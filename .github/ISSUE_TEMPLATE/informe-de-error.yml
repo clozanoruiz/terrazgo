@@ -1,0 +1,39 @@
+name: Informe de error
+description: Algo no funciona como debería
+labels: ["bug"]
+body:
+  - type: textarea
+    id: que-ocurre
+    attributes:
+      label: ¿Qué ocurre?
+      description: Describe el problema. Si aparece un mensaje de error, cópialo aquí tal cual.
+    validations:
+      required: true
+  - type: textarea
+    id: pasos
+    attributes:
+      label: Pasos para reproducirlo
+      description: ¿Qué estabas haciendo cuando apareció el problema?
+      placeholder: |
+        1. Abrir…
+        2. Pulsar…
+        3. Aparece…
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Terrazgo
+      description: La encontrarás en el nombre del instalador descargado (p. ej. v0.1.0).
+    validations:
+      required: true
+  - type: dropdown
+    id: sistema
+    attributes:
+      label: Sistema operativo
+      options:
+        - Linux
+        - Windows
+        - Otro
+    validations:
+      required: true

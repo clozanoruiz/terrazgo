@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "module-sigpac"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo SIGPAC module — Spanish parcel lookups over FEGA's Nube de SIGPAC, through terrazgo-geo's cache-through fetch"
+
+[lints]
+workspace = true
+
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+terrazgo-core = { workspace = true }
+terrazgo-geo = { workspace = true }
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

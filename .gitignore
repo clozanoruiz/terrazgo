@@ -1,0 +1,31 @@
+# Rust / Cargo build output
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Tauri generated schemas
+/src-tauri/gen/
+
+# Editor / OS noise
+.DS_Store
+*.swp
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Local SQLite databases (regulatory data must never be committed)
+*.sqlite
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Frontend toolchain
+/node_modules/
+/dist/
+
+
+# Local task-research material (specs, extracted docs) — never committed;
+# manifest in .taskdocs/<task>/README.md; delete the folder when the task ships
+/.taskdocs/

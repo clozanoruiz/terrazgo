@@ -1,0 +1,23 @@
+# cargo-deny configuration (CI job `audit`): RustSec advisories for the Rust
+# dependency tree. Deliberately advisories-only for now — licenses/bans/sources
+# checks are worth adding before the first public release.
+#
+# Every `ignore` entry must carry a reason and a revisit condition. Re-check the
+# list whenever Tauri is upgraded: `cargo deny check advisories` with the
+# ignores commented out.
+[advisories]
+version = 2
+yanked = "deny"
+# The GTK3 binding crates (atk, gdk, …) are unmaintained upstream but are what
+# tauri/wry still use on Linux; only flag unmaintained DIRECT dependencies,
+# which are ours to choose.
+unmaintained = "workspace"
+ignore = [
+  # quick-xml < 0.41 DoS vectors (quadratic dup-attribute check; unbounded
+  # namespace allocation). Transitive via tauri-utils → plist 1.9.0, which pins
+  # quick-xml 0.39.x — no compatible patched version exists (2026-07-02).
+  # Terrazgo parses no untrusted XML; plist is Apple-bundle tooling.
+  # Revisit when plist > 1.9.0 or a Tauri upgrade moves the tree.
+  "RUSTSEC-2026-0194",
+  "RUSTSEC-2026-0195",
+]

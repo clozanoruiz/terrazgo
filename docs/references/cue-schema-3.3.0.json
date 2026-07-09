@@ -1,0 +1,3214 @@
+{
+  "definitions": {},
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/object1684834003.json",
+  "title": "Root",
+  "type": "object",
+  "required": ["CUADERNO"],
+  "properties": {
+    "CUADERNO": {
+      "$id": "#root/CUADERNO",
+      "title": "Cuaderno",
+      "type": "array",
+      "default": [],
+      "items": {
+        "$id": "#root/CUADERNO/items",
+        "title": "Items",
+        "type": "object",
+        "required": ["CAExplotacion", "IdTitular", "CodigoRea", "UnidadGestora"],
+        "properties": {
+          "CodigoSIEX": {
+            "$id": "#root/CUADERNO/items/CodigoSIEX",
+            "title": "Codigosiex",
+            "type": "string",
+            "minLength": 14,
+            "maxLength": 14,
+            "default": "",
+            "pattern": "^.*$",
+            "description": "Codigo en SIEX de la explotacion"
+          },
+          "CAExplotacion": {
+            "$id": "#root/CUADERNO/items/CAExplotacion",
+            "title": "Caexplotacion",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 2,
+            "default": "",
+            "pattern": "^.*$",
+            "message": "Codigo de Comunidad Autonoma, segun codificacion INE, en la que esta inscrita la explotacion"
+          },
+          "IdTitular": {
+            "$id": "#root/CUADERNO/items/IdTitular",
+            "title": "Idtitular",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20,
+            "default": "",
+            "pattern": "^.*$",
+            "description": "Identificador (CIF, NIE, CIF) del titular de la explotacion"
+          },
+          "IdCuaderno": {
+            "$id": "#root/CUADERNO/items/IdCuaderno",
+            "title": "Idcuaderno",
+            "type": "integer",
+            "minLength": 1,
+            "maxLength": 20,
+            "default": null,
+            "description": "Identificador del cuaderno"
+          },
+          "UnidadGestora": {
+            "$id": "#root/CUADERNO/items/UnidadGestora",
+            "title": "Unidadgestora",
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 20,
+            "default": "",
+            "pattern": "^.*$",
+            "description": "Identificador (CIF, NIE, CIF) de la Unidad gestora"
+          },
+          "CodigoRea": {
+            "$id": "#root/CUADERNO/items/CodigoRea",
+            "title": "Codigorea",
+            "type": "string",
+            "minLength": 14,
+            "maxLength": 14,
+            "default": "",
+            "pattern": "^.*$",
+            "description": "Codigo en REA de la explotacion"
+          },
+          "DatosExplotacion": {
+            "$id": "#root/CUADERNO/items/DatosExplotacion",
+            "title": "Datosexplotacion",
+            "type": "object",
+            "properties": {
+              "MedidaPreventivaCultural": {
+                "$id": "#root/CUADERNO/items/DatosExplotacion/MedidaPreventivaCultural",
+                "title": "Medidapreventivacultural",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "$id": "#root/CUADERNO/items/DatosExplotacion/MedidaPreventivaCultural/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": ["IdMedidaPreventCultural"],
+                  "properties": {
+                    "IdMedidaPreventCultural": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/MedidaPreventivaCultural/items/IdMedidaPreventCultural",
+                      "title": "Idmedidapreventcultural",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 99,
+                      "default": 0,
+                      "description": "Medida preventiva o cultural para la valoracion del cumplimiento de la GIP"
+                    }
+                  }
+                }
+              },
+              "AltaDGC": {
+                "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC",
+                "title": "AltaDGC",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "CodigoDGCAjena",
+                    "Provincia",
+                    "Municipio",
+                    "Agregado",
+                    "Zona",
+                    "Poligono",
+                    "Parcela",
+                    "Recinto",
+                    "FechaInicio",
+                    "Cultivo",
+                    "Variedad",
+                    "SistemaExplotacion",
+                    "SistCultivo"
+                  ],
+                  "properties": {
+                    "CodigoDGCAjena": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/CodigoDGCAjena",
+                      "title": "CodigoDGCAjena",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Codigo de la DGC no vinculada a REA"
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la DGC"
+                    },
+                    "ReferenciaCatastral": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/ReferenciaCatastral",
+                      "title": "ReferenciaCatastral",
+                      "type": "string",
+                      "default": 0,
+                      "description": "Referencia catastral de la PARCELA"
+                    },
+                    "Provincia": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Provincia",
+                      "title": "Provincia",
+                      "type": "string",
+                      "default": 0,
+                      "description": "Codigo de la provincia de la referencia SIGPAC del recinto"
+                    },
+                    "Municipio": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Municipio",
+                      "title": "Municipio",
+                      "type": "string",
+                      "default": 0,
+                      "description": "Codigo del Muncipio de la referencia SIGPAC del recinto"
+                    },
+                    "Agregado": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Agregado",
+                      "title": "Agregado",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Agregado de la DGC"
+                    },
+                    "Zona": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Zona",
+                      "title": "Zona",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Zona de la DGC"
+                    },
+                    "Poligono": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Poligono",
+                      "title": "Poligono",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Poligono de la DGC"
+                    },
+                    "Parcela": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Parcela",
+                      "title": "Parcela",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Parcela de la DGC"
+                    },
+                    "Recinto": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Recinto",
+                      "title": "Recinto",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Recinto de la DGC"
+                    },
+                    "Orden": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Orden",
+                      "title": "Orden",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Orden de la DGC"
+                    },
+                    "Superficie": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Superficie",
+                      "title": "Superficie",
+                      "type": "number",
+                      "default": 0.0,
+                      "description": "Indica la superficie de la DGC en hectáreas con dos decimales"
+                    },
+                    "FechaAltaSuperficie": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/FechaAltaSuperficie",
+                      "title": "FechaAltaSuperficie",
+                      "type": "string",
+                      "minLength": 10,
+                      "maxLength": 10,
+                      "default": 0,
+                      "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                      "description": "Fecha alta superficie"
+                    },
+                    "FechaBajaSuperficie": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/FechaBajaSuperficie",
+                      "title": "FechaBajaSuperficie",
+                      "type": "string",
+                      "minLength": 10,
+                      "maxLength": 10,
+                      "default": 0,
+                      "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                      "description": "Fecha baja superficie"
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/FechaInicio",
+                      "title": "FechaInicio",
+                      "type": "string",
+                      "minLength": 10,
+                      "maxLength": 10,
+                      "default": 0,
+                      "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                      "description": "Fecha inicio de la DGC"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/FechaFin",
+                      "title": "FechaFin",
+                      "type": "string",
+                      "minLength": 10,
+                      "maxLength": 10,
+                      "default": 0,
+                      "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                      "description": "Fecha fin de la DGC"
+                    },
+                    "Cultivo": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Cultivo",
+                      "title": "Cultivo",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Cultivo de la DGC"
+                    },
+                    "Variedad": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/Variedad",
+                      "title": "Variedad",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Cultivo de la DGC"
+                    },
+                    "SistemaExplotacion": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/SistemaExplotacion",
+                      "title": "SistemaExplotacion",
+                      "type": "string",
+                      "default": 0,
+                      "description": "Sistema de explotacion del cultivo"
+                    },
+                    "SistCultivo": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/AltaDGC/items/SistCultivo",
+                      "title": "SistCultivo",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Sistema de Cultivo de la DGC"
+                    }
+                  }
+                }
+              },
+              "CambioCultivoDGC": {
+                "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC",
+                "title": "CambioCultivoDGC",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "FechaInicio",
+                    "Cultivo",
+                    "Variedad",
+                    "SistemaExplotacion",
+                    "SistCultivo"
+                  ],
+                  "properties": {
+                    "CodigoDGC": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/CodigoDGC",
+                      "title": "CodigoDGC",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Codigo de la DGC"
+                    },
+                    "CodigoDGCAjena": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/CodigoDGCAjena",
+                      "title": "CodigoDGCAjena",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Codigo de la DGC no vinculada a REA"
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/FechaInicio",
+                      "title": "FechaInicio",
+                      "type": "string",
+                      "minLength": 10,
+                      "maxLength": 10,
+                      "default": 0,
+                      "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                      "description": "Fecha inicio de la DGC"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/FechaFin",
+                      "title": "FechaFin",
+                      "oneOf": [
+                        {
+                          "type": "string",
+                          "minLength": 10,
+                          "maxLength": 10,
+                          "default": 0,
+                          "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                          "description": "Fecha fin de la DGC"
+                        },
+                        {
+                          "type": "string",
+                          "minLength": 0,
+                          "maxLength": 0,
+                          "description": "Fecha fin de la DGC"
+                        }
+                      ]
+                    },
+                    "Cultivo": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/Cultivo",
+                      "title": "Cultivo",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Cultivo de la DGC"
+                    },
+                    "Variedad": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/Variedad",
+                      "title": "Variedad",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Cultivo de la DGC"
+                    },
+                    "SistemaExplotacion": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/SistemaExplotacion",
+                      "title": "SistemaExplotacion",
+                      "type": "string",
+                      "default": 0,
+                      "description": "Sistema de explotacion del cultivo"
+                    },
+                    "SistCultivo": {
+                      "$id": "#root/CUADERNO/items/DatosExplotacion/CambioCultivoDGC/items/SistCultivo",
+                      "title": "SistCultivo",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Sistema de Cultivo de la DGC"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "ActividadesExplotacion": {
+            "$id": "#root/CUADERNO/items/ActividadesExplotacion",
+            "title": "Actividadesexplotacion",
+            "type": "object",
+            "properties": {
+              "EnergiaUtilizada": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada",
+                "title": "EnergiaUtilizada",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": ["IdAjenaEnergia", "DGCs"],
+                  "properties": {
+                    "IdAjenaEnergia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/IdAjenaEnergia",
+                      "title": "IdAjenaEnergia",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Identificador de la actividad en origen"
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la actividad"
+                    },
+                    "TipoEnergia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/TipoEnergia",
+                      "title": "TipoEnergia",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999,
+                      "default": 0,
+                      "description": "Catalogo de detalles de tipos de energia"
+                    },
+                    "Cantidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/Cantidad",
+                      "title": "Cantidad",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0,
+                      "description": "Cantidad de energia empleada"
+                    },
+                    "Unidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/Unidad",
+                      "title": "Unidad",
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 999,
+                      "default": 0,
+                      "description": "Catalogo de unidades"
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo del recinto"
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/EnergiaUtilizada/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Código de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "ActividadAgraria": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria",
+                "title": "Actividadagraria",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": ["DGCs"],
+                  "properties": {
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "object",
+                      "required": ["Cultivo", "Variedad"],
+                      "properties": {
+                        "CodigoDGC": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/CodigoDGC",
+                          "title": "CodigoDGC",
+                          "type": "integer",
+                          "default": 0,
+                          "description": "Codigo del recinto"
+                        },
+                        "CodigoDGCAjena": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/CodigoDGCAjena",
+                          "title": "CodigoDGCAjena",
+                          "type": "integer",
+                          "default": 0,
+                          "description": "Código de la DGC no vinculada a REA"
+                        },
+                        "Cultivo": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/Cultivo",
+                          "title": "Cultivo",
+                          "type": "integer",
+                          "default": 0,
+                          "description": "Codigo del producto"
+                        },
+                        "Variedad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/Variedad",
+                          "title": "Variedad",
+                          "type": "integer",
+                          "default": 0,
+                          "description": "Codigo de la variedad / especie / tipo utilizado en este cultivo"
+                        },
+                        "DetalleActividad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad",
+                          "title": "Detalleactividad",
+                          "type": "array",
+                          "uniqueItems": true,
+                          "default": [],
+                          "items": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items",
+                            "title": "Items",
+                            "type": "object",
+                            "required": [
+                              "IdDetalleActividadAgraria",
+                              "IdAjenaDetalleActividad",
+                              "FechaInicio",
+                              "FechaFin"
+                            ],
+                            "properties": {
+                              "IdDetalleActividadAgraria": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/IdDetalleActividadAgraria",
+                                "title": "Iddetalleactividadagraria",
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 99,
+                                "default": 0,
+                                "description": "Catalogo de detalles de actividad agraria"
+                              },
+                              "IdAjenaDetalleActividad": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/IdAjenaDetalleActividad",
+                                "title": "IdAjenaDetalleActividad",
+                                "type": "integer",
+                                "default": 0
+                              },
+                              "Borrar": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/Borrar",
+                                "title": "Borrar",
+                                "type": "boolean",
+                                "default": 0,
+                                "description": "Indica si se quiere borrar la actividad"
+                              },
+                              "FechaInicio": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/FechaInicio",
+                                "title": "Fechainici",
+                                "type": "string",
+                                "minLength": 10,
+                                "maxLength": 10,
+                                "default": 0,
+                                "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                                "description": "Fecha en la que se inicia la actividad"
+                              },
+                              "PotenciaMaquinaria": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/PotenciaMaquinaria",
+                                "title": "PotenciaMaquinaria",
+                                "type": "number",
+                                "default": 0.0,
+                                "minimum": 0,
+                                "description": "Potencia maquinaria"
+                              },
+                              "UnidadesMedida": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/UnidadesMedida",
+                                "title": "UnidadesMedida",
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 99,
+                                "default": 0,
+                                "description": "Unidades de medida"
+                              },
+                              "HorasUtilizacion": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/HorasUtilizacion",
+                                "title": "HorasUtilizacion",
+                                "type": "number",
+                                "default": 0.0,
+                                "minimum": 0,
+                                "description": "Horas utilizacion maquinaria"
+                              },
+                              "FechaFin": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ActividadAgraria/items/DGCs/items/DetalleActividad/items/FechaFin",
+                                "title": "Fechafin",
+                                "type": "string",
+                                "minLength": 10,
+                                "maxLength": 10,
+                                "default": 0,
+                                "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$",
+                                "description": "Fecha en la que se finaliza la actividad"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "TratamientosPostCosecha": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha",
+                "title": "Tratamientospostcosecha",
+                "type": "array",
+                "uniqueItems": true,
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaTratamPostco",
+                    "FechaActuacion",
+                    "ProductoVegetal",
+                    "Cantidad",
+                    "ProductosFito",
+                    "IdentificadorAplicador"
+                  ],
+                  "properties": {
+                    "IdAjenaTratamPostco": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdAjenaTratamPostco",
+                      "title": "IdajenaTratamPostco",
+                      "type": "integer",
+                      "default": 0,
+                      "description": "Identificador de la actividad en origen"
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la actividad"
+                    },
+                    "FechaActuacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/FechaActuacion",
+                      "title": "Fechaactuacion",
+                      "type": "string",
+                      "default": "",
+                      "description": "Fecha en la que se realiza el tratamiento del producto vegetal post cosecha"
+                    },
+                    "ProductoVegetal": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductoVegetal",
+                      "title": "Productovegetal",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Cantidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Cantidad",
+                      "title": "Cantidad",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "ProblematicaFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProblematicaFito",
+                      "title": "Problematicafito",
+                      "type": "object",
+                      "properties": {
+                        "Enfermedades": {
+                          "type": "object",
+                          "properties": {
+                            "TipoEnfermedad": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        },
+                        "ArtropodosGasteropodos": {
+                          "type": "object",
+                          "properties": {
+                            "TipoPlaga": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        },
+                        "ReguladoresOtros": {
+                          "type": "object",
+                          "properties": {
+                            "TipoRegulador": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        }
+                      }
+                    },
+                    "Justificaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Justificaciones",
+                      "title": "Justificaciones",
+                      "type": "array",
+                      "uniqueItems": true,
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Justificaciones/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["JustAct"],
+                        "properties": {
+                          "JustAct": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Justificaciones/items/JustAct",
+                            "title": "Justact",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "ProductosFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductosFito",
+                      "title": "Productosfito",
+                      "type": "object",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductosFito/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["NumRegistro", "Unidad"],
+                        "properties": {
+                          "NumRegistro": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductosFito/items/NumRegistro",
+                            "title": "Numregistro",
+                            "type": "string",
+                            "default": "",
+                            "pattern": "^.*$"
+                          },
+                          "Dosis": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductosFito/items/Dosis",
+                            "title": "Dosis",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          },
+                          "Cantidad": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductosFito/items/Cantidad",
+                            "title": "Cantidad",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          },
+                          "Unidad": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/ProductosFito/items/Unidad",
+                            "title": "Unidad",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "IdentificadorAplicador": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador",
+                      "title": "IdentificadorAplicador",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["AplicadorEmpresa", "EquipoAplicador"],
+                        "properties": {
+                          "AplicadorEmpresa": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/AplicadorEmpresa",
+                            "title": "AplicadorEmpresa",
+                            "type": "object",
+                            "required": ["NumROPO"],
+                            "properties": {
+                              "NumROPO": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/AplicadorEmpresa/NumROPO",
+                                "title": "NumROPO",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              }
+                            }
+                          },
+                          "EquipoAplicador": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/EquipoAplicador",
+                            "title": "EquipoAplicador",
+                            "type": "object",
+                            "required": [],
+                            "properties": {
+                              "NumROMA": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/EquipoAplicador/NumROMA",
+                                "title": "NumROMA",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "NumREGANIP": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/EquipoAplicador/NumREGANIP",
+                                "title": "NumREGANIP",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "EquipoPropio": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/EquipoAplicador/EquipoPropio",
+                                "title": "EquipoPropio",
+                                "type": "boolean",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "IdEquipoAplicador": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/IdentificadorAplicador/items/EquipoAplicador/IdEquipoAplicador",
+                                "title": "IdEquipoAplicador",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "AsesorValidacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion",
+                      "title": "AsesorValidacion",
+                      "type": "object",
+                      "required": ["NumROPO"],
+                      "default": [],
+                      "properties": {
+                        "NumROPO": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion/items/NumROPO",
+                          "title": "NumROPO",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "Fecha": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion/items/Fecha",
+                          "title": "Fecha",
+                          "type": "string",
+                          "minLength": 10,
+                          "maxLength": 10,
+                          "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$"
+                        },
+                        "Validacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion/items/Validacion",
+                          "title": "Validacion",
+                          "type": "boolean"
+                        },
+                        "Observaciones": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion/items/Observaciones",
+                          "title": "Observaciones",
+                          "type": "string",
+                          "default": ""
+                        },
+                        "Confirmacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion/items/Confirmacion",
+                          "title": "Confirmacion",
+                          "type": "boolean",
+                          "default": 0
+                        },
+                        "Contrato": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/AsesorValidacion/items/Contrato",
+                          "title": "Contrato",
+                          "type": "boolean",
+                          "default": 0
+                        }
+                      }
+                    },
+                    "Eficacia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Eficacia",
+                      "title": "Eficacia",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Observaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosPostCosecha/items/Observaciones",
+                      "title": "Observaciones",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    }
+                  }
+                }
+              },
+              "TratamientosEdifInstalaciones": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones",
+                "title": "Tratamientosedifinstalaciones",
+                "type": "array",
+                "uniqueItems": true,
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaTratamEdif",
+                    "Edificaciones",
+                    "FechaActuacion",
+                    "ProductosFito",
+                    "IdentificadorAplicador"
+                  ],
+                  "properties": {
+                    "IdAjenaTratamEdif": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdAjenaTratamEdif",
+                      "title": "IdAjenaTratamEdif",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la actividad"
+                    },
+                    "Edificaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Edificaciones",
+                      "title": "Edificaciones",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Edificaciones/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["IdEdificacion"],
+                        "properties": {
+                          "IdEdificacion": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Edificaciones/items/IdEdificacion",
+                            "title": "IdEdificacion",
+                            "type": "integer"
+                          },
+                          "Volumen": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Edificaciones/items/Volumen",
+                            "title": "Volumen",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "FechaActuacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/FechaActuacion",
+                      "title": "Fechaactuacion",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "ProblematicaFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/ProblematicaFito",
+                      "title": "Problematicafito",
+                      "type": "object",
+                      "properties": {
+                        "Enfermedades": {
+                          "type": "object",
+                          "properties": {
+                            "TipoEnfermedad": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        },
+                        "ArtropodosGasteropodos": {
+                          "type": "object",
+                          "properties": {
+                            "TipoPlaga": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        }
+                      }
+                    },
+                    "Justificaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Justificaciones",
+                      "title": "Justificaciones",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Justificaciones/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["JustAct"],
+                        "properties": {
+                          "JustAct": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Justificaciones/items/JustAct",
+                            "title": "Justact",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "ProductosFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/ProductosFito",
+                      "title": "Productosfito",
+                      "type": "object",
+                      "required": ["NumRegistro", "Unidad"],
+                      "properties": {
+                        "NumRegistro": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/ProductosFito/NumRegistro",
+                          "title": "Numregistro",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "Dosis": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/ProductosFito/items/Dosis",
+                          "title": "Dosis",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Cantidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/ProductosFito/Cantidad",
+                          "title": "Cantidad",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Unidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/ProductosFito/Unidad",
+                          "title": "Unidad",
+                          "type": "integer",
+                          "default": 0
+                        }
+                      }
+                    },
+                    "IdentificadorAplicador": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador",
+                      "title": "IdentificadorAplicador",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["AplicadorEmpresa", "EquipoAplicador"],
+                        "properties": {
+                          "AplicadorEmpresa": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/AplicadorEmpresa",
+                            "title": "AplicadorEmpresa",
+                            "type": "object",
+                            "required": ["NumROPO"],
+                            "properties": {
+                              "NumROPO": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/AplicadorEmpresa/NumROPO",
+                                "title": "NumROPO",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              }
+                            }
+                          },
+                          "EquipoAplicador": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/EquipoAplicador",
+                            "title": "EquipoAplicador",
+                            "type": "object",
+                            "required": [],
+                            "properties": {
+                              "NumROMA": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/EquipoAplicador/NumROMA",
+                                "title": "NumROMA",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "NumREGANIP": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/EquipoAplicador/NumREGANIP",
+                                "title": "NumREGANIP",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "EquipoPropio": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/EquipoAplicador/EquipoPropio",
+                                "title": "EquipoPropio",
+                                "type": "boolean",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "IdEquipoAplicador": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/IdentificadorAplicador/items/EquipoAplicador/IdEquipoAplicador",
+                                "title": "IdEquipoAplicador",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "AsesorValidacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion",
+                      "title": "AsesorValidacion",
+                      "type": "object",
+                      "required": ["NumROPO"],
+                      "default": [],
+                      "properties": {
+                        "NumROPO": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion/items/NumROPO",
+                          "title": "NumROPO",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "Fecha": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion/items/Fecha",
+                          "title": "Fecha",
+                          "type": "string",
+                          "minLength": 10,
+                          "maxLength": 10,
+                          "pattern": "^(0?[1-9]|[12][0-9]|3[01])[/\\-](0?[1-9]|1[012])[/\\-]\\d{4}$"
+                        },
+                        "Validacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion/items/Validacion",
+                          "title": "Validacion",
+                          "type": "boolean"
+                        },
+                        "Observaciones": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion/items/Observaciones",
+                          "title": "Observaciones",
+                          "type": "string",
+                          "default": ""
+                        },
+                        "Confirmacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion/items/Confirmacion",
+                          "title": "Confirmacion",
+                          "type": "boolean",
+                          "default": 0
+                        },
+                        "Contrato": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/AsesorValidacion/items/Contrato",
+                          "title": "Contrato",
+                          "type": "boolean",
+                          "default": 0
+                        }
+                      }
+                    },
+                    "Eficacia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Eficacia",
+                      "title": "Eficacia",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Observaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamientosEdifInstalaciones/items/Observaciones",
+                      "title": "Observaciones",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    }
+                  }
+                }
+              },
+              "Cosecha": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha",
+                "title": "Cosecha",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaCosecha",
+                    "CosechaSiega",
+                    "FechaInicio",
+                    "Cantidad",
+                    "Unidad",
+                    "DGCs",
+                    "GestionInsumos"
+                  ],
+                  "properties": {
+                    "IdAjenaCosecha": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/IdAjenaCosecha",
+                      "title": "IdAjenaCosecha",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la actividad"
+                    },
+                    "CosechaSiega": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/CosechaSiega",
+                      "title": "CosechaSiega",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/FechaInicio",
+                      "title": "Fechainicio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/FechaFin",
+                      "title": "Fechafin",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Cantidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/Cantidad",
+                      "title": "Cantidad",
+                      "type": "number",
+                      "default": 0
+                    },
+                    "Unidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/Unidad",
+                      "title": "Unidad",
+                      "type": "number",
+                      "default": 0
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          },
+                          "ProductoCosechado": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DGCs/items/ProductoCosechado",
+                            "title": "Productocosechado",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "Superficie": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DGCs/items/Superficie",
+                            "title": "Superficie",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "FinalidadCosecha": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/FinalidadCosecha",
+                      "title": "Finalidadcosecha",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/FinalidadCosecha/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["IdFinalidad"],
+                        "properties": {
+                          "IdFinalidad": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/FinalidadCosecha/items/IdFinalidad",
+                            "title": "Idfinalidad",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "GestionInsumos": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/GestionInsumos",
+                      "title": "Gestioninsumos",
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "DestinoRestoVeg": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DestinoRestoVeg",
+                      "title": "DestinoRestoVeg",
+                      "type": "array",
+                      "uniqueItems": true,
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DestinoRestoVeg/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["IdDestinoRest"],
+                        "properties": {
+                          "IdDestinoRest": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Cosecha/items/DestinoRestoVeg/items/IdDestinoRest",
+                            "title": "IdDestinoRest",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "SiembraPlantacion": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion",
+                "title": "Siembraplantacion",
+                "type": "array",
+                "uniqueItems": true,
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaSiembraPlant",
+                    "SiembraPlantacion",
+                    "FechaInicio",
+                    "SiembraDirecta",
+                    "DGCs",
+                    "Cantidad"
+                  ],
+                  "properties": {
+                    "IdAjenaSiembraPlant": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/IdAjenaSiembraPlant",
+                      "title": "IdAjenaSiembraPlant",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la actividad"
+                    },
+                    "SiembraPlantacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/SiembraPlantacion",
+                      "title": "Siembraplantacion",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/FechaInicio",
+                      "title": "Fechainicio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/FechaFin",
+                      "title": "Fechafin",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "SiembraDirecta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/SiembraDirecta",
+                      "title": "SiembraDirecta",
+                      "type": "boolean"
+                    },
+                    "DosisSiembra": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs/items/DosisSiembra",
+                      "title": "DosisSiembra",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "UnidadDosisSiembra": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs/items/UnidadDosisSiembra",
+                      "title": "DosisSiembra",
+                      "type": "integer",
+                      "default": 0,
+                      "minimum": 0
+                    },
+                    "FechaInundacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/FechaInundacion",
+                      "title": "FechaInundacion",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs",
+                      "title": "Dgcs",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          },
+                          "SuperficieCultivada": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DGCs/items/SuperficieCultivada",
+                            "title": "SuperficieCultivada",
+                            "type": "number",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "Cantidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/Cantidad",
+                      "title": "Cantidad",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "MarcoPlantacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/MarcoPlantacion",
+                      "title": "MarcoPlantacion",
+                      "type": "string"
+                    },
+                    "DensidadPlantacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DensidadPlantacion",
+                      "title": "Densidadplantacion",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "DensidadPlantacionPlantones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/DensidadPlantacionPlantones",
+                      "title": "DensidadPlantacionPlantones",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "UnidadesRemolacha": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/SiembraPlantacion/items/UnidadesRemolacha",
+                      "title": "Unidadesremolacha",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    }
+                  }
+                }
+              },
+              "UsoSemillaTratada": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/",
+                "title": "Usosemillatratada",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaSemillaTrat",
+                    "Tratamiento",
+                    "Fecha",
+                    "Cantidad",
+                    "ProductosFito",
+                    "DGCs"
+                  ],
+                  "properties": {
+                    "IdAjenaSemillaTrat": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/IdAjenaSemillaTrat",
+                      "title": "IdAjenaSemillaTrat",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "IdAjenaSiembraPlant": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/IdAjenaSiembraPlant",
+                      "title": "IdAjenaSiembraPlant",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean"
+                    },
+                    "Tratamiento": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Tratamiento",
+                      "title": "Tratamiento",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Fecha": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Fecha",
+                      "title": "Fecha",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Producto": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Producto",
+                      "title": "Producto",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "NumeroLote": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/NumeroLote",
+                      "title": "Numerolote",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Cantidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Cantidad",
+                      "title": "Cantidad",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "ProductosFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/ProductosFito",
+                      "title": "Productosfito",
+                      "type": "object",
+                      "required": ["NumRegistro"],
+                      "properties": {
+                        "NumRegistro": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/ProductosFito/NumRegistro",
+                          "title": "Numregistro",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        }
+                      }
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          },
+                          "Superficie": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/DGCs/items/Superficie",
+                            "title": "Superficie",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "Eficacia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Eficacia",
+                      "title": "Eficacia",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Observaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/UsoSemillaTratada/items/Observaciones",
+                      "title": "Observaciones",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    }
+                  }
+                }
+              },
+              "TratamFito": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito",
+                "title": "Tratamfito",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaTratamFito",
+                    "FechaInicio",
+                    "FechaFin",
+                    "DGCs",
+                    "IdentificadorAplicador"
+                  ],
+                  "properties": {
+                    "IdAjenaTratamFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdAjenaTratamFito",
+                      "title": "IdAjenaTratamFito",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/Borrar",
+                      "title": "borrar",
+                      "type": "boolean"
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/FechaInicio",
+                      "title": "Fechainicio",
+                      "type": "string",
+                      "default": ""
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/FechaFin",
+                      "title": "Fechafin",
+                      "type": "string",
+                      "default": ""
+                    },
+                    "HoraTratamiento": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/HoraTratamiento",
+                      "title": "HoraTratamiento",
+                      "type": "string",
+                      "default": ""
+                    },
+                    "FechaSeca": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/FechaSeca",
+                      "title": "FechaSeca",
+                      "type": "string",
+                      "default": ""
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          },
+                          "Superficie": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/Superficie",
+                            "title": "Superficie",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          },
+                          "EstadoFenologico": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/EstadoFenologico",
+                            "title": "EstadoFenologico",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "HuertaVivero": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/HuertaVivero",
+                            "title": "HuertaVivero",
+                            "type": "array",
+                            "uniqueItems": true,
+                            "default": [],
+                            "items": {
+                              "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/HuertaVivero/items",
+                              "title": "Items",
+                              "type": "object",
+                              "required": ["Producto"],
+                              "properties": {
+                                "Producto": {
+                                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/DGCs/items/HuertaVivero/items/Producto",
+                                  "title": "Producto",
+                                  "type": "integer",
+                                  "default": 0
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "ProblematicaFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProblematicaFito",
+                      "title": "Problematicafito",
+                      "type": "object",
+                      "properties": {
+                        "Enfermedades": {
+                          "type": "object",
+                          "properties": {
+                            "TipoEnfermedad": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        },
+                        "ArtropodosGasteropodos": {
+                          "type": "object",
+                          "properties": {
+                            "TipoPlaga": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        },
+                        "MalasHierbas": {
+                          "type": "object",
+                          "properties": {
+                            "TipoMalaHierba": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        },
+                        "ReguladoresOtros": {
+                          "type": "object",
+                          "properties": {
+                            "TipoRegulador": {
+                              "type": "array",
+                              "items": {
+                                "type": "integer"
+                              }
+                            }
+                          },
+                          "required": []
+                        }
+                      }
+                    },
+                    "Justificaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/Justificaciones",
+                      "title": "Justificaciones",
+                      "type": "array",
+                      "uniqueItems": true,
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/Justificaciones/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["JustAct"],
+                        "properties": {
+                          "JustAct": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/Justificaciones/items/JustAct",
+                            "title": "Justact",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "OtrasActuacionesFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/OtrasActuacionesFito",
+                      "title": "OtrasActuacionesFito",
+                      "type": "object",
+                      "required": ["TipoMedida", "Cantidad", "Unidad"],
+                      "properties": {
+                        "TipoMedida": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/OtrasActuacionesFito/TipoMedida",
+                          "title": "Tipomedida",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "Cantidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/OtrasActuacionesFito/Cantidad",
+                          "title": "Cantidad",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Unidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/OtrasActuacionesFito/Unidad",
+                          "title": "Unidad",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "NumRegistroMDF": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/OtrasActuacionesFito/NumRegistroMDF",
+                          "title": "Numregistromdf",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        }
+                      }
+                    },
+                    "ProductosFito": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito",
+                      "title": "Productosfito",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["TipoProducto", "Unidad"],
+                        "properties": {
+                          "TipoProducto": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/TipoProducto",
+                            "title": "TipoProducto",
+                            "type": "integer"
+                          },
+                          "NumRegistro": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/NumRegistro",
+                            "title": "Numregistro",
+                            "type": "string",
+                            "default": "",
+                            "pattern": "^.*$"
+                          },
+                          "MateriaActivaFormulado": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/MateriaActivaFormulado",
+                            "title": "MateriaActivaFormulado",
+                            "type": "array",
+                            "uniqueItems": true,
+                            "default": [],
+                            "items": {
+                              "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/MateriaActivaFormulado/items",
+                              "title": "Items",
+                              "type": "object",
+                              "required": ["MateriaActiva"],
+                              "properties": {
+                                "MateriaActiva": {
+                                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/MateriaActivaFormulado/items/MateriaActiva",
+                                  "title": "MateriaActiva",
+                                  "type": "number"
+                                }
+                              }
+                            }
+                          },
+                          "Dosis": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/Dosis",
+                            "title": "Dosis",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          },
+                          "Cantidad": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/Cantidad",
+                            "title": "Cantidad",
+                            "type": "number",
+                            "default": 0.0,
+                            "minimum": 0
+                          },
+                          "Unidad": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/ProductosFito/items/Unidad",
+                            "title": "Unidad",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "IdentificadorAplicador": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador",
+                      "title": "IdentificadorAplicador",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["AplicadorEmpresa", "EquipoAplicador"],
+                        "properties": {
+                          "AplicadorEmpresa": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/AplicadorEmpresa",
+                            "title": "AplicadorEmpresa",
+                            "type": "object",
+                            "required": ["NumROPO"],
+                            "properties": {
+                              "NumROPO": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/AplicadorEmpresa/NumROPO",
+                                "title": "NumROPO",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              }
+                            }
+                          },
+                          "EquipoAplicador": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador",
+                            "title": "EquipoAplicador",
+                            "type": "object",
+                            "required": [],
+                            "properties": {
+                              "NumROMA": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/NumROMA",
+                                "title": "NumROMA",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "NumREGANIP": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/NumREGANIP",
+                                "title": "NumREGANIP",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "EquipoPropio": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/EquipoPropio",
+                                "title": "EquipoPropio",
+                                "type": "boolean",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "IdEquipoAplicador": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/IdEquipoAplicador",
+                                "title": "IdEquipoAplicador",
+                                "type": "string",
+                                "default": "",
+                                "pattern": "^.*$"
+                              },
+                              "PotenciaMaquinaria": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/PotenciaMaquinaria",
+                                "title": "PotenciaMaquinaria",
+                                "type": "number",
+                                "default": 0.0,
+                                "minimum": 0,
+                                "description": "Potencia maquinaria"
+                              },
+                              "UnidadesMedida": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/UnidadesMedida",
+                                "title": "UnidadesMedida",
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 99,
+                                "default": 0,
+                                "description": "Unidades de medida"
+                              },
+                              "HorasUtilizacion": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/IdentificadorAplicador/items/EquipoAplicador/HorasUtilizacion",
+                                "title": "HorasUtilizacion",
+                                "type": "number",
+                                "default": 0.0,
+                                "minimum": 0,
+                                "description": "Horas utilizacion maquinaria"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "AsesorValidacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion",
+                      "title": "Asesorvalidacion",
+                      "type": "object",
+                      "required": ["NumROPO"],
+                      "properties": {
+                        "NumROPO": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion/NumROPO",
+                          "title": "Numropo",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "Confirmacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion/Confirmacion",
+                          "title": "Confirmacion",
+                          "type": "boolean",
+                          "default": true
+                        },
+                        "Fecha": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion/Fecha",
+                          "title": "Fecha",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "Validacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion/Validacion",
+                          "title": "Validacion",
+                          "type": "boolean"
+                        },
+                        "Observaciones": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion/Observaciones",
+                          "title": "Observaciones",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "Contrato": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/AsesorValidacion/Contrato",
+                          "title": "Contrato",
+                          "type": "boolean",
+                          "default": true
+                        }
+                      }
+                    },
+                    "Eficacia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/Eficacia",
+                      "title": "Eficacia",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Observaciones": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/TratamFito/items/Observaciones",
+                      "title": "Observaciones",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    }
+                  }
+                }
+              },
+              "Fertilizacion": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion",
+                "title": "Fertilizacion",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaFerti",
+                    "FechaInicio",
+                    "DeclaraBuenasPracticas",
+                    "MaterialFertilizante",
+                    "AplicacionMaterialFertilizante",
+                    "DGCs"
+                  ],
+                  "properties": {
+                    "IdAjenaFerti": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/IdAjenaFerti",
+                      "title": "IdAjenaFerti",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Borrar",
+                      "title": "borrar",
+                      "type": "boolean"
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/FechaInicio",
+                      "title": "Fechainicio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/FechaFin",
+                      "title": "Fechafin",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "DeclaraBuenasPracticas": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/DeclaraBuenasPracticas",
+                      "title": "Declarabuenaspracticas",
+                      "type": "boolean",
+                      "default": true
+                    },
+                    "BuenasPracticas": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/BuenasPracticas",
+                      "title": "Buenaspracticas",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/BuenasPracticas/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["TipoBPF"],
+                        "properties": {
+                          "TipoBPF": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/BuenasPracticas/items/TipoBPF",
+                            "title": "Tipobpf",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "MaterialFertilizante": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante",
+                      "title": "Materialfertilizante",
+                      "type": "object",
+                      "required": ["Material", "DetalleMaterial", "Macronutrientes"],
+                      "properties": {
+                        "Material": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Material",
+                          "title": "Material",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "DetalleMaterial": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/DetalleMaterial",
+                          "title": "DetalleMaterial",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "EmpresaSuministradora": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/EmpresaSuministradora",
+                          "title": "Empresasuministradora",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "NifEmpresa": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/NifEmpresa",
+                          "title": "Nifempresa",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "TratamientoEstiercoles": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/TratamientoEstiercoles",
+                          "title": "TratamientoEstiercoles",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "Macronutrientes": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Macronutrientes",
+                          "title": "Macronutrientes",
+                          "type": "array",
+                          "default": [],
+                          "items": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Macronutrientes/items",
+                            "title": "Items",
+                            "type": "object",
+                            "required": ["TipoMacroN"],
+                            "properties": {
+                              "TipoMacroN": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Macronutrientes/items/TipoMacroN",
+                                "title": "TipoMacroN",
+                                "type": "integer",
+                                "default": 0
+                              },
+                              "Porcentaje": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Macronutrientes/items/Porcentaje",
+                                "title": "Porcentaje",
+                                "type": "number",
+                                "default": 0
+                              }
+                            }
+                          }
+                        },
+                        "MetalesPesados": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/MetalesPesados",
+                          "title": "MetalesPesados",
+                          "type": "array",
+                          "default": [],
+                          "items": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/MetalesPesados/items",
+                            "title": "Items",
+                            "type": "object",
+                            "required": ["TipoMetalP"],
+                            "properties": {
+                              "TipoMetalP": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/MetalesPesados/items/TipoMetalP",
+                                "title": "TipoMetalP",
+                                "type": "integer",
+                                "default": 0
+                              },
+                              "Porcentaje": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/MetalesPesados/items/Porcentaje",
+                                "title": "Porcentaje",
+                                "type": "number",
+                                "default": 0
+                              }
+                            }
+                          }
+                        },
+                        "Micronutrientes": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Micronutrientes",
+                          "title": "Micronutrientes",
+                          "type": "array",
+                          "default": [],
+                          "items": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Micronutrientes/items",
+                            "title": "Items",
+                            "type": "object",
+                            "required": ["TipoMicroN"],
+                            "properties": {
+                              "TipoMicroN": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Micronutrientes/items/TipoMicroN",
+                                "title": "TipoMicroN",
+                                "type": "integer",
+                                "default": 0
+                              },
+                              "Porcentaje": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/MaterialFertilizante/Micronutrientes/items/Porcentaje",
+                                "title": "Porcentaje",
+                                "type": "number",
+                                "default": 0
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "AplicacionMaterialFertilizante": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante",
+                      "title": "AplicacionMaterialFertilizante",
+                      "type": "object",
+                      "required": [
+                        "AplicacionLodos",
+                        "TipoFertilizacion",
+                        "MetodoFertilizacion",
+                        "Dosis",
+                        "Unidad"
+                      ],
+                      "properties": {
+                        "NombreProducto": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/NombreProducto",
+                          "title": "NombreProducto",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "AplicacionLodos": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/AplicacionLodos",
+                          "title": "Aplicacionlodos",
+                          "type": "boolean",
+                          "default": true
+                        },
+                        "TipoFertilizacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/TipoFertilizacion",
+                          "title": "Tipofertilizacion",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "MetodoFertilizacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/MetodoFertilizacion",
+                          "title": "Metodofertilizacion",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "Dosis": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/Dosis",
+                          "title": "Dosis",
+                          "type": "number",
+                          "default": 0
+                        },
+                        "Unidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/Unidad",
+                          "title": "Unidad",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "AlbaranFactura": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/AlbaranFactura",
+                          "title": "Albaranfactura",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "EmpresaServicios": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/EmpresaServicios",
+                          "title": "EmpresaServicios",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "NifAplicador": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/AplicacionMaterialFertilizante/NifAplicador",
+                          "title": "NifAplicador",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        }
+                      }
+                    },
+                    "EquipoAplicador": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador",
+                      "title": "EquipoAplicador",
+                      "type": "object",
+                      "required": [],
+                      "properties": {
+                        "NumROMA": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/NumROMA",
+                          "title": "NumROMA",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "NumREGFER": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/NumREGFER",
+                          "title": "NumREGFER",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "EquipoPropio": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/EquipoPropio",
+                          "title": "EquipoPropio",
+                          "type": "boolean",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "IdEquipoAplicador": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/IdEquipoAplicador",
+                          "title": "IdEquipoAplicador",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "PotenciaMaquinaria": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/PotenciaMaquinaria",
+                          "title": "PotenciaMaquinaria",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0,
+                          "description": "Potencia maquinaria"
+                        },
+                        "UnidadesMedida": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/UnidadesMedida",
+                          "title": "UnidadesMedida",
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 99,
+                          "default": 0,
+                          "description": "Unidades de medida"
+                        },
+                        "HorasUtilizacion": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/EquipoAplicador/HorasUtilizacion",
+                          "title": "HorasUtilizacion",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0,
+                          "description": "Horas utilizacion maquinaria"
+                        }
+                      }
+                    },
+                    "BuenasPracticasRiego": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/BuenasPracticasriego",
+                      "title": "Buenaspracticas",
+                      "type": "array",
+                      "uniqueItems": true,
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/BuenasPracticasRiego/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["TipoBPR"],
+                        "properties": {
+                          "TipoBPR": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/BuenasPracticasRiego/items/TipoBPR",
+                            "title": "Tipobpr",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "Fertirrigacion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion",
+                      "title": "Fertirrigacion",
+                      "type": "object",
+                      "required": [
+                        "SistemaRiego",
+                        "Cantidad",
+                        "Unidad",
+                        "DosisN",
+                        "UnidadDosisN",
+                        "DosisP",
+                        "UnidadDosisP"
+                      ],
+                      "properties": {
+                        "SistemaRiego": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/SistemaRiego",
+                          "title": "Sistemariego",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "Cantidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/Cantidad",
+                          "title": "Cantidad",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Unidad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/Unidad",
+                          "title": "Unidad",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "OrigenAgua": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/OrigenAgua",
+                          "title": "Origenagua",
+                          "uniqueItems": true,
+                          "type": "array",
+                          "default": [],
+                          "items": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/OrigenAgua/items",
+                            "title": "Items",
+                            "type": "object",
+                            "required": ["IdOrigenAgua"],
+                            "properties": {
+                              "IdOrigenAgua": {
+                                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/OrigenAgua/items/IdOrigenAgua",
+                                "title": "IdOrigenAgua",
+                                "type": "integer",
+                                "default": 0
+                              }
+                            }
+                          }
+                        },
+                        "NumContador": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/NumContador",
+                          "title": "Numcontador",
+                          "type": "string",
+                          "default": "",
+                          "pattern": "^.*$"
+                        },
+                        "DeclaraBuenasPracticasRiego": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/DeclaraBuenasPracticas",
+                          "title": "Declarabuenaspracticas",
+                          "type": "boolean",
+                          "default": true
+                        },
+                        "DosisN": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/DosisN",
+                          "title": "Dosisn",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "UnidadDosisN": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/UnidadDosisN",
+                          "title": "UnidadDosisN",
+                          "type": "integer",
+                          "default": 0
+                        },
+                        "DosisP": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/DosisP",
+                          "title": "Dosisp",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "UnidadDosisP": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/Fertirrigacion/UnidadDosisP",
+                          "title": "UnidadDosisP",
+                          "type": "integer",
+                          "default": 0
+                        }
+                      }
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Fertilizacion/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "PlanAbonado": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado",
+                "title": "Planabonado",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items",
+                  "title": "Planabonado",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaPlan",
+                    "NecesidadUFN",
+                    "NecesidadUFP2O5",
+                    "NecesidadUFK2O",
+                    "ObjetivoProduccion",
+                    "CultivoPrecedente",
+                    "Herramienta"
+                  ],
+                  "properties": {
+                    "IdAjenaPlan": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/IdAjenaPlan",
+                      "title": "IdAjenaCosecha",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean",
+                      "default": 0,
+                      "description": "Indica si se quiere borrar la actividad"
+                    },
+                    "NecesidadUFN": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/NecesidadUFN",
+                      "title": "NecesidadUFN",
+                      "type": "number",
+                      "default": 0
+                    },
+                    "NecesidadUFP2O5": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/NecesidadUFP2O5",
+                      "title": "NecesidadUFP2O5",
+                      "type": "number",
+                      "default": 0
+                    },
+                    "NecesidadUFK2O": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/NecesidadUFK2O",
+                      "title": "NecesidadUFK2O",
+                      "type": "number",
+                      "default": 0
+                    },
+                    "ObjetivoProduccion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/ObjetivoProduccion",
+                      "title": "ObjetivoProduccion",
+                      "type": "number",
+                      "default": 0
+                    },
+                    "CultivoPrecedente": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/CultivoPrecedente",
+                      "title": "CultivoPrecedente",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Herramienta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/Herramienta",
+                      "title": "Herramienta",
+                      "type": "boolean"
+                    },
+                    "Asesor": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/Asesor",
+                      "title": "Asesor",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaAsesoramiento": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/FechaAsesoramiento",
+                      "title": "FechaAsesoramiento",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaGeneracion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/FechaGeneracion",
+                      "title": "FechaGeneracion",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/PlanAbonado/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "DatosCubierta": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta",
+                "title": "DatosCubierta",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaCubierta",
+                    "FecEstablecimientoCub",
+                    "AnchuraCubierta",
+                    "AnchuraLibreProy",
+                    "TipoCobertura",
+                    "ActividadCubierta",
+                    "DGCs"
+                  ],
+                  "properties": {
+                    "IdAjenaCubierta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/IdAjenaCubierta",
+                      "title": "IdAjenaCubierta",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean"
+                    },
+                    "FecEstablecimientoCub": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/FecEstablecimientoCub",
+                      "title": "FecEstablecimientoCub",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "AnchuraCubierta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/AnchuraCubierta",
+                      "title": "AnchuraCubierta",
+                      "type": "number"
+                    },
+                    "AnchuraLibreProy": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/AnchuraLibreProy",
+                      "title": "AnchuraLibreProy",
+                      "type": "number"
+                    },
+                    "TipoCobertura": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/TipoCobertura",
+                      "title": "TipoCobertura",
+                      "type": "integer"
+                    },
+                    "ActividadCubierta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/ActividadCubierta",
+                      "title": "ActividadCubierta",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/ActividadCubierta/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["ActSobreCubierta", "Fecha"],
+                        "properties": {
+                          "ActSobreCubierta": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/ActividadCubierta/items/ActSobreCubierta",
+                            "title": "ActSobreCubierta",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "Fecha": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/ActividadCubierta/items/Fecha",
+                            "title": "Fecha",
+                            "type": "string",
+                            "default": "",
+                            "pattern": "^.*$"
+                          }
+                        }
+                      }
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/DGCs",
+                      "title": "DGCs",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/DatosCubierta/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "Pastoreo": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo",
+                "title": "Pastoreo",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": ["IdAjenaPastoreo", "FechaInicio", "Animales", "DGCs"],
+                  "properties": {
+                    "IdAjenaPastoreo": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/IdAjenaPastoreo",
+                      "title": "IdAjenaPastoreo",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean"
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/FechaInicio",
+                      "title": "Fechainicio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/FechaFin",
+                      "title": "Fechafin",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Animales": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/Animales",
+                      "title": "Animales",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/Animales/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["REGA", "Numero", "Especie"],
+                        "properties": {
+                          "REGA": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/Animales/items/REGA",
+                            "title": "REGA",
+                            "type": "string",
+                            "default": "",
+                            "pattern": "^.*$"
+                          },
+                          "Numero": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/Animales/items/Numero",
+                            "title": "Numero",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "Especie": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/Animales/items/Especie",
+                            "title": "Especie",
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Pastoreo/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "Analitica": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica",
+                "title": "Analitica",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": ["IdAjenaAna", "MaterialAnalizado", "Fecha", "TiposAnalisis"],
+                  "properties": {
+                    "IdAjenaAna": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/IdAjenaAna",
+                      "title": "IdAjenaAna",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean"
+                    },
+                    "MaterialAnalizado": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/MaterialAnalizado",
+                      "title": "Materialanalizado",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Fecha": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/Fecha",
+                      "title": "Fecha",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Laboratorio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/Laboratorio",
+                      "title": "Laboratorio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Nif": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/Nif",
+                      "title": "Nif",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "NumBoletin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/NumBoletin",
+                      "title": "Numboletin",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "TiposAnalisis": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/TiposAnalisis",
+                      "title": "TiposAnalisis",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/TiposAnalisis/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": ["TipoAnalisis"],
+                        "properties": {
+                          "TipoAnalisis": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/TiposAnalisis/items/TipoAnalisis",
+                            "title": "TipoAnalisis",
+                            "type": "integer",
+                            "default": 0
+                          }
+                        }
+                      }
+                    },
+                    "ParametrosSuelo": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo",
+                      "title": "Parametrossuelo",
+                      "type": "object",
+                      "properties": {
+                        "MateriaOrganica": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/MateriaOrganica",
+                          "title": "Materiaorganica",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Arena": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/Arena",
+                          "title": "Arena",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Limo": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/Limo",
+                          "title": "Limo",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Arcilla": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/Arcilla",
+                          "title": "Arcilla",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Ph": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/Ph",
+                          "title": "Ph",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "FosforoAsimilable": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/FosforoAsimilable",
+                          "title": "Fosforoasimilable",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "PotasioAsimilable": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/PotasioAsimilable",
+                          "title": "Potasioasimilable",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "NitrogenoTotal": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/NitrogenoTotal",
+                          "title": "Nitrogenototal",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        },
+                        "Conductividad": {
+                          "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/ParametrosSuelo/Conductividad",
+                          "title": "Conductividad",
+                          "type": "number",
+                          "default": 0.0,
+                          "minimum": 0
+                        }
+                      }
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/DGCs",
+                      "title": "Dgcs",
+                      "uniqueItems": true,
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/Analitica/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "ComercializacionVD": {
+                "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD",
+                "title": "Comercializacionvd",
+                "type": "array",
+                "default": [],
+                "items": {
+                  "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items",
+                  "title": "Items",
+                  "type": "object",
+                  "required": [
+                    "IdAjenaVenta",
+                    "FechaInicio",
+                    "ProductoVegetal",
+                    "TipoVenta",
+                    "Cantidad",
+                    "Unidad"
+                  ],
+                  "properties": {
+                    "IdAjenaVenta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/IdAjenaVenta",
+                      "title": "IdAjenaVenta",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Borrar": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Borrar",
+                      "title": "Borrar",
+                      "type": "boolean"
+                    },
+                    "FechaInicio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/FechaInicio",
+                      "title": "Fechainicio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "FechaFin": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/FechaFin",
+                      "title": "Fechafin",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "ProductoVegetal": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/ProductoVegetal",
+                      "title": "Productovegetal",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "TipoVenta": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/TipoVenta",
+                      "title": "Tipoventa",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "Cantidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Cantidad",
+                      "title": "Cantidad",
+                      "type": "number",
+                      "default": 0.0,
+                      "minimum": 0
+                    },
+                    "Unidad": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Unidad",
+                      "title": "Unidad",
+                      "type": "integer",
+                      "default": 0
+                    },
+                    "NumFactura": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/NumFactura",
+                      "title": "Numfactura",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "NumLote": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/NumLote",
+                      "title": "Numlote",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "NumRegDigital": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/NumRegDigital",
+                      "title": "Numregdigital",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "IdComprador": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/IdComprador",
+                      "title": "Idcomprador",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Nombre": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Nombre",
+                      "title": "Nombre",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "PrimerApellido": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/PrimerApellido",
+                      "title": "PrimerApellido",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "SegundoApellido": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/SegundoApellido",
+                      "title": "SegundoApellido",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "RazonSocial": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/RazonSocial",
+                      "title": "RazonSocial",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Direccion": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Direccion",
+                      "title": "Direccion",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Provincia": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Provincia",
+                      "title": "Provincia",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Muncipio": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Muncipio",
+                      "title": "Muncipio",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "CP": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/CP",
+                      "title": "CP",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "Pais": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/Pais",
+                      "title": "Pais",
+                      "type": "string",
+                      "default": "",
+                      "pattern": "^.*$"
+                    },
+                    "DGCs": {
+                      "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/DGCs",
+                      "title": "Dgcs",
+                      "type": "array",
+                      "default": [],
+                      "items": {
+                        "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/DGCs/items",
+                        "title": "Items",
+                        "type": "object",
+                        "required": [],
+                        "properties": {
+                          "CodigoDGC": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/DGCs/items/CodigoDGC",
+                            "title": "CodigoDGC",
+                            "type": "integer",
+                            "default": 0
+                          },
+                          "CodigoDGCAjena": {
+                            "$id": "#root/CUADERNO/items/ActividadesExplotacion/ComercializacionVD/items/DGCs/items/CodigoDGCAjena",
+                            "title": "CodigoDGCAjena",
+                            "type": "integer",
+                            "default": 0,
+                            "description": "Codigo de la DGC no vinculada a REA"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

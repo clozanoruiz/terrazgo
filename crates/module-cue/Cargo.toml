@@ -1,0 +1,35 @@
+[package]
+name = "module-cue"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo CUE / PAC module — phytosanitary treatment records (CUE schema + repository)"
+
+[lints]
+workspace = true
+
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+terrazgo-core = { workspace = true }
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+uuid = { workspace = true }
+jiff = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Integration tests are separate crates, so serde_json must also be a dev-dependency
+# for tests/ to inspect record_change payloads. Same crate, no new dependency.
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[features]
+# Demo-campaign seeding (src/demo.rs). Enabled by the shell for its dev-only
+# seed command and required by the demo example; not part of the library proper.
+demo = []
+
+[[example]]
+name = "demo"
+required-features = ["demo"]

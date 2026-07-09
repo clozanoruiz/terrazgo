@@ -1,0 +1,10 @@
+# Build output and vendored/generated trees; Rust is cargo fmt's job.
+dist/
+target/
+src-tauri/gen/
+Cargo.lock
+package-lock.json
+*.md
+# Harvested service responses used as test fixtures — byte-exact, never reformatted.
+crates/*/tests/fixtures/
+crates/module-cue/src/demo/*.geojson

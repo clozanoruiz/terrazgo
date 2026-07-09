@@ -1,0 +1,57 @@
+[workspace]
+members = [
+    "crates/terrazgo-core",
+    "crates/terrazgo-geo",
+    "crates/module-cue",
+    "crates/module-sigpac",
+    "src-tauri",
+]
+resolver = "3"
+
+# Shared package metadata; crates inherit with `<field>.workspace = true`.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Floor set by rusqlite_migration 2.6; raise as dependencies demand.
+rust-version = "1.95"
+license = "AGPL-3.0-or-later"
+
+# Manifest-enforced lints (crates opt in with `[lints] workspace = true`), so
+# a plain `cargo check` flags them locally — not only CI's `-D warnings` run.
+# unwrap/expect outside tests is a workspace hard rule; clippy.toml sets
+# allow-unwrap-in-tests so test code stays idiomatic.
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+
+# Single source of truth for shared dependency versions. Not just tidiness:
+# `rusqlite::Connection` crosses the module-cue ↔ src-tauri boundary and
+# libsqlite3-sys has `links = "sqlite3"`, so two incompatible rusqlite versions
+# in the graph would be a hard build error. Crates opt in with `workspace = true`.
+[workspace.dependencies]
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+uuid = { version = "1", features = ["v7"] }
+jiff = "0.2"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+# Sync HTTP for terrazgo-geo's cache-through fetch (tiles, styles). Kept out of
+# core and modules — offline-first forbids network there.
+ureq = "3"
+# GPKG geometry blobs (WKB) → GeoJSON, for boundary-file import. `with-gpkg`
+# deliberately NOT enabled: it pulls sqlx, and we read GeoPackage files (they
+# are SQLite) with the rusqlite we already have.
+geozero = { version = "0.15", default-features = false, features = ["with-wkb", "with-geojson"] }
+tauri = "2"
+tauri-build = "2"
+# Floor 2.7: that release removed the `confirm`/`ask` IPC commands (merged
+# into `message`), and backend.js's confirmDialog() targets the 2.7+ shape.
+tauri-plugin-dialog = "2.7"
+terrazgo-core = { path = "crates/terrazgo-core" }
+terrazgo-geo = { path = "crates/terrazgo-geo" }
+module-cue = { path = "crates/module-cue" }
+# SIGPAC lookups go through terrazgo-geo's fetch — module-sigpac itself has
+# no HTTP dependency (the sanctioned-seam rule).
+module-sigpac = { path = "crates/module-sigpac" }

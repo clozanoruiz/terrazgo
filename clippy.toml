@@ -1,0 +1,4 @@
+# Companion to [workspace.lints.clippy] in Cargo.toml: the unwrap/expect ban
+# applies to production code only — tests use unwrap freely.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

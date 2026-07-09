@@ -1,0 +1,38 @@
+[package]
+name = "terrazgo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo desktop shell and core — module registry, migration runner, Tauri commands"
+
+[lints]
+workspace = true
+
+# lib + thin main is the standard Tauri 2 shape; it also gives tests/ a library
+# target to link against (the migration-composition tests need one).
+[lib]
+name = "terrazgo"
+crate-type = ["lib"] # desktop-only; mobile builds would add staticlib/cdylib later
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+# Native save/open dialogs for backup export/import (added 2026-07-02).
+tauri-plugin-dialog = { workspace = true }
+# `demo` is enabled unconditionally because cargo features cannot be
+# debug-profile-conditional; the seed command itself refuses in release builds.
+module-cue = { workspace = true, features = ["demo"] }
+# SIGPAC parcel lookups (P3, 2026-07-08); network rides terrazgo-geo's fetch.
+module-sigpac = { workspace = true }
+terrazgo-core = { workspace = true }
+# Geo plumbing: geo-cache.db, the geo:// protocol's fetch layer, map styles,
+# boundary-file import (added 2026-07-07).
+terrazgo-geo = { workspace = true }
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
