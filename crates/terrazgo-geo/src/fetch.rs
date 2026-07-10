@@ -18,6 +18,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use terrazgo_core::date::now_utc_iso;
+use ureq::tls::{RootCerts, TlsConfig};
 
 /// A fetched (or cached) payload plus the content type to serve it with.
 pub struct Fetched {
@@ -206,6 +207,17 @@ fn agent() -> &'static ureq::Agent {
     AGENT.get_or_init(|| {
         ureq::Agent::config_builder()
             .timeout_global(Some(Duration::from_secs(30)))
+            // Trust what the platform trusts (the OS certificate store), like
+            // a browser does. ureq's default — pinned Mozilla roots — rejects
+            // the re-signed certificates of antivirus/proxy HTTPS
+            // interception, common on consumer Windows (field bug 2026-07-09:
+            // UnknownIssuer in the app while every browser on the machine
+            // connected fine).
+            .tls_config(
+                TlsConfig::builder()
+                    .root_certs(RootCerts::PlatformVerifier)
+                    .build(),
+            )
             // Identify politely to the public services we cache from.
             .user_agent("Terrazgo/0.1 (offline-first farm app)")
             .build()

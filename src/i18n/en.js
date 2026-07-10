@@ -335,7 +335,7 @@ export default {
   "error.missing_phi_days":
     "No pre-harvest interval available: the product has no default and none was supplied.",
   "error.geo_http": "The map service answered with an error (HTTP {status}).",
-  "error.geo_offline": "No network connection — showing cached map data only.",
+  "error.geo_offline": "No network connection — showing cached map data only. ({reason})",
   "error.invalid.geometry_invalid":
     "The geometry is not a valid boundary (a closed polygon with valid coordinates).",
   "error.invalid.geo_subject_missing": "The geometry is not attached to a plot or a farm.",

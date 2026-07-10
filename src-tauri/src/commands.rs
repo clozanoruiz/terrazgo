@@ -115,7 +115,11 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
             // The two user-explainable network outcomes: the service said no,
             // or there is no network. Both leave the app fully usable.
             GeoError::Http { status } => ("geo_http".into(), json!({ "status": status })),
-            GeoError::Offline(_) => ("geo_offline".into(), json!({})),
+            // The transport detail (DNS, TLS, refused, timeout…) rides along:
+            // "offline" is a diagnosis the user must be able to dispute — a
+            // firewalled or proxied machine is online for the browser and
+            // unreachable for us, and the reason string is the only evidence.
+            GeoError::Offline(reason) => ("geo_offline".into(), json!({ "reason": reason })),
             GeoError::Cache(_) | GeoError::Migration(_) | GeoError::Json(_) | GeoError::Io(_) => {
                 ("internal".into(), json!({}))
             }

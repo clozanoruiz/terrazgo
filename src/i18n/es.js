@@ -337,7 +337,7 @@ export default {
   "error.missing_phi_days":
     "No hay plazo de seguridad disponible: el producto no tiene valor por defecto y no se indicó ninguno.",
   "error.geo_http": "El servicio de mapas respondió con un error (HTTP {status}).",
-  "error.geo_offline": "Sin conexión — se muestran solo los datos de mapa en caché.",
+  "error.geo_offline": "Sin conexión — se muestran solo los datos de mapa en caché. ({reason})",
   "error.invalid.geometry_invalid":
     "La geometría no es un contorno válido (un polígono cerrado con coordenadas válidas).",
   "error.invalid.geo_subject_missing":

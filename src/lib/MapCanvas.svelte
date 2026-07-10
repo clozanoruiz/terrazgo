@@ -10,7 +10,7 @@
   // with dynamic import() so the heavy map chunk never weighs down the
   // form views — the webview fetches it the first time a map mounts.
   import { t } from "../i18n.js";
-  import { geoBase, invoke } from "./backend.js";
+  import { errorText, geoBase, invoke } from "./backend.js";
   import { MAP_LAYERS, SPAIN_CENTER, SPAIN_ZOOM, mapPalette } from "./mapLayers.js";
   import { notify } from "./notifications.svelte.js";
 
@@ -62,10 +62,12 @@
   async function fetchStyle(styleId) {
     try {
       return JSON.parse(await invoke("get_map_style", { styleId, base: geoBase() }));
-    } catch {
-      // Offline with nothing cached (or upstream broke): tell the user once,
-      // keep the map usable over the plain background.
-      notify(t("map.basemap_unavailable"), true);
+    } catch (err) {
+      // Offline with nothing cached (or upstream broke): tell the user, keep
+      // the map usable over the plain background. The underlying error rides
+      // along — "offline" is only one of the reasons this can fail, and a
+      // swallowed cause is undiagnosable from a user report.
+      notify(`${t("map.basemap_unavailable")} [${errorText(err)}]`, true);
       return OFFLINE_STYLE;
     }
   }
@@ -145,8 +147,10 @@
           if (cancelled) return;
           layerData[layer.id] = data;
           onData?.(layer.id, data);
-        } catch {
-          // Layer data failures must not take the whole map down.
+        } catch (err) {
+          // Layer data failures must not take the whole map down — but they
+          // must not vanish silently either.
+          notify(errorText(err), true);
           layerData[layer.id] = { type: "FeatureCollection", features: [] };
         }
       }

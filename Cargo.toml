@@ -10,7 +10,7 @@ resolver = "3"
 
 # Shared package metadata; crates inherit with `<field>.workspace = true`.
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 # Floor set by rusqlite_migration 2.6; raise as dependencies demand.
 rust-version = "1.95"
@@ -38,8 +38,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 # Sync HTTP for terrazgo-geo's cache-through fetch (tiles, styles). Kept out of
-# core and modules — offline-first forbids network there.
-ureq = "3"
+# core and modules — offline-first forbids network there. platform-verifier:
+# TLS trust comes from the OS certificate store (like a browser) instead of
+# pinned Mozilla roots — antivirus/proxy HTTPS interception re-signs traffic
+# with a locally-installed CA that only the platform store knows (fetch.rs).
+ureq = { version = "3", features = ["platform-verifier"] }
 # GPKG geometry blobs (WKB) → GeoJSON, for boundary-file import. `with-gpkg`
 # deliberately NOT enabled: it pulls sqlx, and we read GeoPackage files (they
 # are SQLite) with the rusqlite we already have.

@@ -1,0 +1,69 @@
+# Builds the per-platform installers for each v* tag and attaches them to a
+# draft release. This workflow ships inside every source snapshot, so each
+# release's binaries are built from exactly the source published at its tag —
+# check out the tag and you are looking at what the installers were built from.
+# Publishing the release (after writing the notes) is a manual step.
+name: Build release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # tauri (via wry/tao) links against the system webview stack on Linux.
+      - name: Install Tauri system dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            librsvg2-dev \
+            libssl-dev
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      # tauri-action runs beforeBuildCommand (npm run build) itself; only the
+      # dependencies need installing here.
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build installers and attach to the draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Terrazgo ${{ github.ref_name }}"
+          releaseDraft: true
+          # Early versions ship as pre-releases (see the README warning about
+          # data not surviving upgrades); drop at the first stable release.
+          prerelease: true
+          uploadUpdaterJson: false
+          # Windows also gets the bare terrazgo.exe as a "portable" download
+          # (runs without installing; still needs the WebView2 runtime and
+          # keeps its data in the user profile like the installed app).
+          uploadPlainBinary: ${{ matrix.platform == 'windows-latest' }}

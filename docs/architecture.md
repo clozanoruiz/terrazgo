@@ -519,10 +519,12 @@ Selective test-first, by code category:
 Releases live at
 [github.com/clozanoruiz/terrazgo](https://github.com/clozanoruiz/terrazgo),
 together with the issue tracker: per-platform installers (Linux AppImage/deb,
-Windows NSIS) plus the **complete source of that version** — one snapshot
-commit per release, so the AGPL source-offer travels with every distributed
-binary. Release notes are written by hand before a draft release is
-published.
+Windows NSIS + portable `.exe`) plus the **complete source of that version** —
+one snapshot commit per release, so the AGPL source-offer travels with every
+distributed binary. The installers are built by that repository's own
+`build.yml` workflow from the tagged source itself, so every binary comes from
+exactly the source published next to it. Release notes are written by hand
+before a draft release is published.
 
 ## Recipes — where to start when you want to…
 
