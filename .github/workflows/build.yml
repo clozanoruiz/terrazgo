@@ -3,6 +3,12 @@
 # release's binaries are built from exactly the source published at its tag —
 # check out the tag and you are looking at what the installers were built from.
 # Publishing the release (after writing the notes) is a manual step.
+#
+# Every artifact gets SLSA build provenance (signed into the public Sigstore
+# ledger) and each release carries a CycloneDX SBOM attested against the
+# installers. Verify any downloaded file with:
+#
+#   gh attestation verify <file> --repo clozanoruiz/terrazgo
 name: Build release
 
 on:
@@ -11,6 +17,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -62,8 +70,65 @@ jobs:
           # Early versions ship as pre-releases (see the README warning about
           # data not surviving upgrades); drop at the first stable release.
           prerelease: true
-          uploadUpdaterJson: false
+          includeUpdaterJson: false
           # Windows also gets the bare terrazgo.exe as a "portable" download
           # (runs without installing; still needs the WebView2 runtime and
           # keeps its data in the user profile like the installed app).
           uploadPlainBinary: ${{ matrix.platform == 'windows-latest' }}
+
+      # Attestation subjects are matched by digest, so the rename tauri-action
+      # applies when uploading (e.g. terrazgo.exe → terrazgo_windows_x64.exe)
+      # does not affect verification of the downloaded assets.
+      - name: Attest build provenance (Linux artifacts)
+        if: startsWith(matrix.platform, 'ubuntu')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/deb/*.deb
+
+      - name: Attest build provenance (Windows artifacts)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            target/release/bundle/nsis/*.exe
+            target/release/terrazgo.exe
+
+  # One SBOM per release, derived from the lockfiles (Cargo.lock +
+  # package-lock.json — dev-dependencies included, that is the lockfile
+  # granularity), attached as a release asset and attested against the
+  # installers built above.
+  sbom:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Generate the CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: terrazgo-${{ github.ref_name }}.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      # Downloaded before the SBOM is uploaded, so the glob below is exactly
+      # the set of installers.
+      - name: Download the installers from the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download "$GITHUB_REF_NAME" --dir assets
+
+      - name: Attest the SBOM against the installers
+        uses: actions/attest-sbom@v4
+        with:
+          subject-path: assets/*
+          sbom-path: terrazgo-${{ github.ref_name }}.cdx.json
+
+      - name: Attach the SBOM to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --clobber keeps a re-tagged run idempotent.
+        run: gh release upload "$GITHUB_REF_NAME" "terrazgo-${GITHUB_REF_NAME}.cdx.json" --clobber

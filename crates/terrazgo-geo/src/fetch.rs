@@ -31,14 +31,16 @@ pub struct Fetched {
 /// stale template triggers one re-resolve + retry.
 pub fn tile(cache: &Mutex<Connection>, source_id: &str, z: u8, x: u32, y: u32) -> Result<Fetched> {
     let source = sources::tile_source(source_id).ok_or(GeoError::NotFound)?;
-    if z > source.max_zoom {
+    if z < source.min_zoom || z > source.max_zoom {
         return Err(GeoError::NotFound);
     }
+
+    let cache_key = tile_cache_key(cache, source)?;
 
     // Scoped so the guard is dropped before any network I/O.
     let cached = {
         let conn = lock(cache)?;
-        cached_tile(&conn, source_id, z, x, y)?
+        cached_tile(&conn, &cache_key, z, x, y)?
     };
     if let Some(hit) = cached {
         return Ok(hit);
@@ -50,23 +52,96 @@ pub fn tile(cache: &Mutex<Connection>, source_id: &str, z: u8, x: u32, y: u32) -
             let url = upstream_tile_url(cache, source, z, x, y, true)?;
             http_get(&url, source.content_type)
         }
+        // Upstream says "no features here" — a cacheable empty tile, not an
+        // error (an empty body is a valid empty vector tile).
+        Err(GeoError::Http { status: 404 }) if source.empty_on_404 => Ok(Fetched {
+            data: Vec::new(),
+            content_type: source.content_type.to_string(),
+        }),
         other => other,
     }?;
 
-    lock(cache)?.execute(
-        "INSERT OR REPLACE INTO tile (source, z, x, y, data, content_type, fetched_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            source_id,
-            z,
-            x,
-            y,
-            fetched.data,
-            fetched.content_type,
-            now_utc_iso()
-        ],
-    )?;
+    // `&*` dereferences the guard to the `Connection` it protects (the guard
+    // stays alive for the duration of the call, so the lock is held).
+    store_tile(&*lock(cache)?, source, &cache_key, z, x, y, &fetched)?;
     Ok(fetched)
+}
+
+/// The cache row key for one source's tiles. Campaign-keyed sources cache
+/// under `{id}@{campaign}` — their upstream URL has no campaign in it, so
+/// the key is what keeps tiles from different campaigns apart at rollover.
+/// Resolution is cache-first (one fetch ever until something refreshes it,
+/// e.g. a plot verification), so it adds no per-tile network cost and works
+/// offline once seen.
+fn tile_cache_key(cache: &Mutex<Connection>, source: &TileSource) -> Result<String> {
+    if source.campaign_keyed {
+        Ok(format!("{}@{}", source.id, current_campaign(cache, false)?))
+    } else {
+        Ok(source.id.to_string())
+    }
+}
+
+/// Store one fetched tile. For campaign-keyed sources this is also the lazy
+/// rollover cleanup: storing a tile for the current campaign evicts any
+/// earlier campaign's rows for the same source.
+fn store_tile(
+    conn: &Connection,
+    source: &TileSource,
+    cache_key: &str,
+    z: u8,
+    x: u32,
+    y: u32,
+    fetched: &Fetched,
+) -> Result<()> {
+    if source.campaign_keyed {
+        conn.execute(
+            "DELETE FROM tile WHERE source LIKE ?1 AND source <> ?2",
+            params![format!("{}@%", source.id), cache_key],
+        )?;
+    }
+    let now = now_utc_iso();
+    conn.execute(
+        "INSERT OR REPLACE INTO tile
+             (source, z, x, y, data, content_type, fetched_at, last_used_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+        params![cache_key, z, x, y, fetched.data, fetched.content_type, now],
+    )?;
+    Ok(())
+}
+
+/// The URL whose directory listing names the available SIGPAC campaigns
+/// (`2025/`, `2026/`) — the only machine-readable place the provider states
+/// the current campaign (neither the consultas responses nor the MVT URLs
+/// carry it).
+const CAMPAIGNS_URL: &str = "https://sigpac-hubcloud.es/geopackages/";
+
+/// The current SIGPAC campaign year, read from the provider's download
+/// directory listing (max year directory). Cached like everything else, so
+/// once seen it resolves offline; `refresh` re-reads at campaign rollover
+/// (plot verification does — campaign-keyed tile caching picks the new year
+/// up from the shared cache row). Lives here rather than in module-sigpac
+/// because campaign-keyed tile caching needs it and modules sit above this
+/// crate; module-sigpac re-exports it.
+pub fn current_campaign(cache: &Mutex<Connection>, refresh: bool) -> Result<i64> {
+    let fetched = cached_resource(
+        cache,
+        "sigpac/campaigns",
+        CAMPAIGNS_URL,
+        "text/html",
+        refresh,
+    )?;
+    let listing = String::from_utf8_lossy(&fetched.data);
+    // Directory anchors look like /geopackages/2026/ — scan for 4-digit years.
+    let campaign = listing
+        .match_indices("/geopackages/")
+        .filter_map(|(at, _)| {
+            let year = listing.get(at + "/geopackages/".len()..)?.get(..5)?;
+            let (digits, slash) = year.split_at(4);
+            (slash == "/").then(|| digits.parse::<i64>().ok()).flatten()
+        })
+        .max()
+        .ok_or(GeoError::Invalid("sigpac_response_invalid"))?;
+    Ok(campaign)
 }
 
 /// Serve one allowlisted non-tile resource (style JSON, glyph range, sprite
@@ -144,19 +219,37 @@ fn cached_tile(
     x: u32,
     y: u32,
 ) -> Result<Option<Fetched>> {
-    Ok(conn
+    let hit = conn
         .query_row(
-            "SELECT data, content_type FROM tile
+            "SELECT data, content_type, last_used_at FROM tile
              WHERE source = ?1 AND z = ?2 AND x = ?3 AND y = ?4",
             params![source_id, z, x, y],
             |r| {
-                Ok(Fetched {
-                    data: r.get(0)?,
-                    content_type: r.get(1)?,
-                })
+                Ok((
+                    Fetched {
+                        data: r.get(0)?,
+                        content_type: r.get(1)?,
+                    },
+                    r.get::<_, String>(2)?,
+                ))
             },
         )
-        .optional()?)
+        .optional()?;
+    let Some((fetched, last_used_at)) = hit else {
+        return Ok(None);
+    };
+    // LRU bookkeeping for the size cap (db::enforce_tile_cache_cap), day
+    // granularity: a serve touches last_used_at at most once per UTC day, so
+    // tile bursts don't turn every cache read into a write.
+    let now = now_utc_iso();
+    if last_used_at.get(..10) != now.get(..10) {
+        conn.execute(
+            "UPDATE tile SET last_used_at = ?1
+             WHERE source = ?2 AND z = ?3 AND x = ?4 AND y = ?5",
+            params![now, source_id, z, x, y],
+        )?;
+    }
+    Ok(Some(fetched))
 }
 
 /// The upstream URL for one tile: a static template, or one resolved from the
@@ -263,8 +356,9 @@ mod tests {
                     .is_none()
             );
             conn.execute(
-                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at)
-                 VALUES ('pnoa', 13, 3990, 3105, x'FFD8', 'image/jpeg', '2026-07-07T00:00:00Z')",
+                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
+                 VALUES ('pnoa', 13, 3990, 3105, x'FFD8', 'image/jpeg',
+                         '2026-07-07T00:00:00Z', '2026-07-07T00:00:00Z')",
                 [],
             )
             .unwrap();
@@ -326,5 +420,136 @@ mod tests {
         assert!(url.contains("tilematrix=13"));
         assert!(url.contains("tilerow=3105"));
         assert!(url.contains("tilecol=3990"));
+    }
+
+    // --- SIGPAC recinto MVT overlay (campaign-keyed caching) ----------------
+
+    /// Shape of the real /geopackages/ directory listing (anchors per year).
+    const CAMPAIGN_LISTING: &[u8] =
+        br#"<a href="/geopackages/2025/">2025/</a> <a href="/geopackages/2026/">2026/</a>"#;
+
+    fn seed_campaigns(cache: &Mutex<Connection>, listing: &[u8]) {
+        cache
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO resource (key, data, content_type, fetched_at)
+                 VALUES ('sigpac/campaigns', ?1, 'text/html', '2026-07-11T00:00:00Z')",
+                params![listing],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn current_campaign_reads_the_max_year_from_the_listing() {
+        let with_years = cache();
+        seed_campaigns(&with_years, CAMPAIGN_LISTING);
+        assert_eq!(current_campaign(&with_years, false).unwrap(), 2026);
+
+        let without_years = cache();
+        seed_campaigns(&without_years, b"<html>no years here</html>");
+        assert!(matches!(
+            current_campaign(&without_years, false),
+            Err(GeoError::Invalid("sigpac_response_invalid"))
+        ));
+    }
+
+    #[test]
+    fn sigpac_tiles_are_served_from_the_campaign_keyed_cache_without_network() {
+        let cache = cache();
+        seed_campaigns(&cache, CAMPAIGN_LISTING);
+        cache
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
+                 VALUES ('sigpac-recintos@2026', 15, 15887, 12108, x'1A00',
+                         'application/x-protobuf', '2026-07-11T00:00:00Z', '2026-07-11T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        // This test has no network; the campaign-suffixed row must be enough.
+        let hit = tile(&cache, "sigpac-recintos", 15, 15887, 12108).unwrap();
+        assert_eq!(hit.data, vec![0x1A, 0x00]);
+
+        // The key follows the resolved campaign — a row cached under a
+        // previous campaign can no longer satisfy lookups after rollover.
+        let source = sources::tile_source("sigpac-recintos").unwrap();
+        assert_eq!(
+            tile_cache_key(&cache, source).unwrap(),
+            "sigpac-recintos@2026"
+        );
+        assert_eq!(
+            tile_cache_key(&cache, sources::tile_source("pnoa").unwrap()).unwrap(),
+            "pnoa"
+        );
+    }
+
+    #[test]
+    fn sigpac_zoom_bounds_are_enforced() {
+        // The MVT service publishes pbf tiles at z12–15 only (service
+        // description + live probe, 2026-07-11).
+        let cache = cache();
+        for z in [11, 16] {
+            assert!(matches!(
+                tile(&cache, "sigpac-recintos", z, 0, 0),
+                Err(GeoError::NotFound)
+            ));
+        }
+    }
+
+    #[test]
+    fn serving_a_cached_tile_touches_last_used_at_across_days() {
+        let cache = cache();
+        cache
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
+                 VALUES ('pnoa', 13, 3990, 3105, x'FFD8', 'image/jpeg',
+                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        tile(&cache, "pnoa", 13, 3990, 3105).unwrap();
+        let last_used: String = cache
+            .lock()
+            .unwrap()
+            .query_row("SELECT last_used_at FROM tile", [], |r| r.get(0))
+            .unwrap();
+        // Touched to today (LRU input for the size cap), not left at January.
+        assert_ne!(last_used, "2026-01-01T00:00:00Z");
+        assert_eq!(last_used.get(..10), now_utc_iso().get(..10));
+    }
+
+    #[test]
+    fn storing_a_tile_evicts_earlier_campaigns_of_the_same_source() {
+        let cache = cache();
+        let conn = cache.lock().unwrap();
+        conn.execute(
+            "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at) VALUES
+             ('sigpac-recintos@2025', 15, 1, 1, x'00', 'application/x-protobuf',
+              '2025-07-11T00:00:00Z', '2025-07-11T00:00:00Z'),
+             ('pnoa', 13, 1, 1, x'00', 'image/jpeg', '2025-07-11T00:00:00Z', '2025-07-11T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        let source = sources::tile_source("sigpac-recintos").unwrap();
+        let fetched = Fetched {
+            data: vec![0x1A],
+            content_type: "application/x-protobuf".into(),
+        };
+        store_tile(&conn, source, "sigpac-recintos@2026", 15, 2, 2, &fetched).unwrap();
+
+        let count = |src: &str| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM tile WHERE source = ?1", [src], |r| {
+                r.get(0)
+            })
+            .unwrap()
+        };
+        assert_eq!(count("sigpac-recintos@2025"), 0, "old campaign evicted");
+        assert_eq!(count("sigpac-recintos@2026"), 1);
+        assert_eq!(count("pnoa"), 1, "other sources untouched");
     }
 }

@@ -2,6 +2,8 @@
 
 **Aplicación libre y de código abierto para la gestión integral de la explotación agrícola.**
 
+🌐 **[Página del proyecto](https://clozanoruiz.github.io/terrazgo/)**
+
 Terrazgo funciona primero sin conexión (*offline-first*): todos los datos viven en tu
 dispositivo, en una base de datos local, y la aplicación sigue funcionando completa sin
 cobertura — pensada para el campo, no para la oficina. Escritorio hoy; móvil en el plan.
@@ -36,8 +38,7 @@ En [Releases](../../releases) encontrarás los instaladores de cada versión:
 ## Incidencias y sugerencias
 
 ¿Algo no funciona o echas algo en falta? Abre una
-[incidencia](../../issues/new/choose) — hay plantillas para errores y propuestas,
-en español.
+[incidencia](../../issues/new/choose) — hay plantillas para errores y propuestas.
 
 ## Código fuente y licencia
 

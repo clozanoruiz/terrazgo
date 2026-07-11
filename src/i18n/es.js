@@ -124,6 +124,7 @@ export default {
   "map.farm": "Explotación",
   "map.layers": "Capas",
   "map.layer.plots": "Contornos de parcelas",
+  "map.layer.sigpac_recintos": "Recintos SIGPAC",
   "map.no_farms": "Crea primero una explotación para verla en el mapa.",
   "map.plots": "Parcelas",
   "map.select_plot_hint": "Selecciona una parcela para dibujar o importar su contorno.",

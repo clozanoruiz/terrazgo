@@ -335,7 +335,7 @@ served by `src-tauri/src/geo_protocol.rs` → `terrazgo_geo::fetch`:
 cache lookup in `geo-cache.db`, miss → `ureq` GET (lock **never** held
 across network I/O; tile bursts fetch in parallel), store, respond. Only
 allowlisted upstreams exist (`terrazgo_geo::sources`, data not code — a new
-base map or the future SIGPAC MVT layer is a new entry). Upstream styles are
+base map or overlay tile source is a new entry). Upstream styles are
 rewritten in Rust (`terrazgo_geo::style`) so no external URL ever reaches
 the webview; responses carry `Access-Control-Allow-Origin` because the page
 origin is cross-origin to `geo://localhost` and MapLibre uses `fetch()`.
@@ -345,13 +345,30 @@ data*: the core `geo_feature` table (exclusive-arc FKs, audit-logged,
 soft-deleted, synced, in backups). Tiles and styles are *derived and
 re-fetchable*: `geo-cache.db`, a separate file with its own tiny migration
 runner, deliberately outside `VACUUM INTO` backups, `record_change` and any
-future sync. Deleting it loses warm caches, nothing else. Offline with a
-cold cache the map degrades to a plain background with stored geometry —
-the app never stops working.
+future sync. Deleting it loses warm caches, nothing else — which is why its
+schema guard is recreation: `open_cache` probes for the current shape and
+deletes + rebuilds a stale cache file, so pre-release schema squashes never
+strand a deployed cache (2026-07-11). Offline with a cold cache the map
+degrades to a plain background with stored geometry — the app never stops
+working.
+
+The tile cache is size-capped (2026-07-11): serving a tile touches
+`last_used_at` (at most once per UTC day, so bursts don't turn reads into
+writes), and at startup — off the critical path — the shell evicts
+least-recently-used tiles past `TILE_CACHE_MAX_BYTES` (512 MiB) and
+reclaims the space with `VACUUM`. Only tiles are capped: the `resource`
+table also holds the SIGPAC lookup and zone-check responses that keep a
+verified plot verifiable offline, and evicting those would silently break
+that promise for kilobytes of savings. The cap is a constant for now;
+promote it to a user setting when the settings module exists (and revisit
+the default at the mobile milestone, where device storage is the real
+constraint).
 
 **Layers as data.** `src/lib/mapLayers.js` mirrors the `nav.js` philosophy:
-a module contributes a map overlay by adding one entry (id, label key,
-`load()` via invoke, MapLibre style specs). `MapCanvas.svelte` is the
+a module contributes a map overlay by adding one entry — either a GeoJSON
+layer (id, label key, `load()` via invoke, MapLibre style specs) or a
+vector-tile layer (`vector()` returning the source spec: `geo://` tile
+template, zoom bounds, attribution). `MapCanvas.svelte` is the
 embeddable engine wrapper (base-layer switch, selection, terra-draw
 drawing); `MapView.svelte` is the routed workspace around it (farm selector,
 layer panel, draw/import workflows, `#/map?farm=…&plot=…` deep links);
@@ -407,6 +424,21 @@ latest campaign says 'inside'; the subject is the plot, so a dismissal
 survives re-checks and campaign rollovers. A zone-check failure after the
 boundary stored is reported (`zone_check_error`), never fatal, and the plot
 cards show the flags as chips.
+
+**The recinto overlay** (2026-07-11): SIGPAC's official parcel fabric as a
+toggleable vector-tile layer over both base maps — the Nube de SIGPAC MVT
+service (pbf, z12–15, single source-layer `recinto`), one `sigpac-recintos`
+entry in the source allowlist and one vector entry in `mapLayers.js`, with
+`SIGPAC © FEGA (CC BY 4.0)` shown while active. Two service quirks shape
+the caching: the tile URL carries no campaign year (the fixed path always
+serves the *current* campaign), so cache rows are keyed
+`sigpac-recintos@{campaign}` using the same campaign resolution the zone
+checks use — a re-resolve at rollover (any plot verification does one)
+switches the key, and storing the first new-campaign tile evicts the old
+campaign's rows; and tiles with no recintos answer HTTP 404, which the
+fetch layer caches and serves as an *empty* payload (a valid empty vector
+tile), so known-empty countryside costs no repeat requests and reads as
+empty — not as an error — offline.
 
 ## The frontend in one page
 
@@ -499,10 +531,13 @@ Most invariants above are invisible to the compiler, so tests hold the line
 
 Selective test-first, by code category:
 
-1. **Business logic & compliance rules — test-first (TDD).** PHI end dates,
-   licence/ITV expiry, alert generation, record validation: the failing test
-   is written from the regulatory requirement, then implemented. Edge cases
-   (leap years, campaign boundaries, multi-plot treatments) are in scope.
+1. **Domain/business logic — test-first (TDD), regulatory or not.**
+   Compliance rules (PHI end dates, licence/ITV expiry, alert generation,
+   record validation) and equally any module's computational core, such as
+   future irrigation recommendations or analytics: the failing test is
+   written from the requirement's source of truth — a regulation, a
+   technical reference like FAO-56 — then implemented. Edge cases (leap
+   years, campaign boundaries, multi-plot treatments) are in scope.
 2. **Repository / data layer — test-alongside.** Every public repository
    function runs against an in-memory SQLite database with migrations applied.
 3. **Migrations — always tested.** Each migration applies cleanly to a fresh
@@ -523,8 +558,11 @@ Windows NSIS + portable `.exe`) plus the **complete source of that version** —
 one snapshot commit per release, so the AGPL source-offer travels with every
 distributed binary. The installers are built by that repository's own
 `build.yml` workflow from the tagged source itself, so every binary comes from
-exactly the source published next to it. Release notes are written by hand
-before a draft release is published.
+exactly the source published next to it. Each artifact carries signed SLSA
+build provenance and every release ships a CycloneDX SBOM attested against
+the installers — verify any download with
+`gh attestation verify <file> --repo clozanoruiz/terrazgo`. Release notes are
+written by hand before a draft release is published.
 
 ## Recipes — where to start when you want to…
 

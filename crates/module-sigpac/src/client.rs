@@ -12,16 +12,18 @@ use crate::models::{
 use crate::reference::SigpacRef;
 use rusqlite::Connection;
 use std::sync::Mutex;
-use terrazgo_geo::{GeoError, Result, fetch};
+use terrazgo_geo::{Result, fetch};
 
 /// The consultas base. Only this Rust code builds SIGPAC URLs — the webview
 /// never sees the host (it talks `geo://`; production CSP stays closed).
 const BASE_URL: &str = "https://sigpac-hubcloud.es/servicioconsultassigpac/query";
 const INTERSECTION_URL: &str = "https://sigpac-hubcloud.es/servicioconsultassigpac/intersection";
-/// The bulk-download directory names the available campaigns (`2025/`,
-/// `2026/`) — the only machine-readable place the provider states the
-/// current campaign (the consultas responses do not carry it).
-const CAMPAIGNS_URL: &str = "https://sigpac-hubcloud.es/geopackages/";
+
+/// The current SIGPAC campaign year. Moved into terrazgo-geo (2026-07-11)
+/// because campaign-keyed tile caching (the MVT recinto overlay) needs it
+/// below the module tier; re-exported so this crate's callers keep one entry
+/// point for everything SIGPAC.
+pub use terrazgo_geo::fetch::current_campaign;
 
 /// The zone layers Terrazgo checks, as (zone_type code, service layer name).
 /// Order is the storage/display order.
@@ -68,31 +70,6 @@ pub fn zone_intersection(
     let url = format!("{INTERSECTION_URL}/{layer}/{}.json", reference.to_path());
     let fetched = fetch::cached_resource(cache, &key, &url, "application/json", refresh)?;
     parse_intersection_response(&fetched.data)
-}
-
-/// The current SIGPAC campaign year, read from the provider's download
-/// directory listing (max year directory). Cached like everything else, so
-/// once seen it resolves offline; `refresh` re-reads at campaign rollover.
-pub fn current_campaign(cache: &Mutex<Connection>, refresh: bool) -> Result<i64> {
-    let fetched = fetch::cached_resource(
-        cache,
-        "sigpac/campaigns",
-        CAMPAIGNS_URL,
-        "text/html",
-        refresh,
-    )?;
-    let listing = String::from_utf8_lossy(&fetched.data);
-    // Directory anchors look like /geopackages/2026/ — scan for 4-digit years.
-    let campaign = listing
-        .match_indices("/geopackages/")
-        .filter_map(|(at, _)| {
-            let year = listing.get(at + "/geopackages/".len()..)?.get(..5)?;
-            let (digits, slash) = year.split_at(4);
-            (slash == "/").then(|| digits.parse::<i64>().ok()).flatten()
-        })
-        .max()
-        .ok_or(GeoError::Invalid("sigpac_response_invalid"))?;
-    Ok(campaign)
 }
 
 /// Look up the recinto under a geographic point (map click today, GPS

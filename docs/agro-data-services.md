@@ -1,11 +1,18 @@
 # External agronomic data services — soil, NDVI, irrigation
 
-> Status: research (2026-07-09). **Nothing in this document is decided or
-> scheduled.** It inventories the public services that could feed three future
-> capabilities — soil characteristics on the map, NDVI at plot level, and
-> irrigation guidance — and lays out the integration questions each one opens.
-> The services here would serve the Irrigation, Fertilization & soil, and
-> Analytics modules; none of those has started.
+> Status: research (2026-07-09). This inventories the public services that
+> could feed three future capabilities — soil characteristics on the map,
+> NDVI at plot level, and irrigation guidance — and lays out the integration
+> questions each one opens. The services here would serve the Irrigation,
+> Fertilization & soil, and Analytics modules; none of those has started.
+>
+> **Update 2026-07-11:** two of the open questions below are now decided in
+> [map-layers-roadmap.md](map-layers-roadmap.md) — WMS responses are cached
+> as grid-snapped EPSG:3857 tiles (question 2), and CDSE credentials are
+> farmer-supplied (question 1, for CDSE). That document also fixes which
+> map layers are wanted and their build order. Everything else here
+> (irrigation guidance shape, per-plot storage schema, regional-vs-national
+> layering) remains undecided.
 
 ## Ground rules any of these must fit
 

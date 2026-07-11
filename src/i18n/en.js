@@ -123,6 +123,7 @@ export default {
   "map.farm": "Farm",
   "map.layers": "Layers",
   "map.layer.plots": "Plot boundaries",
+  "map.layer.sigpac_recintos": "SIGPAC parcels",
   "map.no_farms": "Create a farm first to see it on the map.",
   "map.plots": "Plots",
   "map.select_plot_hint": "Select a plot to draw or import its boundary.",

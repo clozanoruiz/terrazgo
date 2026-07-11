@@ -56,6 +56,28 @@ pub fn run() {
             app.manage(state::GeoState {
                 conn: Mutex::new(geo_conn),
             });
+
+            // Tile-cache size cap, off the startup path: usually a no-op,
+            // but the reclaim VACUUM on a maxed-out cache takes seconds and
+            // must not delay the window. Failure only means the cache stays
+            // big — log it, never abort startup.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let Some(geo) = handle.try_state::<state::GeoState>() else {
+                    return;
+                };
+                let Ok(conn) = geo.conn.lock() else {
+                    return;
+                };
+                match terrazgo_geo::db::enforce_tile_cache_cap(
+                    &conn,
+                    terrazgo_geo::db::TILE_CACHE_MAX_BYTES,
+                ) {
+                    Ok(0) => {}
+                    Ok(evicted) => eprintln!("geo-cache cap: evicted {evicted} tiles"),
+                    Err(err) => eprintln!("geo-cache cap enforcement failed: {err}"),
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

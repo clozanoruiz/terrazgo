@@ -121,6 +121,17 @@
     if (!map) return;
     for (const layer of MAP_LAYERS) {
       if (!visibleLayers.includes(layer.id)) continue;
+      if (layer.vector) {
+        // Vector-tile overlay: the source spec is static (tiles stream from
+        // the geo:// protocol on demand), so there is no data to (re)set.
+        if (!map.getSource(sourceId(layer))) {
+          map.addSource(sourceId(layer), layer.vector(geoBase()));
+          for (const spec of layer.styles(palette)) {
+            map.addLayer({ ...spec, source: sourceId(layer) });
+          }
+        }
+        continue;
+      }
       const data = layerData[layer.id] ?? { type: "FeatureCollection", features: [] };
       if (!map.getSource(sourceId(layer))) {
         map.addSource(sourceId(layer), { type: "geojson", data });
@@ -141,7 +152,7 @@
     let cancelled = false;
     (async () => {
       for (const layer of MAP_LAYERS) {
-        if (!visibleLayers.includes(layer.id)) continue;
+        if (!layer.load || !visibleLayers.includes(layer.id)) continue;
         try {
           const data = await layer.load(invoke, { farmId: currentFarm });
           if (cancelled) return;

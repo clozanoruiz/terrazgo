@@ -258,7 +258,7 @@ each device re-derives them locally).
 `plot_zone_flag` like any other source table. (Exact columns still to be
 finalised when the module is scheduled.)
 
-## Build order (steps 1–2 DONE 2026-07-07; next up: step 3)
+## Build order (1–4 + the MVT overlay shipped; remaining: 5–6)
 
 1. ~~**Schema design**~~ **DONE** — shipped as `geo_feature` (exclusive arc,
    GeoJSON, `properties` JSON), superseding the `plot_geometry` draft; see the
@@ -330,6 +330,22 @@ finalised when the module is scheduled.)
    the PLOT (dismissals survive re-checks and rollovers), due date =
    campaign year end. The fertilisation module's trigger reads
    `plot_zone_flag` from core — no dependency on module-sigpac, as designed.
+   ~~**MVT recinto overlay**~~ **SHIPPED 2026-07-11**: the recinto fabric as
+   a toggleable vector-tile layer over both base maps — `sigpac-recintos` in
+   terrazgo-geo's source allowlist + a vector entry in `mapLayers.js`, tiles
+   through the `geo://` cache, attribution `SIGPAC © FEGA (CC BY 4.0)` while
+   active. Service facts established against the live service and a real
+   tile (2026-07-11): pbf at z12–15 only; single source-layer **`recinto`**
+   (attribute keys = the recinfo set); **the URL carries no campaign year**
+   (current campaign at the fixed path, previous under `/mvt/anterior/`), so
+   cache rows are campaign-keyed (`sigpac-recintos@{campaign}`, resolved from
+   the shared campaigns listing; old campaign evicted on first new-campaign
+   store); **empty tiles answer HTTP 404**, cached and served as empty
+   payloads so they cost nothing on repeat visits and stay empty offline.
+   `current_campaign` moved from module-sigpac's client into
+   `terrazgo_geo::fetch` (re-exported) because tile caching below the module
+   tier needs it.
+
 5. **GPS point query** (mobile milestone): recinto under the device's position.
 6. **Offline municipality packs** (ATOM/GPKG) — only if field usage shows the
    online cache isn't enough; the GPKG reader from step 2 already does the
