@@ -39,6 +39,43 @@ CREATE TABLE licence_level (
     i18n_key TEXT NOT NULL
 );
 
+-- Imported reference catalogues (added 2026-07-14; design in docs/siex-export.md
+-- → "Storage design"). Generic on purpose: the mechanism is country-neutral and
+-- the Spanish-ness is data — each catalogue carries its provider `source`
+-- ('siex' today) and provider columns ride verbatim in `attrs` JSON, the
+-- geo_feature precedent. Promote a catalogue to a typed table only when a real
+-- query needs its attributes; promotion is an additive copy, codes never change.
+-- INTEGER PKs: shipped reference data, not user data — the UUID rule doesn't
+-- apply. Excluded from record_change: each device imports its own copy from the
+-- snapshot vendored in the binary (crates/terrazgo-core/catalogues/).
+--
+-- Imports are UPSERT-ONLY, never delete: providers retire codes by baja date
+-- instead of removing them, so a code on an old record keeps resolving forever.
+--
+-- Deliberately NO foreign keys from user data to catalogue_code: the code value
+-- is the regulatory payload, the catalogue row is display metadata; a reimport
+-- must never cascade into user records. Bogus codes are caught in Rust and by
+-- the export's schema-validated tests instead.
+CREATE TABLE catalogue (
+    id                TEXT PRIMARY KEY,  -- provider table id (SIEX: the idTabla, e.g. 'EFICACIA_TRATAMIENTO')
+    source            TEXT NOT NULL,     -- 'siex' | future providers
+    source_updated_at TEXT,              -- newest lifecycle date across rows at import; NULL when the provider ships none
+    imported_at       TEXT NOT NULL
+);
+
+CREATE TABLE catalogue_code (
+    id           INTEGER PRIMARY KEY,
+    catalogue_id TEXT NOT NULL REFERENCES catalogue(id),
+    code         TEXT NOT NULL,          -- provider code; NOT unique per catalogue — some catalogues repeat a code per qualifying attr (e.g. one row per ámbito)
+    label        TEXT NOT NULL,          -- current provider label; deliberately never snapshotted onto records — the code is what's legal, a renamed label should show its new text
+    attrs        TEXT,                   -- JSON object of the provider's remaining columns, keys verbatim; NULL when the catalogue is plain code+label
+    added_on     TEXT,                   -- provider lifecycle dates as ISO 'YYYY-MM-DD' (alta / modificación / baja)
+    modified_on  TEXT,
+    retired_on   TEXT                    -- retired codes stay resolvable for old records; pickers filter retired_on IS NULL
+);
+
+CREATE INDEX idx_catalogue_code_lookup ON catalogue_code(catalogue_id, code);
+
 -- ============================================================================
 -- Core user-data tables (UUIDv7 TEXT PKs)
 -- ============================================================================

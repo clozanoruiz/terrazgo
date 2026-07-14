@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The shell-owned database runner: composes every module's migration steps into

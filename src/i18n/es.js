@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // Diccionario español. Las claves son idénticas a en.js; los huecos `{name}`
@@ -61,6 +62,7 @@ export default {
   "nav.map": "Mapa",
   "nav.treatments": "Tratamientos",
   "nav.registry": "Catálogo",
+  "nav.settings": "Ajustes",
 
   "farms.title": "Explotaciones",
   "farms.new": "Nueva explotación",
@@ -124,7 +126,24 @@ export default {
   "map.farm": "Explotación",
   "map.layers": "Capas",
   "map.layer.plots": "Contornos de parcelas",
+  "map.layer.phi_status": "Plazos de seguridad",
+  "map.layer.zone_flags": "Zonas reguladas",
+  "map.legend.phi_in": "En plazo de seguridad — no cosechar",
+  "map.legend.phi_clear": "Tratada — cosecha permitida",
   "map.layer.sigpac_recintos": "Recintos SIGPAC",
+  "map.layer.cultivo_declarado": "Cultivos declarados (campaña anterior)",
+  "map.layer.paisaje": "Elementos del paisaje",
+  "map.inspect.title": "En este punto",
+  "map.inspect.phi_until": "Cosecha permitida desde",
+  "map.inspect.sigpac_ref": "Referencia SIGPAC",
+  "map.inspect.land_use": "Uso SIGPAC",
+  "map.inspect.surface_ha": "Superficie (ha)",
+  "map.inspect.crop_code": "Cultivo declarado (código)",
+  "map.inspect.exploitation_system": "Sistema (secano/regadío)",
+  "map.inspect.declared_surface": "Superficie declarada (ha)",
+  "map.inspect.campaign": "Campaña",
+  "map.inspect.element_type": "Tipo de elemento (código)",
+  "map.zoom_hint": "Acerca el mapa para ver: {layers}",
   "map.no_farms": "Crea primero una explotación para verla en el mapa.",
   "map.plots": "Parcelas",
   "map.select_plot_hint": "Selecciona una parcela para dibujar o importar su contorno.",
@@ -311,6 +330,18 @@ export default {
   "formulation_type.wg": "WG (granulado dispersable)",
   "formulation_type.sl": "SL (concentrado soluble)",
 
+  "settings.general": "General",
+  "settings.map": "Mapa",
+  "settings.cache_size": "Espacio máximo para mapas sin conexión",
+  "settings.cache_default": "Predeterminado ({size})",
+  "settings.cache_hint":
+    "Los mapas consultados se guardan para poder usarlos sin conexión; al superar el límite se eliminan primero los menos usados.",
+  "settings.clear_cache": "Borrar mapas guardados",
+  "settings.clear_cache_confirm":
+    "¿Borrar los mapas guardados? Se descargarán de nuevo cuando haya conexión. Los datos de la explotación no se tocan.",
+  "message.settings_saved": "Ajustes guardados.",
+  "message.cache_cleared": "Mapas guardados borrados ({count}).",
+
   "backup.title": "Copia de seguridad",
   "actions.export_backup": "Exportar copia de seguridad",
   "actions.import_backup": "Importar copia de seguridad",
@@ -327,6 +358,8 @@ export default {
   "error.invalid.empty_name": "El nombre no puede estar vacío.",
   "error.invalid.empty_authorisation_number": "El número de registro no puede estar vacío.",
   "error.invalid.nonpositive_area": "La superficie debe ser mayor que cero.",
+  "error.invalid.cache_cap_too_small":
+    "El espacio para mapas sin conexión es demasiado pequeño (mínimo 64 MB).",
   "error.invalid_date": "Fecha no válida «{date}» (se espera AAAA-MM-DD).",
   "error.authorisation_missing": "El producto {product_id} no está autorizado en «{country}».",
   "error.country_mismatch": "El país «{provided}» no coincide con el de la explotación («{farm}»).",

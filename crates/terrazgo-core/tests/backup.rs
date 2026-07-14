@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Backup export/import-validation tests (docs/architecture.md testing strategy #1:

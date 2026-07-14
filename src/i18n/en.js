@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 // English dictionary. Flat keys, dot-namespaced; `{name}` placeholders are
@@ -60,6 +61,7 @@ export default {
   "nav.map": "Map",
   "nav.treatments": "Treatments",
   "nav.registry": "Catalogue",
+  "nav.settings": "Settings",
 
   "farms.title": "Farms",
   "farms.new": "New farm",
@@ -123,7 +125,24 @@ export default {
   "map.farm": "Farm",
   "map.layers": "Layers",
   "map.layer.plots": "Plot boundaries",
+  "map.layer.phi_status": "Pre-harvest intervals (PHI)",
+  "map.layer.zone_flags": "Regulated zones",
+  "map.legend.phi_in": "PHI running — harvest restricted",
+  "map.legend.phi_clear": "Treated — harvest allowed",
   "map.layer.sigpac_recintos": "SIGPAC parcels",
+  "map.layer.cultivo_declarado": "Declared crops (previous campaign)",
+  "map.layer.paisaje": "Landscape elements",
+  "map.inspect.title": "At this point",
+  "map.inspect.phi_until": "Harvest allowed from",
+  "map.inspect.sigpac_ref": "SIGPAC reference",
+  "map.inspect.land_use": "SIGPAC land use",
+  "map.inspect.surface_ha": "Surface (ha)",
+  "map.inspect.crop_code": "Declared crop (code)",
+  "map.inspect.exploitation_system": "System (rainfed/irrigated)",
+  "map.inspect.declared_surface": "Declared surface (ha)",
+  "map.inspect.campaign": "Campaign",
+  "map.inspect.element_type": "Element type (code)",
+  "map.zoom_hint": "Zoom in to see: {layers}",
   "map.no_farms": "Create a farm first to see it on the map.",
   "map.plots": "Plots",
   "map.select_plot_hint": "Select a plot to draw or import its boundary.",
@@ -310,6 +329,18 @@ export default {
   "formulation_type.wg": "WG (water-dispersible granules)",
   "formulation_type.sl": "SL (soluble concentrate)",
 
+  "settings.general": "General",
+  "settings.map": "Map",
+  "settings.cache_size": "Maximum space for offline maps",
+  "settings.cache_default": "Default ({size})",
+  "settings.cache_hint":
+    "Viewed maps are stored for offline use; past the limit, the least recently used are removed first.",
+  "settings.clear_cache": "Clear stored maps",
+  "settings.clear_cache_confirm":
+    "Clear the stored maps? They will download again when online. Farm data is not affected.",
+  "message.settings_saved": "Settings saved.",
+  "message.cache_cleared": "Stored maps cleared ({count}).",
+
   "backup.title": "Backup",
   "actions.export_backup": "Export backup",
   "actions.import_backup": "Import backup",
@@ -326,6 +357,7 @@ export default {
   "error.invalid.empty_name": "The name must not be empty.",
   "error.invalid.empty_authorisation_number": "The registration number must not be empty.",
   "error.invalid.nonpositive_area": "The area must be greater than zero.",
+  "error.invalid.cache_cap_too_small": "The space for offline maps is too small (minimum 64 MB).",
   "error.invalid_date": 'Invalid date "{date}" (expected YYYY-MM-DD).',
   "error.authorisation_missing": 'Product {product_id} is not authorised in "{country}".',
   "error.country_mismatch": 'Country "{provided}" does not match the farm\'s country ("{farm}").',

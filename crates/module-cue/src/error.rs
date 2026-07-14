@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Error type for the CUE module. `thiserror` keeps this a library-style error;
@@ -29,6 +30,11 @@ pub enum CueError {
 
     #[error("invalid date '{0}' (expected YYYY-MM-DD)")]
     InvalidDate(String),
+
+    /// Mirrors `CoreError::Catalogue` (a vendored catalogue file failed to
+    /// parse — a packaging defect, never user input).
+    #[error("catalogue data error: {0}")]
+    Catalogue(String),
 
     #[error("product {product_id} has no authorisation for country '{country}'")]
     AuthorisationMissing { product_id: String, country: String },
@@ -64,6 +70,7 @@ impl From<terrazgo_core::CoreError> for CueError {
             CoreError::NotFound => CueError::NotFound,
             CoreError::InvalidDate(d) => CueError::InvalidDate(d),
             CoreError::Invalid(msg) => CueError::Invalid(msg),
+            CoreError::Catalogue(msg) => CueError::Catalogue(msg),
         }
     }
 }

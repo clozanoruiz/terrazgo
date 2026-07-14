@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Alert rules: pure, date-only compliance logic (docs/architecture.md testing strategy #1, test-first).

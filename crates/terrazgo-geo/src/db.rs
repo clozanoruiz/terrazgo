@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! The geo cache database (`geo-cache.db`) — its own file, its own (tiny)
@@ -11,12 +12,28 @@ use rusqlite::Connection;
 use rusqlite_migration::{M, Migrations};
 use std::path::Path;
 
-/// Ceiling for cached tile payload bytes — the knob `enforce_tile_cache_cap`
-/// enforces. 512 MiB holds full-depth orthophoto for a farm plus generous
-/// base-map browsing; revisit at the mobile milestone, where device storage
-/// is the real constraint, and promote to a user setting once the core
-/// settings module exists.
+/// Default ceiling for cached tile payload bytes — the knob
+/// `enforce_tile_cache_cap` enforces. 512 MiB holds full-depth orthophoto for
+/// a farm plus generous base-map browsing; revisit at the mobile milestone,
+/// where device storage is the real constraint. Users override it via the
+/// settings file (`tile_cache_max_bytes`); an unset setting follows this
+/// default, which is why the constant stays here and not in the settings.
 pub const TILE_CACHE_MAX_BYTES: i64 = 512 * 1024 * 1024;
+
+/// Smallest accepted tile-cache cap. Below this the map cycles through
+/// eviction so fast the cache stops being one; the settings UI offers presets
+/// well above it, so the floor only guards direct/broken invoke payloads.
+pub const TILE_CACHE_MIN_BYTES: i64 = 64 * 1024 * 1024;
+
+/// Range-check a user-supplied tile-cache cap (the settings write path).
+/// The default constant lives here too, so the rule and its bounds share an
+/// owner; callers pass overrides through before persisting them.
+pub fn validate_tile_cache_cap(bytes: i64) -> Result<()> {
+    if bytes < TILE_CACHE_MIN_BYTES {
+        return Err(crate::error::GeoError::Invalid("cache_cap_too_small"));
+    }
+    Ok(())
+}
 
 fn migrations() -> Migrations<'static> {
     Migrations::new(vec![M::up(include_str!(
@@ -103,6 +120,18 @@ pub fn enforce_tile_cache_cap(conn: &Connection, max_bytes: i64) -> Result<usize
     Ok(evicted)
 }
 
+/// Drop every cached tile and reclaim the file space. Returns the number of
+/// deleted rows. Same scope rule as the cap: `resource` rows (styles, glyphs,
+/// SIGPAC lookup/zone responses) survive — clearing tiles frees the bulk of
+/// the disk without breaking a verified plot's offline verifiability.
+pub fn clear_tile_cache(conn: &Connection) -> Result<usize> {
+    let deleted = conn.execute("DELETE FROM tile", [])?;
+    if deleted > 0 {
+        conn.execute_batch("VACUUM")?;
+    }
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -138,6 +167,44 @@ mod tests {
 
         // Under the cap: a no-op.
         assert_eq!(enforce_tile_cache_cap(&conn, 250).unwrap(), 0);
+    }
+
+    #[test]
+    fn clear_tile_cache_empties_tiles_and_keeps_resources() {
+        let conn = open_cache_in_memory().unwrap();
+        seed_tile(&conn, "pnoa", 10, 100, "2026-07-01T00:00:00Z");
+        seed_tile(&conn, "pnoa", 11, 100, "2026-07-05T00:00:00Z");
+        conn.execute(
+            "INSERT INTO resource (key, data, content_type, fetched_at)
+             VALUES ('sigpac/campaigns', x'FF', 'application/json', '2026-07-11T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+
+        assert_eq!(clear_tile_cache(&conn).unwrap(), 2);
+        let tiles: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tile", [], |r| r.get(0))
+            .unwrap();
+        let resources: i64 = conn
+            .query_row("SELECT COUNT(*) FROM resource", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tiles, 0);
+        assert_eq!(resources, 1, "resource rows must survive a tile clear");
+
+        // Idempotent on an already-empty cache.
+        assert_eq!(clear_tile_cache(&conn).unwrap(), 0);
+    }
+
+    #[test]
+    fn cache_cap_validation_floors_at_the_minimum() {
+        assert!(validate_tile_cache_cap(TILE_CACHE_MIN_BYTES).is_ok());
+        assert!(validate_tile_cache_cap(TILE_CACHE_MAX_BYTES).is_ok());
+        assert!(matches!(
+            validate_tile_cache_cap(TILE_CACHE_MIN_BYTES - 1),
+            Err(crate::error::GeoError::Invalid("cache_cap_too_small"))
+        ));
+        assert!(validate_tile_cache_cap(0).is_err());
+        assert!(validate_tile_cache_cap(-1).is_err());
     }
 
     #[test]

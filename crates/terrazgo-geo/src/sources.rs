@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Base-map and overlay source registry — data, not code (the `nav.js`
@@ -108,6 +109,68 @@ pub const TILE_SOURCES: &[TileSource] = &[
         campaign_keyed: true,
         empty_on_404: true,
     },
+    // Declared-crop lines (líneas de declaración gráfica), same Nube de SIGPAC
+    // MVT service (source-layer "cultivo_declarado", inspected 2026-07-12).
+    // Service quirk: the fixed path serves the PREVIOUS campaign's
+    // declarations (the running campaign's are still open per the service
+    // doc) — the UI label says so. Campaign-keyed all the same: what the
+    // fixed URL serves still changes at the campaign rollover.
+    TileSource {
+        id: "sigpac-cultivo-declarado",
+        url_template: Some(
+            "https://sigpac-hubcloud.es/mvt/cultivo_declarado@3857@pbf/{z}/{x}/{y}.pbf",
+        ),
+        tilejson_url: None,
+        content_type: "application/x-protobuf",
+        min_zoom: 12,
+        max_zoom: 15,
+        attribution: "SIGPAC © FEGA (CC BY 4.0)",
+        campaign_keyed: true,
+        empty_on_404: true,
+    },
+    // Landscape elements (PAC conditionality protected features) — three
+    // geometry types, three service layers (source-layers named like the
+    // path, inspected 2026-07-12: live tiles at 12/1972/1548), one frontend
+    // toggle. Sparse data: most tiles answer 404-empty.
+    TileSource {
+        id: "sigpac-paisaje-area",
+        url_template: Some(
+            "https://sigpac-hubcloud.es/mvt/e_paisaje_area@3857@pbf/{z}/{x}/{y}.pbf",
+        ),
+        tilejson_url: None,
+        content_type: "application/x-protobuf",
+        min_zoom: 12,
+        max_zoom: 15,
+        attribution: "SIGPAC © FEGA (CC BY 4.0)",
+        campaign_keyed: true,
+        empty_on_404: true,
+    },
+    TileSource {
+        id: "sigpac-paisaje-linea",
+        url_template: Some(
+            "https://sigpac-hubcloud.es/mvt/e_paisaje_linea@3857@pbf/{z}/{x}/{y}.pbf",
+        ),
+        tilejson_url: None,
+        content_type: "application/x-protobuf",
+        min_zoom: 12,
+        max_zoom: 15,
+        attribution: "SIGPAC © FEGA (CC BY 4.0)",
+        campaign_keyed: true,
+        empty_on_404: true,
+    },
+    TileSource {
+        id: "sigpac-paisaje-punto",
+        url_template: Some(
+            "https://sigpac-hubcloud.es/mvt/e_paisaje_punto@3857@pbf/{z}/{x}/{y}.pbf",
+        ),
+        tilejson_url: None,
+        content_type: "application/x-protobuf",
+        min_zoom: 12,
+        max_zoom: 15,
+        attribution: "SIGPAC © FEGA (CC BY 4.0)",
+        campaign_keyed: true,
+        empty_on_404: true,
+    },
 ];
 
 pub const RESOURCE_BASES: &[ResourceBase] = &[
@@ -134,4 +197,46 @@ pub fn tile_source(id: &str) -> Option<&'static TileSource> {
 
 pub fn resource_base(prefix: &str) -> Option<&'static ResourceBase> {
     RESOURCE_BASES.iter().find(|r| r.prefix == prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tile_source_ids_are_unique() {
+        for (i, a) in TILE_SOURCES.iter().enumerate() {
+            assert!(
+                !TILE_SOURCES.iter().skip(i + 1).any(|b| b.id == a.id),
+                "duplicate tile source id {}",
+                a.id
+            );
+        }
+    }
+
+    /// Every Nube de SIGPAC MVT source shares one live-service contract
+    /// (inspected 2026-07-11/12): pbf z12–15, current-campaign fixed URL
+    /// (→ campaign-keyed cache rows), empty tiles answered as HTTP 404
+    /// (→ cached as empty payloads), CC BY 4.0 attribution.
+    #[test]
+    fn sigpac_mvt_sources_share_the_service_contract() {
+        let sigpac: Vec<_> = TILE_SOURCES
+            .iter()
+            .filter(|s| s.id.starts_with("sigpac-"))
+            .collect();
+        assert_eq!(sigpac.len(), 5, "recintos + cultivo declarado + 3 paisaje");
+        for s in sigpac {
+            assert!(s.campaign_keyed, "{} must be campaign-keyed", s.id);
+            assert!(s.empty_on_404, "{} must treat 404 as empty", s.id);
+            assert_eq!(s.content_type, "application/x-protobuf", "{}", s.id);
+            assert_eq!((s.min_zoom, s.max_zoom), (12, 15), "{}", s.id);
+            assert!(s.attribution.contains("CC BY 4.0"), "{}", s.id);
+            let url = s.url_template.expect("sigpac sources use fixed templates");
+            assert!(
+                url.starts_with("https://sigpac-hubcloud.es/mvt/") && url.contains("@3857@pbf"),
+                "{}: unexpected URL shape {url}",
+                s.id
+            );
+        }
+    }
 }

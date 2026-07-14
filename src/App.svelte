@@ -1,10 +1,11 @@
+<!-- SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script>
   // App shell: responsive navigation (sidebar on wide screens, bottom tab bar
-  // on narrow ones — both rendered from lib/nav.js), hash router, language
-  // selector, notification bell.
-  import { locale, locales, nativeName, onLocaleChange, setLocale, t } from "./i18n.js";
+  // on narrow ones — both rendered from lib/nav.js), hash router, notification
+  // bell. The language selector lives in the Settings view.
+  import { onLocaleChange, t } from "./i18n.js";
   import FarmsView from "./lib/FarmsView.svelte";
   import FarmView from "./lib/FarmView.svelte";
   import MapView from "./lib/MapView.svelte";
@@ -12,6 +13,7 @@
   import NotificationBell from "./lib/NotificationBell.svelte";
   import { clearAll } from "./lib/notifications.svelte.js";
   import RegistryView from "./lib/RegistryView.svelte";
+  import SettingsView from "./lib/SettingsView.svelte";
   import StatusView from "./lib/StatusView.svelte";
   import TreatmentsView from "./lib/TreatmentsView.svelte";
 
@@ -44,24 +46,7 @@
     clearAll();
     localeVersion += 1;
   });
-
-  // setLocale is async (it may lazy-load a dictionary); a rejection means a
-  // locale file is missing from the bundle — log it, keep the previous language.
-  function switchLocale(event) {
-    setLocale(event.target.value).catch((err) => {
-      console.error(err);
-      event.target.value = locale();
-    });
-  }
 </script>
-
-{#snippet langSelect(ariaLabel)}
-  <select class="lang-select" aria-label={ariaLabel} onchange={switchLocale}>
-    {#each locales() as code (code)}
-      <option value={code} selected={code === locale()}>{nativeName(code)}</option>
-    {/each}
-  </select>
-{/snippet}
 
 {#key localeVersion}
   <div class="app-shell">
@@ -70,7 +55,6 @@
       <h1>Terrazgo</h1>
       <div class="topbar-tools">
         <NotificationBell />
-        {@render langSelect(t("lang.label"))}
       </div>
     </header>
 
@@ -82,14 +66,18 @@
       </div>
       <nav aria-label={t("nav.aria")}>
         {#each NAV_ITEMS as item (item.route)}
-          <a href={item.route} class:active={active === item.route} title={t(item.labelKey)}>
+          <a
+            href={item.route}
+            class:active={active === item.route}
+            class:nav-foot={item.foot}
+            title={t(item.labelKey)}
+          >
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d={item.icon} /></svg>
             <span class="nav-label">{t(item.labelKey)}</span>
           </a>
         {/each}
       </nav>
       <div class="sidebar-foot">
-        {@render langSelect(t("lang.label"))}
         <button
           type="button"
           class="sidebar-toggle"
@@ -123,6 +111,8 @@
         <TreatmentsView />
       {:else if hash === "#/registry"}
         <RegistryView />
+      {:else if hash === "#/settings"}
+        <SettingsView />
       {:else}
         <StatusView />
       {/if}

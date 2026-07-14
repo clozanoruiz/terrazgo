@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Tauri commands: thin wrappers over the `terrazgo_core` and `module_cue`
@@ -9,7 +10,7 @@ use module_cue::alerts::AlertConfig;
 use module_cue::demo::DemoSeedSummary;
 use module_cue::models::{
     ActiveSubstance, Alert, NewProduct, NewProductAuthorisation, NewTreatmentPlot,
-    NewTreatmentRecord, Product, ProductActiveSubstance, ProductAuthorisation,
+    NewTreatmentRecord, PlotPhiStatus, Product, ProductActiveSubstance, ProductAuthorisation,
     ProductAuthorisationFields, ProductDetail, TreatmentRecord, TreatmentRecordWithPlots,
     UpdateProduct,
 };
@@ -26,6 +27,8 @@ use terrazgo_core::models::{
     PlotDetail, Season, UpdateFarm, UpdateMachinery, UpdateOperator, UpdatePlot, ZoneFlag,
 };
 use terrazgo_core::repository as core_repo;
+
+use terrazgo_core::settings::AppSettings;
 
 use crate::state;
 use crate::state::AppState;
@@ -87,9 +90,11 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
                 json!({ "plot_id": plot_id, "farm_id": farm_id }),
             ),
             CueError::MissingPhiDays => ("missing_phi_days".into(), json!({})),
-            CueError::Sqlite(_) | CueError::Migration(_) | CueError::Json(_) | CueError::Io(_) => {
-                ("internal".into(), json!({}))
-            }
+            CueError::Sqlite(_)
+            | CueError::Migration(_)
+            | CueError::Json(_)
+            | CueError::Io(_)
+            | CueError::Catalogue(_) => ("internal".into(), json!({})),
         };
     }
 
@@ -102,7 +107,8 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
             CoreError::Sqlite(_)
             | CoreError::Migration(_)
             | CoreError::Json(_)
-            | CoreError::Io(_) => ("internal".into(), json!({})),
+            | CoreError::Io(_)
+            | CoreError::Catalogue(_) => ("internal".into(), json!({})),
         };
     }
 
@@ -120,9 +126,11 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
             // firewalled or proxied machine is online for the browser and
             // unreachable for us, and the reason string is the only evidence.
             GeoError::Offline(reason) => ("geo_offline".into(), json!({ "reason": reason })),
-            GeoError::Cache(_) | GeoError::Migration(_) | GeoError::Json(_) | GeoError::Io(_) => {
-                ("internal".into(), json!({}))
-            }
+            GeoError::Cache(_)
+            | GeoError::Migration(_)
+            | GeoError::Json(_)
+            | GeoError::Io(_)
+            | GeoError::Catalogue(_) => ("internal".into(), json!({})),
         };
     }
 
@@ -149,6 +157,13 @@ fn lock_conn<'a>(state: &'a State<'_, AppState>) -> CmdResult<MutexGuard<'a, Con
         .conn
         .lock()
         .map_err(|_| CommandError(anyhow!("database connection mutex is poisoned")))
+}
+
+/// Same poisoned-mutex reasoning as [`lock_conn`], for the geo cache.
+fn lock_geo<'a>(geo: &'a State<'_, state::GeoState>) -> CmdResult<MutexGuard<'a, Connection>> {
+    geo.conn
+        .lock()
+        .map_err(|_| CommandError(anyhow!("geo cache mutex is poisoned")))
 }
 
 #[derive(Serialize)]
@@ -201,6 +216,83 @@ pub fn get_treatment_record(
 ) -> CmdResult<TreatmentRecordWithPlots> {
     let conn = lock_conn(&state)?;
     Ok(repository::get_treatment_record(&conn, &id)?)
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+/// Settings plus the code-owned defaults the UI needs to render "unset"
+/// meaningfully: an unset cache cap displays the default value, not a blank,
+/// and the frontend must not hardcode a copy of the constant.
+#[derive(Serialize)]
+pub struct SettingsInfo {
+    pub settings: AppSettings,
+    pub tile_cache_default_bytes: i64,
+}
+
+fn settings_info(settings: AppSettings) -> SettingsInfo {
+    SettingsInfo {
+        settings,
+        tile_cache_default_bytes: terrazgo_geo::db::TILE_CACHE_MAX_BYTES,
+    }
+}
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, state::SettingsState>) -> CmdResult<SettingsInfo> {
+    let guard = state
+        .settings
+        .lock()
+        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?;
+    Ok(settings_info(guard.clone()))
+}
+
+/// Replace the settings wholesale — the Settings form is the source of truth,
+/// like the farm/plot full-row updates. Validation belongs to each setting's
+/// owning crate (the cache cap is range-checked by terrazgo-geo); the file is
+/// written before the in-memory copy so a failed save never leaves them
+/// disagreeing. The new cap is enforced immediately: shrinking the cache must
+/// visibly act, not wait for the next launch.
+///
+/// `async` because that enforcement can VACUUM a multi-hundred-MB file
+/// (seconds); the body stays synchronous — no `.await`, so holding the state
+/// guards is safe.
+#[tauri::command]
+pub async fn update_settings(
+    state: State<'_, state::SettingsState>,
+    geo: State<'_, state::GeoState>,
+    settings: AppSettings,
+) -> CmdResult<SettingsInfo> {
+    if let Some(bytes) = settings.tile_cache_max_bytes {
+        terrazgo_geo::db::validate_tile_cache_cap(bytes)?;
+    }
+
+    terrazgo_core::settings::save_settings(&state.path, &settings)?;
+    {
+        let mut guard = state
+            .settings
+            .lock()
+            .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?;
+        *guard = settings.clone();
+    }
+
+    let cap = settings
+        .tile_cache_max_bytes
+        .unwrap_or(terrazgo_geo::db::TILE_CACHE_MAX_BYTES);
+    let conn = lock_geo(&geo)?;
+    terrazgo_geo::db::enforce_tile_cache_cap(&conn, cap)?;
+
+    Ok(settings_info(settings))
+}
+
+/// Empty the tile cache, keeping `resource` rows (styles, glyphs, SIGPAC
+/// lookup/zone responses — a verified plot stays verifiable offline). Returns
+/// the number of tiles dropped, for the notification. `async` for the VACUUM,
+/// same reasoning as `update_settings`.
+#[tauri::command]
+pub async fn clear_tile_cache(geo: State<'_, state::GeoState>) -> CmdResult<usize> {
+    let conn = lock_geo(&geo)?;
+    Ok(terrazgo_geo::db::clear_tile_cache(&conn)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -838,6 +930,21 @@ pub async fn sigpac_verify_plot(
 pub fn list_zone_flags(state: State<'_, AppState>, farm_id: String) -> CmdResult<Vec<ZoneFlag>> {
     let conn = lock_conn(&state)?;
     Ok(core_repo::list_zone_flags_for_farm(&conn, &farm_id)?)
+}
+
+/// Per-plot PHI standing (in window / harvest allowed) of a farm's plots
+/// against today — feeds the map's PHI overlay.
+#[tauri::command]
+pub fn list_phi_status(
+    state: State<'_, AppState>,
+    farm_id: String,
+) -> CmdResult<Vec<PlotPhiStatus>> {
+    let conn = lock_conn(&state)?;
+    Ok(repository::phi_status_for_farm(
+        &conn,
+        &farm_id,
+        &today_utc(),
+    )?)
 }
 
 /// Dev-only: seed the demo campaign so the UI has something to show.

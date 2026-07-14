@@ -1,13 +1,16 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Treatment record CRUD — the central regulatory entity.
 
 use super::audit::{log_insert, write_change};
 use super::no_rows_to_not_found;
+use crate::alerts::phi_window_is_active;
 use crate::date::{add_days, now_utc_iso};
 use crate::error::{CueError, Result};
 use crate::models::{
-    NewTreatmentPlot, NewTreatmentRecord, TreatmentPlot, TreatmentRecord, TreatmentRecordWithPlots,
+    NewTreatmentPlot, NewTreatmentRecord, PlotPhiStatus, TreatmentPlot, TreatmentRecord,
+    TreatmentRecordWithPlots,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
@@ -253,6 +256,58 @@ fn plots_of(conn: &Connection, treatment_record_id: &str) -> Result<Vec<Treatmen
         .query_map([treatment_record_id], map_treatment_plot)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(plots)
+}
+
+/// Per-plot PHI standing across one farm's active treatment records, every
+/// season included — the PHI binds the plot physically, not the campaign the
+/// record was filed under. Plots with no active treatments (or soft-deleted
+/// plots) are absent. Window rule per `alerts::phi_window_is_active`:
+/// `[application_date, phi_end_date)`, the end date being the first day
+/// harvest is allowed again.
+pub fn phi_status_for_farm(
+    conn: &Connection,
+    farm_id: &str,
+    today: &str,
+) -> Result<Vec<PlotPhiStatus>> {
+    let mut stmt = conn.prepare(
+        "SELECT tp.plot_id, tr.application_date, tr.phi_end_date
+         FROM treatment_plot tp
+         JOIN treatment_record tr ON tr.id = tp.treatment_record_id
+         WHERE tr.farm_id = ?1 AND tr.deleted_at IS NULL
+           AND tp.plot_id IN (SELECT id FROM plot WHERE deleted_at IS NULL)
+         ORDER BY tp.plot_id",
+    )?;
+    let windows = stmt
+        .query_map([farm_id], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+
+    // Rows arrive grouped by plot; fold each plot's windows into one status,
+    // keeping the latest end date among the windows that contain today.
+    let mut statuses: Vec<PlotPhiStatus> = Vec::new();
+    for (plot_id, application_date, phi_end_date) in windows {
+        let active = phi_window_is_active(&application_date, &phi_end_date, today)?;
+        if statuses.last().map(|s| s.plot_id.as_str()) != Some(plot_id.as_str()) {
+            statuses.push(PlotPhiStatus {
+                plot_id,
+                in_phi: false,
+                phi_until: None,
+            });
+        }
+        if active
+            && let Some(status) = statuses.last_mut()
+            && status.phi_until.as_deref() < Some(phi_end_date.as_str())
+        {
+            status.in_phi = true;
+            status.phi_until = Some(phi_end_date);
+        }
+    }
+    Ok(statuses)
 }
 
 /// Soft-delete a regulatory record (official records are never hard-deleted).

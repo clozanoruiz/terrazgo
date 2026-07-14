@@ -121,8 +121,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release download "$GITHUB_REF_NAME" --dir assets
 
+      # actions/attest-sbom is deprecated; actions/attest detects SBOM mode
+      # from sbom-path and emits the same CycloneDX attestation.
       - name: Attest the SBOM against the installers
-        uses: actions/attest-sbom@v4
+        uses: actions/attest@v4
         with:
           subject-path: assets/*
           sbom-path: terrazgo-${{ github.ref_name }}.cdx.json

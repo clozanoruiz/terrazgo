@@ -106,7 +106,7 @@ survives a future framework swap untouched — only views would be rewritten.
   `.view-head`, `.form-grid`, `.form-actions`, `.card-list`/`.card`(+`.stack`),
   `fieldset.es-only` (country-conditional sections), `fieldset.subsection`,
   `.btn-danger`/`.btn-cancel`. App-shell classes (`.sidebar`, `.topbar`,
-  `.tabbar`, `.lang-select`, `.main-head`, `.bell*`/`.notif*`) belong to
+  `.tabbar`, `.main-head`, `.bell*`/`.notif*`) belong to
   `App.svelte`/`NotificationBell.svelte` — views never use them.
 - Icons are inline SVG path data (24×24 Feather outlines, MIT), stroked with
   `currentColor` — no icon font, no image files (CSP: `default-src 'self'`).

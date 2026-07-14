@@ -1,3 +1,4 @@
+<!-- SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script>
@@ -8,7 +9,7 @@
   import { t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import MapCanvas from "./MapCanvas.svelte";
-  import { MAP_LAYERS } from "./mapLayers.js";
+  import { MAP_LAYERS, mapPalette } from "./mapLayers.js";
   import { notify, run } from "./notifications.svelte.js";
 
   const params = new URLSearchParams((location.hash.split("?")[1] ?? "").replace(/\?/g, "&"));
@@ -17,7 +18,21 @@
   let plots = $state([]);
   let farmId = $state(params.get("farm"));
   let selectedPlotId = $state(params.get("plot"));
-  let visibleLayers = $state(MAP_LAYERS.map((l) => l.id));
+  let visibleLayers = $state(MAP_LAYERS.filter((l) => l.defaultVisible !== false).map((l) => l.id));
+  let mapZoom = $state(null);
+  const palette = mapPalette();
+  const visibleLegends = $derived(
+    MAP_LAYERS.filter((l) => l.legend && visibleLayers.includes(l.id)),
+  );
+  // Tile overlays draw nothing below their service's minimum zoom — warn
+  // instead of leaving an on-toggle that silently shows nothing.
+  const belowZoomLayers = $derived(
+    mapZoom === null
+      ? []
+      : MAP_LAYERS.filter(
+          (l) => l.minZoom != null && visibleLayers.includes(l.id) && mapZoom < l.minZoom,
+        ).map((l) => t(l.labelKey)),
+  );
   let drawing = $state(false);
   // SIGPAC point lookup (Door B): pick a point, then create or attach.
   let picking = $state(false);
@@ -25,6 +40,9 @@
   let refreshToken = $state(0);
   // Boundary rows of the selected plot, derived from the map's loaded data.
   let plotFeatures = $state({});
+  // Point-inspect result: what the visible overlays render where the user
+  // clicked (null = nothing there / no click yet).
+  let inspectGroups = $state(null);
 
   // Import picker state (a file has been read, the user picks a feature).
   let importPath = $state(null);
@@ -87,6 +105,10 @@
 
   function onLayerData(layerId, data) {
     plotFeatures = { ...plotFeatures, [layerId]: data };
+  }
+
+  function onInspect(groups) {
+    inspectGroups = groups.length > 0 ? groups : null;
   }
 
   function toggleLayer(layerId) {
@@ -324,6 +346,25 @@
     </div>
   </div>
 
+  {#if visibleLegends.length > 0}
+    <div class="map-legend">
+      {#each visibleLegends as layer (layer.id)}
+        {#each layer.legend as item (item.labelKey)}
+          <span class="legend-item">
+            <span class="legend-swatch" style="background: {palette[item.colorKey]}"></span>
+            {t(item.labelKey)}
+          </span>
+        {/each}
+      {/each}
+    </div>
+  {/if}
+
+  {#if belowZoomLayers.length > 0}
+    <p class="map-zoom-hint detail">
+      {t("map.zoom_hint", { layers: belowZoomLayers.join(" · ") })}
+    </p>
+  {/if}
+
   {#if farms.length === 0}
     <p>{t("map.no_farms")}</p>
   {:else}
@@ -339,11 +380,37 @@
           bind:picking
           {onDrawn}
           {onPick}
+          {onInspect}
+          onZoom={(z) => (mapZoom = z)}
           onData={onLayerData}
         />
       </div>
 
       <aside class="map-side">
+        {#if inspectGroups}
+          <div class="map-inspect">
+            <div class="map-inspect-head">
+              <h4>{t("map.inspect.title")}</h4>
+              <button type="button" class="btn-cancel" onclick={() => (inspectGroups = null)}>
+                ✕
+              </button>
+            </div>
+            {#each inspectGroups as group (group.layerId)}
+              <h5>{t(group.labelKey)}</h5>
+              {#each group.items as rows, i (i)}
+                <ul class="map-inspect-rows">
+                  {#each rows as row, j (j)}
+                    <li>
+                      {#if row.labelKey}<span class="detail">{t(row.labelKey)}:</span>{/if}
+                      {row.valueKey ? t(row.valueKey) : row.value}
+                    </li>
+                  {/each}
+                </ul>
+              {/each}
+            {/each}
+          </div>
+        {/if}
+
         <h3>{t("map.plots")}</h3>
         {#if plots.length === 0}
           <p class="detail">{t("plots.empty")}</p>
@@ -505,12 +572,32 @@
   }
   .map-layer-toggles {
     display: flex;
-    gap: 0.9rem;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.9rem;
   }
   .map-layer-toggles label {
     display: flex;
     align-items: center;
     gap: 0.35rem;
+  }
+  .map-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+  .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .legend-swatch {
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 3px;
+    opacity: 0.7;
+    border: 1px solid var(--border);
   }
   .map-workspace {
     display: flex;
@@ -553,6 +640,39 @@
   .has-boundary {
     color: var(--primary);
     float: right;
+  }
+  .map-zoom-hint {
+    margin: 0;
+    font-size: 0.85rem;
+  }
+  .map-inspect {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel);
+    padding: 0.6rem 0.7rem;
+    margin-bottom: 0.9rem;
+    font-size: 0.9rem;
+  }
+  .map-inspect-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .map-inspect-head h4,
+  .map-inspect h5 {
+    margin: 0.3rem 0;
+  }
+  .map-inspect-head button {
+    padding: 0 0.4rem;
+  }
+  .map-inspect-rows {
+    list-style: none;
+    margin: 0 0 0.4rem;
+    padding: 0;
+  }
+  .map-inspect-rows + .map-inspect-rows {
+    border-top: 1px dashed var(--border);
+    padding-top: 0.4rem;
   }
   .map-plot-actions,
   .map-sigpac {

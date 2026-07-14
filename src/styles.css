@@ -2,15 +2,15 @@
   /* Palette — drawn from the app logo (greens, water blue, wheat gold).
      Re-theming
      the app means editing these variables, nothing else. */
-  --text: var(--text);
-  --muted: var(--muted);
+  --text: #1c261a; /* green-tinted near-black */
+  --muted: #5a6855; /* green-tinted gray — secondary text */
   --bg: #f7faf6;
   --panel: #edf3ea;
   --border: #d8e2d3;
   --primary: #007830; /* logo deep green — interactive elements, brand */
   --accent: #0078c0; /* logo water blue — hyperlinks */
   --warning: #c09030; /* logo wheat gold — alert accent */
-  --danger: var(--danger);
+  --danger: #c62828; /* semantic red — destructive actions, errors */
 
   font-family: system-ui, sans-serif;
   color: var(--text);
@@ -115,8 +115,16 @@ h1 {
 }
 
 .sidebar nav {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.25rem;
+  flex: 1;
+}
+
+/* App-level destinations (nav.js `foot: true`) sink to the sidebar's bottom,
+   visually separated from the farm workspaces above. */
+.sidebar nav a.nav-foot {
+  margin-top: auto;
 }
 
 .sidebar nav a {
@@ -167,8 +175,7 @@ h1 {
 }
 
 .sidebar.collapsed .brand,
-.sidebar.collapsed .nav-label,
-.sidebar.collapsed .lang-select {
+.sidebar.collapsed .nav-label {
   display: none;
 }
 
@@ -418,6 +425,9 @@ main {
 #status-strip dd {
   margin: 0;
   font-family: monospace;
+  /* The db path is one long unbreakable token — without this it forces
+     horizontal scroll on phone widths. */
+  overflow-wrap: anywhere;
 }
 
 #actions {
@@ -456,14 +466,6 @@ button.btn-danger:hover:enabled {
   color: #fff;
 }
 
-.lang-select {
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
-  background: #fff;
-  color: var(--text);
-}
-
 .view-head {
   display: flex;
   justify-content: space-between;
@@ -483,6 +485,7 @@ button.btn-danger:hover:enabled {
 .alert {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
   padding: 0.6rem 0.9rem;
   background: #fff;

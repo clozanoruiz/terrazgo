@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Repository tests (docs/architecture.md testing strategy #2): every public repository function is
@@ -1337,4 +1338,236 @@ fn list_formulation_types_returns_seeded_reference_data() {
             .iter()
             .all(|t| t.i18n_key.starts_with("formulation_type."))
     );
+}
+
+// --- PHI status per plot (map overlay; test-first) --------------------------
+//
+// The window rule is `[application_date, phi_end_date)` — phi_end_date is the
+// first day harvest is allowed again (RD 1311/2012 "plazo de seguridad"; same
+// convention as alerts::phi_window_is_active, whose tests pin the boundary
+// days). These tests pin the per-plot aggregation on top of that rule.
+
+fn add_status_plot(conn: &mut Connection, farm_id: &str, name: &str) -> String {
+    repo::insert_plot(
+        conn,
+        NewPlot {
+            farm_id: farm_id.into(),
+            name: name.into(),
+            area_ha: Some(2.0),
+            es: None,
+        },
+    )
+    .unwrap()
+    .id
+}
+
+/// One treatment on the given plots at an explicit date/PHI; returns the record.
+fn treat_on(
+    conn: &mut Connection,
+    fx: &Fixture,
+    plot_ids: &[&str],
+    application_date: &str,
+    phi_days: i64,
+) -> TreatmentRecord {
+    let mut new = sample_treatment(fx, None, Some(phi_days));
+    new.application_date = application_date.into();
+    let plots = plot_ids
+        .iter()
+        .map(|id| NewTreatmentPlot {
+            plot_id: (*id).into(),
+            crop_id: None,
+            surface_treated_ha: 1.0,
+        })
+        .collect();
+    repo::insert_treatment_record(conn, new, plots).unwrap()
+}
+
+fn status_of<'a>(rows: &'a [PlotPhiStatus], plot_id: &str) -> &'a PlotPhiStatus {
+    rows.iter()
+        .find(|r| r.plot_id == plot_id)
+        .expect("plot missing from PHI status")
+}
+
+#[test]
+fn phi_status_in_window_from_the_application_day() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
+    // PHI 21 applied 2026-05-01 → harvest allowed from 2026-05-22.
+    treat_on(&mut conn, &fx, &[&plot], "2026-05-01", 21);
+
+    for today in ["2026-05-01", "2026-05-10", "2026-05-21"] {
+        let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, today).unwrap();
+        let status = status_of(&rows, &plot);
+        assert!(status.in_phi, "must be in PHI on {today}");
+        assert_eq!(status.phi_until.as_deref(), Some("2026-05-22"));
+    }
+}
+
+#[test]
+fn phi_status_clear_on_the_end_date_itself() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
+    treat_on(&mut conn, &fx, &[&plot], "2026-05-01", 21);
+
+    // phi_end_date is the first day harvest is allowed → clear, but still
+    // listed: "treated and harvest allowed" is a state the map shows.
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-22").unwrap();
+    let status = status_of(&rows, &plot);
+    assert!(!status.in_phi);
+    assert_eq!(status.phi_until, None);
+}
+
+#[test]
+fn phi_status_takes_the_latest_end_among_live_windows() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
+    treat_on(&mut conn, &fx, &[&plot], "2026-05-01", 7); // ends 2026-05-08
+    treat_on(&mut conn, &fx, &[&plot], "2026-05-03", 21); // ends 2026-05-24
+
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-05").unwrap();
+    let status = status_of(&rows, &plot);
+    assert!(status.in_phi);
+    assert_eq!(status.phi_until.as_deref(), Some("2026-05-24"));
+
+    // After the shorter window lapses the longer one still rules.
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
+    assert_eq!(
+        status_of(&rows, &plot).phi_until.as_deref(),
+        Some("2026-05-24")
+    );
+}
+
+#[test]
+fn phi_status_ignores_windows_not_yet_started() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
+    // Planned/future-dated record: the window has not opened yet.
+    treat_on(&mut conn, &fx, &[&plot], "2026-06-01", 21);
+
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-20").unwrap();
+    let status = status_of(&rows, &plot);
+    assert!(!status.in_phi);
+    assert_eq!(status.phi_until, None);
+}
+
+#[test]
+fn phi_status_multi_plot_treatment_marks_every_treated_plot() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let a = add_status_plot(&mut conn, &fx.farm_id, "A");
+    let b = add_status_plot(&mut conn, &fx.farm_id, "B");
+    treat_on(&mut conn, &fx, &[&a, &b], "2026-05-01", 21);
+
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(status_of(&rows, &a).in_phi);
+    assert!(status_of(&rows, &b).in_phi);
+}
+
+#[test]
+fn phi_status_excludes_deleted_records_untreated_plots_and_other_farms() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let treated = add_status_plot(&mut conn, &fx.farm_id, "A");
+    let _untreated = add_status_plot(&mut conn, &fx.farm_id, "B");
+    let record = treat_on(&mut conn, &fx, &[&treated], "2026-05-01", 21);
+
+    // A second farm with its own in-window treatment must not leak in.
+    let other_farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Otra".into(),
+            owner_name: None,
+            country_code: "es".into(),
+            es: None,
+        },
+    )
+    .unwrap()
+    .id;
+    let other_plot = add_status_plot(&mut conn, &other_farm, "C");
+    let mut other = sample_treatment(&fx, None, Some(21));
+    other.farm_id = other_farm.clone();
+    repo::insert_treatment_record(
+        &mut conn,
+        other,
+        vec![NewTreatmentPlot {
+            plot_id: other_plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 1.0,
+        }],
+    )
+    .unwrap();
+
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "only the treated plot of this farm is listed"
+    );
+    assert_eq!(rows[0].plot_id, treated);
+
+    // Soft-deleting the only record removes the plot from the status list —
+    // deleted records carry no PHI restriction.
+    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
+    assert!(rows.is_empty());
+}
+
+#[test]
+fn phi_status_spans_seasons() {
+    // PHI is a physical restriction on the plot — a window opened by a record
+    // filed under another campaign still binds today.
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
+    let old_season = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            campaign_year: 2025,
+            label: "2025".into(),
+            starts_on: None,
+            ends_on: None,
+        },
+    )
+    .unwrap();
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.season_id = old_season.id;
+    new.application_date = "2026-05-01".into();
+    repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 1.0,
+        }],
+    )
+    .unwrap();
+
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
+    assert!(status_of(&rows, &plot).in_phi);
+}
+
+#[test]
+fn phi_status_excludes_deleted_plots() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
+    treat_on(&mut conn, &fx, &[&plot], "2026-05-01", 21);
+
+    terrazgo_core::repository::soft_delete_plot(&mut conn, &plot).unwrap();
+    let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
+    assert!(rows.is_empty(), "a deleted plot has no map presence");
 }

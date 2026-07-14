@@ -52,6 +52,7 @@ questions about it:
 | Category | Tables | PK | Synced? | Audited in `record_change`? | Soft delete? |
 |---|---|---|---|---|---|
 | **Reference / lookup** — ships with the app, seeded by migration | `country`, `production_system`, `licence_level`, `unit`, `reason_category`, `formulation_type`, `alert_type` | TEXT code | no (app-versioned) | no | no |
+| **Imported reference** — provider catalogue snapshot vendored in the binary, imported at startup | `catalogue`, `catalogue_code` | TEXT id / INTEGER | no (each device imports its own copy) | no | no — the provider retires codes by baja date; imports upsert and never delete |
 | **User data** — created on a device | `season`, `farm`, `plot`, `crop`, `operator`, `machinery`, `geo_feature`, `active_substance`, `product`, `product_active_substance`, `product_authorisation`, `treatment_record`, `treatment_plot` | UUIDv7 | yes (Stage 2+) | yes, full row images | on the regulatory ones (see below) |
 | **Regional extension** — attributes of a user-data row for one country | `farm_es_extension`, `plot_es_extension`, `machinery_es_extension` | parent's id | yes (as part of parent's domain) | yes (own entity) | no — hard-deleted when the form clears them (null after-image logged) |
 | **Derived / infrastructure** | `alert` (derived), `record_change` (infrastructure) | UUIDv7 | no / is the sync source | `alert`: never. `record_change`: is the log | no |
@@ -143,6 +144,22 @@ makes the reconciliation idempotent *by construction*. `subject_table` /
 `subject_id` are polymorphic — alerts point at treatments, operators or
 machinery without FKs. Excluded from audit and sync: every device
 re-derives its own.
+
+**`catalogue` / `catalogue_code`** — imported regulatory reference catalogues
+(added 2026-07-14; design history in docs/siex-export.md → "Storage design").
+Generic by design: `catalogue.source` tags the provider (`'siex'` — the FEGA
+Anexo VII catalogues the SIEX export codes against), and each code's remaining
+provider columns ride verbatim in `attrs` JSON (the `geo_feature` precedent —
+promote a catalogue to a typed table only when a real query needs its
+attributes). `terrazgo_core::catalogue::ensure_catalogues` runs at every
+startup: idempotent, **upsert-only** (a code referenced by an old record must
+keep resolving forever; retired codes carry `retired_on` and drop out of
+pickers, never out of the table). A code may repeat within a catalogue when a
+qualifying attribute distinguishes the rows (one row per ámbito / per SIGPAC
+uso). Deliberately **no FKs from user data to codes**: the code value is the
+regulatory payload, the catalogue row is display metadata, and a reimport must
+never cascade into user records. Labels are not snapshotted onto records —
+the code is what's legal; a renamed label should display its new text.
 
 **`record_change`** — append-only audit log *and* future sync delta source
 (one design, two obligations). Polymorphic (`entity_table`, `entity_id`),

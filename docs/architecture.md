@@ -28,7 +28,7 @@ even that is cache-through: with no network the app keeps working.
 │  commands.rs (thin wrappers + error boundary)          │
 │  geo_protocol.rs (geo:// handler) · registry.rs        │
 │  db.rs (composed migration runner)                     │
-│  state.rs (AppState + GeoState, connections in Mutex)  │
+│  state.rs (AppState, GeoState, SettingsState)          │
 └───────┬──────────────────┬──────────────────┬──────────┘
         │                  │                  │
 ┌───────▼──────────┐ ┌─────▼────────────┐ ┌───▼──────────────────┐
@@ -51,8 +51,9 @@ compiler, not discipline, prevents a core→module import:
 
 - `terrazgo-core` depends on **no module and never on the shell**. It owns
   the farm registry (land, calendar, people, machines), geometry storage
-  (`geo_feature`), the audit helpers, date utilities, the pure-parsing
-  GeoJSON validator and backup.
+  (`geo_feature`), the imported reference catalogues (`catalogue` +
+  vendored SIEX snapshot), the audit helpers, date utilities, the
+  pure-parsing GeoJSON validator, backup and the device-local settings file.
 - Modules depend on `terrazgo-core`. The CUE module owns the treatment
   domain: products, authorisations, treatment records, alerts.
 - `terrazgo-geo` depends on `terrazgo-core` only (for the GeoJSON validator
@@ -168,9 +169,12 @@ is the correct behaviour for "the database didn't open or migrate":
    `terrazgo.db` — WAL mode, `foreign_keys = ON`.
 2. Run `composed_migrations()` — core steps first, then each registered
    module's steps in registration order, one global `user_version`.
-3. `refresh_alerts(today)` — idempotent reconciliation, so the UI never
+3. `terrazgo_core::catalogue::ensure_catalogues` — imports/reconciles the
+   reference catalogues vendored in the binary (upsert-only; see "Reference
+   catalogues" below). After first run this is a handful of date probes.
+4. `refresh_alerts(today)` — idempotent reconciliation, so the UI never
    opens on stale alert state.
-4. Put `AppState { conn: Mutex<Connection>, db_path, schema_version }` into
+5. Put `AppState { conn: Mutex<Connection>, db_path, schema_version }` into
    Tauri managed state and register the commands.
 
 Why a `Mutex`? Tauri runs commands on a thread pool, and anything in managed
@@ -254,7 +258,34 @@ re-derives its own; logging them would pollute the sync delta source), and
 lead times (60 d licence / 30 d ITV) are config defaults, not regulatory
 values.
 
-## Backup and the road to sync
+## Reference catalogues: vendored, imported, upsert-only
+
+Regulatory exports must speak the provider's coded vocabulary — for Spain,
+the FEGA SIEX "Anexo VII" catalogues (efficacy, justification, crop and
+phytosanitary-problem codes, units, machinery types…). The 16
+treatment-relevant catalogue CSVs are vendored **inside the binary**
+(`crates/terrazgo-core/catalogues/`, a dated snapshot of FEGA's public
+catalogue API) and `terrazgo_core::catalogue::ensure_catalogues` imports
+them at startup into `catalogue` + `catalogue_code` (added 2026-07-14;
+design history in docs/siex-export.md → "Storage design"). Offline-first:
+codes resolve from first run, no network — refreshing the snapshot is a
+release-ritual step, and an in-app refresh through terrazgo-geo's fetch is a
+possible later addition (same parser, same upsert).
+
+The importer is idempotent (a per-catalogue lifecycle-date fast path makes
+the steady-state startup cost a handful of probes) and **upsert-only**: the
+provider retires codes by baja date instead of deleting them, and so do we —
+a code referenced by a years-old treatment record must keep resolving at
+inspection time. Pickers offer `active_codes` (not retired); resolution uses
+`find_code` (any lifecycle state). The files are parsed with the `csv` crate
+(`;`-separated, RFC quoting) plus a hand-rolled decode, no encoding crate:
+UTF-8 accepted first (future-proofing — legacy accented text is never
+accidentally valid UTF-8), then Windows-1252 (what the files really are —
+they carry € at 0x80, despite being documented as ISO-8859-1; only the
+0x80–0x9F range differs from the 1:1 Latin-1 map). A control-character
+tripwire test turns any future encoding drift into a loud test failure at
+the snapshot refresh. Tests run against the real
+vendored FEGA files; the upsert-never-delete invariant has its own test.
 
 **Backup** (in `terrazgo_core::backup`): export is a `VACUUM INTO` snapshot
 — consistent and compact while the app runs, no WAL sidecars — which is then
@@ -276,6 +307,38 @@ UUIDv7 everywhere and full row images in `record_change` exist precisely so
 Stages 2–3 need no schema rework. The live db file itself must never be
 placed on a network drive or file-sync service — WAL breaks across network
 filesystems; sync travels through exported bundles only.
+
+## Device-local settings
+
+App settings live in `settings.json` beside the databases, not in either of
+them (`terrazgo_core::settings`, added 2026-07-11). The reasoning is the
+same lifecycle test that keeps `geo-cache.db` a separate file: settings are
+device-local preferences — no audit trail, no sync, and deliberately **not
+in backups** (a backup exists so regulatory records survive a lost device;
+it must not impose the old device's cache cap on a new one).
+
+The file is one flat serde struct. Defaults live in code: a missing file or
+field means "use the default" (`#[serde(default)]`), so adding a setting is
+adding a struct field — no migrations, and old and new versions read each
+other's files. Fields whose default is owned elsewhere are `Option` (`None`
+= follow the owner's constant, e.g. the tile-cache cap defaulting to
+`terrazgo_geo::db::TILE_CACHE_MAX_BYTES`), which keeps a future default
+change effective for users who never touched the knob. Writes are atomic
+(temp file + rename); an unreadable file falls back to defaults — settings
+are the one store where self-healing beats surfacing corruption. Validation
+belongs to each setting's owning crate (the cache cap range check lives in
+terrazgo-geo).
+
+Two deliberate exclusions: the display language stays in `localStorage`
+(the frontend must resolve it synchronously before first render, and the
+i18n layer stays backend-independent — revisit if settings ever roam), and
+**secrets never go in this file** (it is plain text; future credentials
+such as CDSE accounts need their own storage decision).
+
+In the UI, the Settings view hosts the language selector, the offline-map
+cache size (applied immediately — shrinking evicts on the spot), the
+clear-stored-maps action and the backup export/import moved from the Status
+view.
 
 **Conflicts are two different problems** (Stage-2 design notes, 2026-07-05
 — nothing here is built yet, but the strategy is decided):
@@ -340,6 +403,17 @@ rewritten in Rust (`terrazgo_geo::style`) so no external URL ever reaches
 the webview; responses carry `Access-Control-Allow-Origin` because the page
 origin is cross-origin to `geo://localhost` and MapLibre uses `fetch()`.
 
+Terrazgo-geo hosting the app's only HTTP client is deliberate today (one
+consumer: the map tier plus the SIGPAC lookups riding it) and has a
+pre-agreed evolution (2026-07-14): when a second in-app network consumer
+becomes real (catalogue refresh, weather, CDSE), the *generic* layer —
+agent construction with the platform-verifier TLS policy, timeouts, the
+offline/error diagnosis — extracts into its own small networking crate;
+the cache-through semantics, source registry and style rewriting stay
+geo. terrazgo-core never gains a network dependency: core having no HTTP
+crate in its tree is the structural enforcement of "no network calls in
+core or module code paths", not an accident.
+
 **Two databases, two natures.** Geometry a user attaches to a plot is *user
 data*: the core `geo_feature` table (exclusive-arc FKs, audit-logged,
 soft-deleted, synced, in backups). Tiles and styles are *derived and
@@ -359,10 +433,12 @@ least-recently-used tiles past `TILE_CACHE_MAX_BYTES` (512 MiB) and
 reclaims the space with `VACUUM`. Only tiles are capped: the `resource`
 table also holds the SIGPAC lookup and zone-check responses that keep a
 verified plot verifiable offline, and evicting those would silently break
-that promise for kilobytes of savings. The cap is a constant for now;
-promote it to a user setting when the settings module exists (and revisit
-the default at the mobile milestone, where device storage is the real
-constraint).
+that promise for kilobytes of savings. Since 2026-07-11 the cap is a user
+setting (Settings view; `tile_cache_max_bytes` in `settings.json`, unset =
+the `TILE_CACHE_MAX_BYTES` default, changes enforced immediately), and the
+same view offers clearing the tile cache outright — `resource` rows survive
+that too. Revisit the default at the mobile milestone, where device storage
+is the real constraint.
 
 **Layers as data.** `src/lib/mapLayers.js` mirrors the `nav.js` philosophy:
 a module contributes a map overlay by adding one entry — either a GeoJSON
@@ -439,6 +515,45 @@ campaign's rows; and tiles with no recintos answer HTTP 404, which the
 fetch layer caches and serves as an *empty* payload (a valid empty vector
 tile), so known-empty countryside costs no repeat requests and reads as
 empty — not as an error — offline.
+
+**The remaining Nube MVT overlays** (2026-07-12, phase 2 of
+[map-layers-roadmap.md](map-layers-roadmap.md)): declared-crop lines
+(`cultivo_declarado` — the service's fixed path serves the *previous*
+campaign, the label says so) and landscape elements. The latter spans three
+tile services (area/line/point) behind one toggle, which grew the
+`mapLayers.js` contract minimally: an entry may declare `vectors(base)` —
+several keyed source specs — instead of `vector(base)`, and style specs pick
+theirs with `sourceKey`. All four sources are ordinary campaign-keyed,
+empty-on-404 registry entries; a registry contract test pins the shared
+SIGPAC service shape (pbf, z12–15, CC BY 4.0, campaign-keyed, 404-as-empty).
+
+**Point inspect + zoom hints** (2026-07-12). Clicking the map lists what
+every *visible* overlay renders at that point in an "At this point" panel in
+the side column: entries opt in with `inspect(props)` (label/value rows the
+view translates), `MapCanvas` dedupes `queryRenderedFeatures` results per
+feature, and the recinto overlay gained an invisible fill so polygon
+interiors are hit-testable, not just their outlines. Tile overlays also
+declare `minZoom`, and the layer panel warns ("zoom in to see: …") while
+such a layer is toggled on below it — before this, an on-toggle below z12
+silently rendered nothing, which reads as a broken layer. Live-service
+quirk the panel corrects for: MVT attribute surfaces are **m²** while the
+REST lookups speak hectares (verified on the same recinto: 1152241 vs
+115.2241).
+
+**Own-data overlays** (2026-07-12, phase 1 of
+[map-layers-roadmap.md](map-layers-roadmap.md)): the app's own records as
+plot tints, no network involved. `phi-status` tints each treated plot by
+whether a PHI window contains today (red = harvest restricted, green =
+treated and clear), backed by `list_phi_status` → module-cue's
+`phi_status_for_farm` — derived on read from the treatment records (same
+`[application_date, phi_end_date)` rule as the alerts, tested against it),
+never stored. `zone-flags` tints plots by the stored zone checks (latest
+campaign's 'inside' per plot and zone kind — the chip rule), one translucent
+fill per zone kind so overlapping memberships blend. Both are plain GeoJSON
+`mapLayers.js` entries that join `list_geo_features` with their status
+command, one feature per plot (stacked boundary sources would double the
+tint). They start toggled off (`defaultVisible: false`) and declare a
+`legend` (color swatch + label pairs) the layer panel shows while visible.
 
 ## The frontend in one page
 

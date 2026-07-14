@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Shared app state, managed by Tauri and injected into commands.
@@ -32,4 +33,15 @@ pub struct AppState {
 /// (its documented performance contract).
 pub struct GeoState {
     pub conn: Mutex<Connection>,
+}
+
+/// Device-local app settings (`settings.json` in the app data dir), loaded
+/// once at startup. The mutex guards the in-memory copy commands read; the
+/// file is the durable one, and every change writes the file first (via
+/// `terrazgo_core::settings::save_settings`, atomic) and the copy second.
+/// Deliberately not in any database: different lifecycle from farm data —
+/// no audit trail, no sync, excluded from backups.
+pub struct SettingsState {
+    pub settings: Mutex<terrazgo_core::settings::AppSettings>,
+    pub path: PathBuf,
 }

@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Thin repository layer: CRUD for `TreatmentRecord` and the entities it depends on,
@@ -43,7 +44,7 @@ pub use terrazgo_core::repository::{
     list_crops, list_machinery, list_operators, list_seasons,
 };
 pub use treatment::{
-    get_treatment_record, insert_treatment_record, list_treatment_records,
+    get_treatment_record, insert_treatment_record, list_treatment_records, phi_status_for_farm,
     soft_delete_treatment_record,
 };
 

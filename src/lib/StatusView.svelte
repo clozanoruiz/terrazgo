@@ -1,9 +1,11 @@
+<!-- SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script>
   // Status view: app facts strip + active alerts wired to the CUE module.
+  // Backup export/import lives in the Settings view.
   import { formatDate, t, tCode } from "../i18n.js";
-  import { confirmDialog, invoke } from "./backend.js";
+  import { invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
   import Skeleton from "./Skeleton.svelte";
 
@@ -51,49 +53,6 @@
   function dismiss(alert) {
     run(async () => {
       await invoke("dismiss_alert", { alertId: alert.id });
-      await reloadAlerts();
-    });
-  }
-
-  function formatSize(bytes) {
-    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${Math.max(1, Math.round(bytes / 1024))} kB`;
-  }
-
-  // The dialog plugin is invoked directly (plugin:dialog|…) — same transport
-  // the official @tauri-apps/plugin-dialog JS wrapper uses, no npm package.
-  function exportBackup() {
-    run(async () => {
-      const stamp = new Date().toISOString().slice(0, 10);
-      const path = await invoke("plugin:dialog|save", {
-        options: {
-          defaultPath: `terrazgo-backup-${stamp}.db`,
-          filters: [{ name: "SQLite", extensions: ["db"] }],
-        },
-      });
-      if (!path) return;
-      const summary = await invoke("export_backup", { destPath: path });
-      notify(
-        t("message.backup_saved", { path: summary.path, size: formatSize(summary.size_bytes) }),
-      );
-    });
-  }
-
-  function importBackup() {
-    run(async () => {
-      const selection = await invoke("plugin:dialog|open", {
-        options: {
-          multiple: false,
-          directory: false,
-          filters: [{ name: "SQLite", extensions: ["db"] }],
-        },
-      });
-      const path = Array.isArray(selection) ? selection[0] : selection;
-      if (!path) return;
-      if (!(await confirmDialog(t("backup.import_confirm")))) return;
-      const summary = await invoke("import_backup", { srcPath: path });
-      notify(t("message.backup_imported", { path: summary.safety_backup_path }));
-      status = await invoke("get_status");
       await reloadAlerts();
     });
   }
@@ -154,10 +113,4 @@
       <p>{t("alerts.empty")}</p>
     {/if}
   {/if}
-
-  <h2>{t("backup.title")}</h2>
-  <div id="backup-actions" aria-label={t("backup.title")}>
-    <button type="button" onclick={exportBackup}>{t("actions.export_backup")}</button>
-    <button type="button" onclick={importBackup}>{t("actions.import_backup")}</button>
-  </div>
 </section>

@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Error type for the geo crate, mirroring the `CueError` conventions:
@@ -47,6 +48,11 @@ pub enum GeoError {
 
     #[error("invalid date '{0}' (expected YYYY-MM-DD)")]
     InvalidDate(String),
+
+    /// Mirrors `CoreError::Catalogue`; nothing in this crate raises it, the
+    /// variant only exists so the conversion below stays variant-preserving.
+    #[error("catalogue data error: {0}")]
+    Catalogue(String),
 }
 
 /// Variant-preserving: a core `NotFound` stays `NotFound`, a core
@@ -63,6 +69,7 @@ impl From<CoreError> for GeoError {
             CoreError::NotFound => GeoError::NotFound,
             CoreError::Invalid(code) => GeoError::Invalid(code),
             CoreError::InvalidDate(s) => GeoError::InvalidDate(s),
+            CoreError::Catalogue(s) => GeoError::Catalogue(s),
         }
     }
 }

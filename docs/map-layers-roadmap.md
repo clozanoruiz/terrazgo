@@ -71,25 +71,31 @@ keychain) is decided when that module is designed.
 Order is by infrastructure readiness — each phase reuses everything the
 previous one built. Within a phase, order is free.
 
-### Phase 1 — own data as overlays (no network, no new deps)
+### Phase 1 — own data as overlays (no network, no new deps) — SHIPPED 2026-07-12
 
 | Layer | Source | Notes |
 | --- | --- | --- |
-| Treatment / PHI status | module-cue via `invoke` | Plots tinted by "in PHI window / harvest allowed"; the highest farmer value per unit of effort on this list |
-| Zone-flag tint | core `plot_zone_flag` | Nitrate/phyto/Natura status as plot colouring (today: chips on cards only) |
+| Treatment / PHI status | `list_phi_status` → module-cue `phi_status_for_farm` | Plots tinted by "in PHI window / harvest allowed" (red/green); derived on read, same window rule as the alerts |
+| Zone-flag tint | `list_zone_flags` (core `plot_zone_flag`) | Latest campaign's 'inside' per (plot, zone kind) — the chip rule — one translucent fill per zone kind, overlaps blend |
 
-One `mapLayers.js` GeoJSON entry each. First candidates to force the layer
-panel to grow grouping.
+One `mapLayers.js` GeoJSON entry each, as predicted. What the panel grew was
+not grouping but two smaller contracts: `defaultVisible: false` (status tints
+start toggled off) and a per-layer `legend` shown while visible; grouping
+waits for a phase that actually overflows a flat list.
 
-### Phase 2 — the rest of the Nube de SIGPAC MVT service (same plumbing as the recinto overlay)
+### Phase 2 — the rest of the Nube de SIGPAC MVT service — SHIPPED 2026-07-12
 
 | Layer | Service layer | Notes |
 | --- | --- | --- |
-| Declared crops | `cultivo_declarado` | Product/surface/secano-regadío per declaration line; campaign-keyed like recintos |
-| Landscape elements | `e_paisaje_area`, `_linea`, `_punto` | PAC conditionality (protected features); three source-layers, probably one toggle |
+| Declared crops | `cultivo_declarado` | Dashed gold fill+line; campaign-keyed like recintos. **The fixed path serves the PREVIOUS campaign** (the running one's declarations are still open, per the service doc) — the layer label says so. The same dataset also ships as provincial GPKG downloads (current + previous campaign, CC BY 4.0) — the data path for the crop-prefill idea in [siex-export.md](siex-export.md) → "Farmer-side data paths"; the overlay here is only its display twin |
+| Landscape elements | `e_paisaje_area`, `_linea`, `_punto` | PAC conditionality (protected features); three tile services behind ONE toggle — the `mapLayers.js` contract grew `vectors()` (multi-source entry, style specs pick theirs via `sourceKey`). Sparse data: most tiles are 404-empty |
 
-CC BY 4.0, no auth, pbf z12–15. Pre-flight per layer: inspect a real tile's
-attribute keys and confirm the source-layer name.
+Pre-flight ran 2026-07-12 against live tiles: source-layer names equal the
+path names; attribute keys match the download-service models (declared crops:
+`parc_producto`, `parc_sistexp`, `parc_supcult`, `exp_ano`…; landscape:
+`tipo_elemento`); pbf z12–15; empty tiles answer 404 (cached as empty, the
+recinto rule). Live-verified end-to-end in the real app: all four sources
+stream through `geo://` with campaign-keyed cache rows.
 
 ### Phase 3 — public WMS overlays through grid snapping (needs decision 1 implemented once)
 
@@ -118,7 +124,8 @@ active.
   ever sees `geo://`.
 - Attribution visible while the layer is active (OpenFreeMap/PNOA/SIGPAC
   precedent).
-- A new overlay = one source-registry entry + one `mapLayers.js` entry;
+- A new overlay = one source-registry entry + one `mapLayers.js` entry +
+  one row in [map-data-sources.md](map-data-sources.md) (the inventory);
   anything that needs more than that is a design smell to stop on.
 - Dated/campaign products record their version in the cache key and the UI
   says how fresh the data is.

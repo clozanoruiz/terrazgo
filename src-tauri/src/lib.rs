@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Terrazgo shell: Tauri builder, startup wiring and command registration.
@@ -36,6 +37,10 @@ pub fn run() {
             let mut conn = db::open_app_db(&db_path)?;
             let schema_version = db::schema_version(&conn)?;
 
+            // Reference catalogues (vendored FEGA snapshot). Idempotent and
+            // upsert-only; after first run this is a handful of date probes.
+            terrazgo_core::catalogue::ensure_catalogues(&mut conn)?;
+
             // Idempotent reconciliation — over-calling is sanctioned by the
             // repository docs; a dismissal is never resurrected.
             module_cue::repository::refresh_alerts(
@@ -48,6 +53,19 @@ pub fn run() {
                 conn: Mutex::new(conn),
                 db_path,
                 schema_version,
+            });
+
+            // Device-local settings, a plain JSON file beside the databases.
+            // A missing or unreadable file just means defaults (tolerant
+            // read), so loading can never abort startup.
+            let settings_path = data_dir.join("settings.json");
+            let settings = terrazgo_core::settings::load_settings(&settings_path);
+            let tile_cache_cap = settings
+                .tile_cache_max_bytes
+                .unwrap_or(terrazgo_geo::db::TILE_CACHE_MAX_BYTES);
+            app.manage(state::SettingsState {
+                settings: Mutex::new(settings),
+                path: settings_path,
             });
 
             // The geo cache is a separate database with its own lifecycle:
@@ -69,10 +87,7 @@ pub fn run() {
                 let Ok(conn) = geo.conn.lock() else {
                     return;
                 };
-                match terrazgo_geo::db::enforce_tile_cache_cap(
-                    &conn,
-                    terrazgo_geo::db::TILE_CACHE_MAX_BYTES,
-                ) {
+                match terrazgo_geo::db::enforce_tile_cache_cap(&conn, tile_cache_cap) {
                     Ok(0) => {}
                     Ok(evicted) => eprintln!("geo-cache cap: evicted {evicted} tiles"),
                     Err(err) => eprintln!("geo-cache cap enforcement failed: {err}"),
@@ -82,6 +97,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_status,
+            commands::get_settings,
+            commands::update_settings,
+            commands::clear_tile_cache,
             commands::export_backup,
             commands::import_backup,
             commands::list_alerts,
@@ -142,6 +160,7 @@ pub fn run() {
             commands::sigpac_lookup_point,
             commands::sigpac_verify_plot,
             commands::list_zone_flags,
+            commands::list_phi_status,
         ])
         .run(tauri::generate_context!());
 

@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Error type for the core crate. `thiserror` keeps this a library-style error;
@@ -40,4 +41,10 @@ pub enum CoreError {
 
     #[error("invalid date '{0}' (expected YYYY-MM-DD)")]
     InvalidDate(String),
+
+    /// A vendored catalogue file failed to parse — a packaging defect, never
+    /// user input, so this is a plain message (maps to `internal` at the
+    /// command boundary), not an `Invalid` machine code.
+    #[error("catalogue data error: {0}")]
+    Catalogue(String),
 }

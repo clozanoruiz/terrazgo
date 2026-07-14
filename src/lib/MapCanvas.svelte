@@ -1,3 +1,4 @@
+<!-- SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz -->
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script>
@@ -31,6 +32,13 @@
     // next map click reports its coordinates and the mode flips back off.
     picking = $bindable(false),
     onPick = null,
+    // Point inspect: every plain click reports what the visible overlays
+    // render there — [{ layerId, labelKey, items: [rows…] }] (see the
+    // inspect() contract in mapLayers.js); [] when the point is empty.
+    onInspect = null,
+    // Reports the map zoom after every camera move (the layer panel warns
+    // when a visible tile overlay is below its minZoom).
+    onZoom = null,
     // Parent observes loaded layer data (e.g. the plot panel lists boundary
     // rows without a second backend call).
     onData = null,
@@ -93,7 +101,9 @@
         // Layer data may have loaded before the map existed (both are async);
         // fitToContext is lastFitKey-guarded, so this only fits once per farm.
         fitToContext(farmId);
+        onZoom?.(map.getZoom());
       });
+      map.on("moveend", () => onZoom?.(map.getZoom()));
       wireInteractions();
     })();
     return () => {
@@ -113,31 +123,46 @@
 
   // --- overlay layers ---------------------------------------------------------
 
-  function sourceId(layer) {
-    return `layer-${layer.id}`;
+  function sourceId(layer, key = "") {
+    return `layer-${layer.id}${key ? `-${key}` : ""}`;
+  }
+
+  // A vector entry declares one source (vector()) or several keyed ones
+  // (vectors(), e.g. the landscape elements' area/line/point services under
+  // one toggle); style specs pick theirs with sourceKey.
+  function vectorSpecs(layer) {
+    if (layer.vectors) return layer.vectors(geoBase());
+    if (layer.vector) return { "": layer.vector(geoBase()) };
+    return null;
+  }
+
+  // sourceKey is our extension, not MapLibre's — strip it before addLayer.
+  function addStyleSpec(layer, spec) {
+    const { sourceKey = "", ...rest } = spec;
+    map.addLayer({ ...rest, source: sourceId(layer, sourceKey) });
   }
 
   function applyOverlays() {
     if (!map) return;
     for (const layer of MAP_LAYERS) {
       if (!visibleLayers.includes(layer.id)) continue;
-      if (layer.vector) {
-        // Vector-tile overlay: the source spec is static (tiles stream from
+      const vectors = vectorSpecs(layer);
+      if (vectors) {
+        // Vector-tile overlay: the source specs are static (tiles stream from
         // the geo:// protocol on demand), so there is no data to (re)set.
-        if (!map.getSource(sourceId(layer))) {
-          map.addSource(sourceId(layer), layer.vector(geoBase()));
-          for (const spec of layer.styles(palette)) {
-            map.addLayer({ ...spec, source: sourceId(layer) });
-          }
+        // setStyle wipes sources and layers together, so the first source's
+        // presence implies the whole entry is intact.
+        const keys = Object.keys(vectors);
+        if (!map.getSource(sourceId(layer, keys[0]))) {
+          for (const key of keys) map.addSource(sourceId(layer, key), vectors[key]);
+          for (const spec of layer.styles(palette)) addStyleSpec(layer, spec);
         }
         continue;
       }
       const data = layerData[layer.id] ?? { type: "FeatureCollection", features: [] };
       if (!map.getSource(sourceId(layer))) {
         map.addSource(sourceId(layer), { type: "geojson", data });
-        for (const spec of layer.styles(palette)) {
-          map.addLayer({ ...spec, source: sourceId(layer) });
-        }
+        for (const spec of layer.styles(palette)) addStyleSpec(layer, spec);
       } else {
         map.getSource(sourceId(layer)).setData(data);
       }
@@ -243,9 +268,13 @@
 
   function wireInteractions() {
     map.on("click", (event) => {
-      if (!picking || drawing) return;
-      picking = false;
-      onPick?.({ lon: event.lngLat.lng, lat: event.lngLat.lat });
+      if (drawing) return;
+      if (picking) {
+        picking = false;
+        onPick?.({ lon: event.lngLat.lng, lat: event.lngLat.lat });
+        return;
+      }
+      reportInspect(event.point);
     });
     for (const layer of MAP_LAYERS) {
       if (!layer.selectable) continue;
@@ -268,6 +297,37 @@
   $effect(() => {
     if (map && styleReady) map.getCanvas().style.cursor = picking ? "crosshair" : "";
   });
+
+  /// What do the visible overlays render at this pixel? One group per layer
+  /// that answers, one row set per distinct feature (an MVT polygon comes
+  /// back once per style spec — fill and line — and tile borders can split
+  /// a feature, so dedupe on the properties).
+  function reportInspect(point) {
+    if (!onInspect || !styleReady) return;
+    const groups = [];
+    for (const layer of MAP_LAYERS) {
+      if (!layer.inspect || !visibleLayers.includes(layer.id)) continue;
+      const ids = layer
+        .styles(palette)
+        .map((spec) => spec.id)
+        .filter((id) => map.getLayer(id));
+      if (ids.length === 0) continue;
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity -- function-local dedupe, never reactive state
+      const seen = new Set();
+      const items = [];
+      for (const feature of map.queryRenderedFeatures(point, { layers: ids })) {
+        const key = JSON.stringify(feature.properties);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const rows = layer
+          .inspect(feature.properties)
+          .filter((row) => row.valueKey || (row.value !== null && row.value !== undefined));
+        if (rows.length > 0) items.push(rows);
+      }
+      if (items.length > 0) groups.push({ layerId: layer.id, labelKey: layer.labelKey, items });
+    }
+    onInspect(groups);
+  }
 
   // --- drawing (terra-draw) ------------------------------------------------------
 

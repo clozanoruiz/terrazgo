@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Rust structs mirroring the schema.
@@ -109,6 +110,18 @@ pub struct TreatmentPlot {
 pub struct TreatmentRecordWithPlots {
     pub record: TreatmentRecord,
     pub plots: Vec<TreatmentPlot>,
+}
+
+/// Per-plot PHI standing, derived on read for the map overlay: whether any
+/// active treatment's PHI window contains today, and until when. Never
+/// stored — recomputing from the records each time means it cannot drift.
+#[derive(Debug, Clone, Serialize)]
+pub struct PlotPhiStatus {
+    pub plot_id: String,
+    pub in_phi: bool,
+    /// Latest `phi_end_date` among the windows containing today — the first
+    /// day harvest is allowed again. `None` whenever `in_phi` is false.
+    pub phi_until: Option<String>,
 }
 
 /// Derived alert row, owned by `repository::refresh_alerts` (reconciliation). Serialize

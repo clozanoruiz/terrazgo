@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Terrazgo core crate: the entities and infrastructure shared by the shell and
@@ -12,19 +13,26 @@
 //!   * [`audit`]      — append-only `record_change` helpers, used by every crate
 //!     that writes synced user data.
 //!   * [`backup`]     — export a consistent snapshot / validate before import.
+//!   * [`catalogue`]  — imported reference catalogues (vendored FEGA SIEX
+//!     snapshot, upsert-only `ensure_catalogues` at startup).
 //!   * [`date`]       — timezone-safe date maths (`jiff`), shared app-wide.
+//!   * [`settings`]   — device-local app settings (`settings.json`): typed
+//!     struct, atomic write, tolerant read. Not in the database, not in
+//!     backups, no secrets.
 //!   * [`geojson`]    — pure-parsing GeoJSON boundary validation (no I/O), used
 //!     by the `geo_feature` write path and reused by `terrazgo-geo`'s importer.
 //!   * [`error`]      — `CoreError` / `Result`.
 
 pub mod audit;
 pub mod backup;
+pub mod catalogue;
 pub mod date;
 pub mod db;
 pub mod error;
 pub mod geojson;
 pub mod models;
 pub mod repository;
+pub mod settings;
 
 pub use db::{migration_set, migrations, open_in_memory};
 pub use error::{CoreError, Result};
