@@ -2,6 +2,7 @@
 members = [
     "crates/terrazgo-core",
     "crates/terrazgo-geo",
+    "crates/terrazgo-report",
     "crates/module-cue",
     "crates/module-sigpac",
     "src-tauri",
@@ -10,7 +11,7 @@ resolver = "3"
 
 # Shared package metadata; crates inherit with `<field>.workspace = true`.
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 # Floor set by rusqlite_migration 2.6; raise as dependencies demand.
 rust-version = "1.95"
@@ -41,6 +42,12 @@ anyhow = "1"
 # quoting with embedded ';' and newlines in their notes columns — real CSV,
 # not split-on-delimiter territory.
 csv = "1.3"
+# JSON-Schema validation for the SIEX export tests (module-cue dev-dependency
+# only — never in the shipped binary): the serializer's output is validated
+# against the vendored official CUE schema. Default features pull an HTTP
+# resolver (reqwest + rustls) for remote $refs; the vendored schema has none,
+# so they stay off.
+jsonschema = { version = "0.47", default-features = false }
 # Sync HTTP for terrazgo-geo's cache-through fetch (tiles, styles). Kept out of
 # core and modules — offline-first forbids network there. platform-verifier:
 # TLS trust comes from the OS certificate store (like a browser) instead of
@@ -51,6 +58,19 @@ ureq = { version = "3", features = ["platform-verifier"] }
 # deliberately NOT enabled: it pulls sqlx, and we read GeoPackage files (they
 # are SQLite) with the rusqlite we already have.
 geozero = { version = "0.15", default-features = false, features = ["with-wkb", "with-geojson"] }
+# In-app PDF generation (terrazgo-report): Typst as a library — a real layout
+# engine (automatic line/page breaking, repeating table headers) instead of
+# per-document coordinate code. 0.x APIs: the caret on a 0.x version already
+# locks the minor, so these only float patch releases. typst-as-lib is the
+# World wrapper; its network-capable features (packages/reqwest/ureq — Typst
+# Universe package downloads) are NOT default and stay off: templates and
+# fonts are embedded, rendering is fully offline.
+typst = "0.15"
+# Direct dep only to NAME the output type (typst_layout::PagedDocument, which
+# `typst` does not re-export); same version train, already in typst's tree.
+typst-layout = "0.15"
+typst-pdf = "0.15"
+typst-as-lib = "0.16"
 tauri = "2"
 tauri-build = "2"
 # Floor 2.7: that release removed the `confirm`/`ask` IPC commands (merged
@@ -58,6 +78,7 @@ tauri-build = "2"
 tauri-plugin-dialog = "2.7"
 terrazgo-core = { path = "crates/terrazgo-core" }
 terrazgo-geo = { path = "crates/terrazgo-geo" }
+terrazgo-report = { path = "crates/terrazgo-report" }
 module-cue = { path = "crates/module-cue" }
 # SIGPAC lookups go through terrazgo-geo's fetch — module-sigpac itself has
 # no HTTP dependency (the sanctioned-seam rule).

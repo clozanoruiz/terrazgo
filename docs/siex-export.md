@@ -1,7 +1,8 @@
 # SIEX-aligned export — design notes
 
-> Status: design (2026-07-04; re-diffed against schema v3.11.4 on 2026-07-14).
-> No code yet. The user-facing feature name is TBD
+> Status: design (2026-07-04; re-diffed against schema v3.11.4 on 2026-07-14);
+> capture schema built 2026-07-15, export module (`module_cue::export`) built
+> 2026-07-16 — see "Export module" below. The user-facing feature name is TBD
 > ("SIEX" is too technical for farmers). This document maps Terrazgo's treatment
 > domain onto the official CUE exchange format and lists what is missing.
 
@@ -15,6 +16,7 @@
 | Code catalogues (crops, units, problems, substances…) | FEGA Anexo VII — public REST API `https://www11.fega.es/bdcsixwsp/` (no auth; guide "BdcSixWsp" v4.5.0); the 16 treatment-relevant CSVs vendored in `crates/terrazgo-core/catalogues/` | stored 2026-07-14 — see "Storage design" |
 | REA ↔ CUE relationship, CyL onboarding | [CUECYL](https://agriculturaganaderia.jcyl.es/web/es/cuaderno-digital-explotacion-agricola.html) + [REACYL](https://agriculturaganaderia.jcyl.es/web/es/registro-explotaciones-agrarias-castilla.html) pages; [RD 1054/2022](https://www.boe.es/buscar/doc.php?id=BOE-A-2022-23054) | checked 2026-07-11 |
 | Farmer-side DGC outputs | [Instrucciones declaración DGC (Junta de CyL, PDF)](https://agriculturaganaderia.jcyl.es/web/jcyl/binarios/169/699/Instrucciones%20declaraci%C3%B3nDGC_ene-2025.pdf); [SIGPAC download service](https://sigpac-hubcloud.es/html/sdsigpac/descServicio.html) + [cultivos-declarados model](https://sigpac-hubcloud.es/html/sdsigpac/modelos/cultivos-declarados-SIGPAC.html) | checked 2026-07-12 |
+| Other public SIEX services (MDF, `existeNIF`) | Same BdcSixWsp API — see "Other public SIEX services" below | checked live 2026-07-15 |
 
 Transport recap: REST + JSON; auth =
 qualified legal-person certificate + JWT; `POST /IUWS/crear/` is asynchronous
@@ -127,27 +129,27 @@ be derived from anything else.
 
 | Descriptor field | Terrazgo source | Status |
 | --- | --- | --- |
-| `IdAjenaTratamFito` (integer) | — needs an integer alias per `treatment_record` | **gap 1** |
+| `IdAjenaTratamFito` (integer) | `export_alias` (minted at first export, keyed (treatment, split)) | ✓ (2026-07-15) |
 | `Borrar` (bool) | soft-deleted records that were previously exported | ok (derive) |
 | `FechaInicio` / `FechaFin` | `application_date` (both = same day) — 3.11.4 enforces `dd/mm/yyyy` (or `-`) via pattern; serializer converts from ISO | ✓ (format at export) |
 | `HoraTratamiento`, `FechaSeca`, `Actividad` | not captured (`Actividad` = cover maintenance/elimination, cubierta treatments only) | optional — omit |
-| `DGCs[].CodigoDGC` / `CodigoDGCAjena` | `treatment_plot` → plot+crop | **gap 2** |
-| `DGCs[].CodigoCultivo` (new 3.11.x) | crop of the DGC — "indicar junto con CodigoDGC" | with gap 2 |
+| `DGCs[].CodigoDGC` / `CodigoDGCAjena` | `CodigoDGCAjena` minted per core `crop` row (a crop IS the plot+crop+season unit) via `export_alias` | ✓ (2026-07-16) — REA `CodigoDGC` + `AltaDGC` generation stay **gap 2** |
+| `DGCs[].CodigoCultivo` (new 3.11.x) | crop of the DGC — "indicar junto con CodigoDGC"; needs PRODUCTOS coding | with gap 2 (omitted for now — optional in schema) |
 | `DGCs[].Superficie` | `treatment_plot.surface_treated_ha` | ✓ |
 | **Constraint (descriptor):** all DGCs in one `TratamFito` must share product+variety | `treatment_plot` allows different crops per plot (by design) | serializer **splits** a multi-crop treatment into one `TratamFito` per crop |
-| `ProblematicaFito.*.Tipo*[]` (codes) | `reason_category_code` + free-text `target_organism` | **gap 3 — now REQUIRED** (≥1 problem) |
-| `Justificaciones[].JustAct` (code) | not captured | **gap 3 — now REQUIRED** (1..n) |
-| `ProductosFito[].TipoProducto` (code) | not captured (product kind catalogue) | **gap 3** |
+| `ProblematicaFito.*.Tipo*[]` (codes) | `treatment_problem` junction: category + catalogue code, ≥1 per record | ✓ (2026-07-15; bucket = category) |
+| `Justificaciones[].JustAct` (code) | `treatment_justification` junction (≥1 per record), English lookup → SIEX int at export | ✓ (2026-07-15) |
+| `ProductosFito[].TipoProducto` (code) | `product_authorisation.kind_code` (default 'registered') → SIEX 1..4 | ✓ (2026-07-15) |
 | `ProductosFito[].NumRegistro` | `authorisation_number_snapshot` | ✓ |
-| `ProductosFito[].MateriaActiva` (code, number(5)) | 3.11.4 dropped the `MateriaActivaFormulado[]` wrapper; single code, **mandatory only for TipoProducto 4 "autorización excepcional"** — registered products are covered by `NumRegistro` | softened: omit unless exceptional authorisation (**gap 3** only for that case) |
-| `ProductosFito[].Dosis` / `Cantidad` / `Unidad` (code) | `dose_value` + `dose_unit_code`; Dosis XOR Cantidad ("nunca ambas") | code mapping (**gap 3**) |
+| `ProductosFito[].MateriaActiva` (code, number(5)) | `product_authorisation.exceptional_substance_code` (AUTORIZACION_EXCP code, required iff kind = 'exceptional') | ✓ (2026-07-15) — emitted only for TipoProducto 4 |
+| `ProductosFito[].Dosis` / `Cantidad` / `Unidad` (code) | `dose_value` + `dose_unit_code`; Dosis XOR Cantidad ("nunca ambas") — our rate units emit Dosis | ✓ — `siex::unit_to_siex` map (code + exact conversion factor), contract-tested |
 | **Constraint (descriptor):** ≥1 of `ProductosFito` / `OtrasActuacionesFito` | every treatment record has a product | ✓ |
 | `IdentificadorAplicador[].AplicadorEmpresa.NumROPO` | `operator_licence_snapshot` | ✓ |
 | `IdentificadorAplicador[].EquipoAplicador.NumROMA` / `NumREGANIP` / `IdEquipoAplicador` | `machinery_roma_snapshot` / `machinery_reganip_snapshot`; `IdEquipoAplicador` (string(50), free id) covers equipment not registrable in ROMA/REGANIP | ✓ — exactly one of the three ("nunca ambos"); serializer emits ROMA preferred |
 | `IdentificadorAplicador[].EquipoAplicador.AplicacionManual` (bool) | **REQUIRED in 3.11.4** — derive: true when no machinery on the record, false otherwise | ✓ (derive) |
 | `…EquipoAplicador.Duracion`/`NumRepeticiones`/`TipoEnergia`/`TipoMaquinariaUNE` | not captured (3.11.4 replaced `HorasUtilizacion` with `Duracion`) | optional — omit |
 | `AsesorValidacion` (advisor ROPO + validation) | no advisor entity yet | optional — omit |
-| `Eficacia` (code) | not captured | **gap 3 — now REQUIRED** |
+| `Eficacia` (code) | `treatment_record.efficacy_code` (nullable — observed after application; export precheck demands it) | ✓ (2026-07-15) |
 | `Observaciones` | `notes` | ✓ |
 
 Envelope requirements per farm: `CAExplotacion` (CCAA code), `IdTitular`
@@ -243,6 +245,33 @@ Catalogues move on FEGA's own cadence (fecha probes ranged 2023 → **2026-07-14
 itself** across this list), so a refresh path matters — but snapshot-first:
 the app must work offline with vendored data from first run.
 
+### Other public SIEX services (checked live 2026-07-15)
+
+The same no-auth API exposes two more things beyond the catalogues (the
+portal's `/ffii` section = "Fuentes de Información externas"; documented in
+the same BdcSixWsp guide):
+
+- **`GET /fuentesInformacion/zip`** (~30 MB) — exactly two CSVs:
+  - **`MDF.csv`** (1,235 rows): Registro de Determinados Medios de Defensa
+    Fitosanitaria — *non-chemical* defense means (biological control
+    organisms, traps, pheromone attractants) with target organisms and
+    crops. Not needed for `TratamFito` v1 (chemical products ride
+    `NumRegistro`), but the natural source when biological-control /
+    organic-farm records arrive; small enough to vendor like the
+    catalogues.
+  - **`ROPO.csv`** (1.33 M rows, 228 MB): the national phytosanitary-carnet
+    register — **excluded (2026-07-15): it is a mass personal-data dump**
+    (names, phones, emails) the app must not vendor or redistribute, and
+    the served snapshot was two years stale (2024-01-25). If carnet
+    validation/prefill is ever wanted, it needs a different mechanism, not
+    this file.
+- **`POST /existeNIF`** (public, live-verified): given a NIF, returns the
+  holder's explotaciones with `Codigo_SIEX` (+ REA code and CCAA when
+  present). This is gap 4's data — a future "look up my REA code from my
+  NIF" prefill through the sanctioned network seam, sparing the farmer the
+  transcription from their REA papers. Optional and online-only; the manual
+  fields stay the offline path.
+
 ### Storage design (settled 2026-07-14; implemented same day)
 
 **Implemented as designed** — schema in core `0001` (`catalogue` +
@@ -316,6 +345,135 @@ What this does NOT cover (the design pass after the storage lands, gaps
 choices at record time (efficacy, justifications 1..n, problems per type),
 the integer export aliases, and `rea_code` + titular NIF.
 
+## Capture design — gaps 1/3/4 (settled + implemented 2026-07-15)
+
+One schema pass, all pre-release `0001`/`0002` edits. The storage principle
+mirrors the codebase's two existing precedents:
+
+- **Small closed lists with universal meaning** (efficacy, justification,
+  authorisation kind) → English-coded lookup tables + i18n keys, mapped to
+  SIEX integers at export (`module_cue::siex`) — the `unit`/`reason_category`
+  pattern. The `es` dictionary carries the official Castilian wording
+  verbatim, so Spanish users see exactly the catalogue terms. A **contract
+  test** (`tests/siex_mapping.rs`) checks each mapping against the vendored
+  catalogue snapshot in both directions, so a snapshot refresh that adds a
+  code (JUSTIFICACION_ACTUACION grew 5 → 6 rows in 2025/26) fails the suite
+  instead of silently under-offering choices.
+- **Provider lists too large to own** (the ~1,400 phytosanitary problems) →
+  the catalogue code stored verbatim, no FK (the settled catalogue rule).
+
+What landed where:
+
+- **Problems (gap 3)** — `treatment_problem` junction: per-row
+  `reason_category_code` + `problem_code`, ≥1 per record enforced at insert
+  (this IS the "reason for treatment"; the record-level
+  `reason_category_code` column was dropped, `target_organism` stays as
+  optional free text). The category picks the resolution catalogue
+  (disease → ENFERMEDADES, pest → PLAGAS, weed → MALAS_HIERBAS,
+  growth_regulator/other → REGULADORES_CRECIMIENTO) and the export bucket.
+  Codes are validated at insert against the imported catalogue (existence
+  only — retired codes pass, matching upsert-never-delete); the export's
+  schema-validated tests are the second net.
+- **Justifications (gap 3)** — `treatment_justification` junction, ≥1 per
+  record at insert (known at treatment time, unlike efficacy).
+- **Efficacy (gap 3)** — nullable `treatment_record.efficacy_code`:
+  unknowable on application day, so it is recorded later via
+  `set_treatment_efficacy` (the ONE edit a stored treatment allows,
+  audit-logged) and the export precheck lists records still missing it.
+- **Product kind (gap 3)** — `product_authorisation.kind_code`
+  (`registered`/`common_name`/`parallel_import`/`exceptional`, default
+  registered) + `exceptional_substance_code` (AUTORIZACION_EXCP code,
+  required iff exceptional — the `MateriaActiva` payload). Dose units need
+  no schema: `siex::unit_to_siex` maps each unit to a catalogue code plus an
+  exact conversion factor (SIEX has no ml/ha or g/L — nearest units differ
+  by a power of ten).
+- **Integer aliases (gap 1)** — `export_alias` (module-cue):
+  `(target, entity_table, entity_id, split_key) → alias INTEGER`, minted
+  MAX+1 per target at first export, never updated or deleted. `split_key`
+  discriminates the per-crop `TratamFito` splits; alias existence doubles as
+  the "previously exported" marker driving `Borrar`. Synced + audited (not
+  re-derivable). **Recorded limit:** two devices exporting independently
+  before syncing could mint colliding integers — a sync-stage-2 design item
+  (same family as alert-acknowledgement roaming); today one device exports.
+- **Farm identifiers (gap 4)** — `farm.owner_tax_id` in core (holder
+  tax/identity number: a universal concept — NIF/CUAA/SIREN — with
+  per-country format validation) and `farm_es_extension.rea_code`. Both
+  user-entered from the REA papers. `CAExplotacion` needs no column — it
+  derives from `farm_es_extension.province_code` via a static province→CCAA
+  map at export. `UnidadGestora` is "Identificador (NIF/CIF) de la Unidad
+  gestora" per the descriptor sheet: for a titular-driven notebook the
+  export defaults it to `owner_tax_id` (question 7 below confirms the
+  reading); a column arrives only if entidades habilitadas become a use
+  case.
+
+## Export module (built 2026-07-16)
+
+`module_cue::export` — the query layer + serializer for one farm+season,
+schema-validated in `crates/module-cue/tests/export.rs` against the vendored
+3.11.4 schema (the `jsonschema` crate, dev-dependency only, HTTP-resolver
+features off). Two entry points:
+
+- **`export_precheck(conn, season, farm)`** — lists what blocks a valid
+  export instead of erroring one field at a time: records missing
+  `efficacy_code` (schema-required), records whose operator has no licence
+  number (`NumROPO`), treated plots without a crop (no DGC unit to name),
+  and farm identity fields missing or unusable (`owner_tax_id`, `rea_code`,
+  `province_code`). Only active records are checked — deletion entries
+  cannot demand new observations.
+- **`build_cuaderno(conn, season, farm)`** — the descriptor itself
+  (`descriptor::CuadernoExport`, typed serde structs mirroring the schema).
+  Refuses while the precheck is not clean, so nothing is silently dropped or
+  invented.
+
+Serialization decisions, each pinned by a test:
+
+- **Per-crop splits.** Plots group by `(crop_name, variety)` snapshot; a
+  multi-group record emits one `TratamFito` per group, aliased on
+  (record, split key). Snapshots are frozen at insert, so grouping can never
+  drift between exports. Single-group records keep the empty split key.
+- **DGC linkage (pending gap 2's real answer).** A core `crop` row is
+  exactly the SIEX plot+crop+season unit, so each treated plot's crop gets a
+  `CodigoDGCAjena` minted from `export_alias` (`entity_table='crop'`) —
+  stable across exports and shared by every treatment on that crop. If
+  CUECYL mandates REA `CodigoDGC` instead, the minted aliases go unused.
+  `AltaDGC` block generation (registering those DGCs) is not built yet.
+- **Deletions.** A soft-deleted record emits a full entry with
+  `Borrar: true` for each split that had an alias (= was actually exported);
+  splits never exported are skipped. Deletion entries must still satisfy the
+  schema's required fields, so a never-assessed efficacy falls back to the
+  schema default 0 and a missing licence to the empty string — the entry
+  exists to identify the deleted activity, not to assert observations.
+- **Equipment `oneOf`.** The schema demands exactly one of
+  `NumROMA`/`NumREGANIP`/`IdEquipoAplicador` even for manual application:
+  no machinery → `AplicacionManual: true` + the fixed sentinel `"manual"`;
+  machinery with both registry numbers → ROMA ("nunca ambos"); machinery in
+  neither registry → its row id as `IdEquipoAplicador` (free string(50),
+  never drifts).
+- **Product kind.** Resolved live by the frozen authorisation number
+  (product + country + `authorisation_number_snapshot`); when the
+  authorisation row no longer matches, the default kind (registered)
+  applies. `MateriaActiva` (the AUTORIZACION_EXCP code) is emitted only for
+  kind `exceptional`.
+- **Dates** convert ISO → dd/mm/yyyy (`siex::date_to_siex`); `CAExplotacion`
+  derives from the province via `siex::province_to_ccaa` (INE relation,
+  unit-tested); `UnidadGestora` = `owner_tax_id` (open question 7).
+
+Two findings from validating against the real schema:
+
+- **`CodigoRea` is exactly 14 characters** (minLength = maxLength = 14, like
+  `CodigoSIEX` — the national ES+12-digit registry format). The precheck
+  flags a present-but-wrong-length REA code the same way as an absent one.
+- **The official schema has a typo**: one `$id` reads `"##root/…"` (double
+  `#`, under SiembraPlantacion → Maquinaria → items), which draft-07
+  meta-validation rejects as an invalid uri-reference. The vendored file
+  stays byte-exact; the test harness normalizes the typo in its in-memory
+  copy only (the `$id`s are decorative — the schema contains no `$ref`).
+  Check whether a future schema release fixes it.
+
+The file-export command + UI entry point landed the same day (build-order
+step 4 below). Still not built: the `AltaDGC`/`CambioCultivoDGC` blocks
+(gap 2) and the server-side WS client.
+
 ## Gaps found (ordered by design impact)
 
 1. **Integer activity ids.** `IdAjena*` fields are integers (`number(10)`, max
@@ -334,6 +492,11 @@ the integer export aliases, and `rea_code` + titular NIF.
    Update 2026-07-11: CyL confirms commercial notebooks may import surfaces
    and crops into the Cuecyl (see the REA-first section), so the `AltaDGC`
    path is viable standalone; the duplication question stands.
+   Update 2026-07-16: the export module references DGCs via minted
+   `CodigoDGCAjena` integers (one per core `crop` row — see "Export module");
+   what remains of this gap is generating the `AltaDGC` blocks themselves
+   (needs `CodigoCultivo` from the PRODUCTOS catalogue) and the REA
+   `CodigoDGC` question.
 3. **Anexo VII catalogue codes.** Crops, varieties, units, active substances,
    product types, phytosanitary problems, justifications and efficacy are
    *coded* lists. We store English enum codes / free text today. Needed:
@@ -344,11 +507,15 @@ the integer export aliases, and `rea_code` + titular NIF.
    `Eficacia` are now *required* — the treatment form must offer these coded
    choices, they cannot be deferred to export time. Softened for substances:
    `MateriaActiva` codes are only needed for exceptional authorisations.
+   **Done 2026-07-15** (capture columns/junctions + form + validation — see
+   "Capture design"). Still open within gap 3: crop coding
+   (`DGCs[].CodigoCultivo`, PRODUCTOS catalogue) rides with gap 2.
 4. **Farm identifiers.** `IdTitular` (NIF) and `CodigoRea` are required and we
-   capture neither (`farm_es_extension` has REGA, which is the *livestock*
-   registry — same trap as REGANIP/ROMA). Needs: `rea_code` (+ titular NIF,
-   probably on `farm`) — schema design. Both values come from the farm's REA
-   registration (see the REA-first section): user-entered, never derived.
+   captured neither (`farm_es_extension` had REGA, which is the *livestock*
+   registry — same trap as REGANIP/ROMA). **Done 2026-07-15**
+   (`farm.owner_tax_id` + `farm_es_extension.rea_code` — see "Capture
+   design"). Both values come from the farm's REA registration (see the
+   REA-first section): user-entered, never derived.
 5. **Advisor (optional).** `AsesorValidacion` supports GIP advisor sign-off;
    no advisor entity exists yet. Fine to omit; future entity if users need it.
 
@@ -358,11 +525,21 @@ the integer export aliases, and `rea_code` + titular NIF.
    treatment form (coded problems). **Done 2026-07-14** (study, settled
    design AND implementation — see "Storage design" above).
 2. Schema additions (gaps 1, 3, 4) — one schema design pass, settled before
-   coding. **This is the next step.**
+   coding. **Done 2026-07-15** (design settled and implemented the same day —
+   see "Capture design").
 3. Export module: query layer (season+farm → snapshots+plots) → serializer to
-   the descriptor JSON → validate against the vendored schema in tests
-   (JSON-Schema validation crate needed — decide deliberately before adding).
-4. File export command (async, like backups) + UI entry point.
+   the descriptor JSON → validate against the vendored schema in tests.
+   **Done 2026-07-16** (see "Export module"; `jsonschema` settled as the
+   dev-only validation crate).
+4. File export command (async, like backups) + UI entry point. **Done
+   2026-07-16** — `export_cuaderno_precheck` + `export_cuaderno` commands
+   (the latter async, backup-command pattern: build → write to the
+   dialog-chosen path, returns path/size/entry count); the record-book view
+   gained an "Exportación oficial (SIEX)" section whose button runs the
+   precheck first and renders the blockers as a fix-it list (farm fields
+   link to the farms view), opening the save dialog only when clean. The
+   suggested filename sanitizes the season label ("2025/2026" carries a
+   path separator). Feature name stays provisional.
 5. Server-side WS client — separate component, after developer authorization
    with the Junta exists. Not in this repo's core.
 
@@ -394,3 +571,7 @@ and part of question 1; the rest still needs the email.
    contain — in particular, does it include `CodigoDGC`? Is its format stable
    across campaigns, and is the export reachable any time the titular enters
    the module, or only during an active declaration?
+7. `UnidadGestora` (2026-07-15, from the descriptor sheet: "Identificador
+   (CIF, NIE, CIF) de la Unidad gestora"): for a titular who drives a
+   commercial notebook directly (no entidad habilitada), is it simply the
+   titular's own NIF — i.e. equal to `IdTitular`?

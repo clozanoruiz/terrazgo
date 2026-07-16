@@ -27,6 +27,25 @@ INSERT INTO formulation_type (code, i18n_key) VALUES
     ('wg', 'formulation_type.wg'),
     ('sl', 'formulation_type.sl');
 
+INSERT INTO efficacy (code, i18n_key) VALUES
+    ('good', 'efficacy.good'),
+    ('fair', 'efficacy.fair'),
+    ('poor', 'efficacy.poor');
+
+INSERT INTO justification (code, i18n_key) VALUES
+    ('threshold_exceeded',      'justification.threshold_exceeded'),
+    ('monitoring',              'justification.monitoring'),
+    ('decision_support_system', 'justification.decision_support_system'),
+    ('authority_warning',       'justification.authority_warning'),
+    ('advisor_recommendation',  'justification.advisor_recommendation'),
+    ('alert_device',            'justification.alert_device');
+
+INSERT INTO authorisation_kind (code, i18n_key) VALUES
+    ('registered',      'authorisation_kind.registered'),
+    ('common_name',     'authorisation_kind.common_name'),
+    ('parallel_import', 'authorisation_kind.parallel_import'),
+    ('exceptional',     'authorisation_kind.exceptional');
+
 INSERT INTO alert_type (code, i18n_key) VALUES
     ('phi_window',     'alert_type.phi_window'),
     ('licence_expiry', 'alert_type.licence_expiry'),

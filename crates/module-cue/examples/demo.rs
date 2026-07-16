@@ -129,10 +129,27 @@ fn print_treatment(
         r.active_substances_snapshot.as_deref().unwrap_or("—")
     );
     println!("  dose       {} {}", r.dose_value, r.dose_unit_code);
+    let problems = t
+        .problems
+        .iter()
+        .map(|p| format!("{}:{}", p.reason_category_code, p.problem_code))
+        .collect::<Vec<_>>()
+        .join(", ");
     println!(
-        "  reason     {} — {}",
-        r.reason_category_code,
+        "  problems   {} — {}",
+        problems,
         r.target_organism.as_deref().unwrap_or("—"),
+    );
+    let justifications = t
+        .justifications
+        .iter()
+        .map(|j| j.justification_code.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("  justified  {justifications}");
+    println!(
+        "  efficacy   {}",
+        r.efficacy_code.as_deref().unwrap_or("not yet assessed")
     );
     println!(
         "  operator   {} (licence {})",

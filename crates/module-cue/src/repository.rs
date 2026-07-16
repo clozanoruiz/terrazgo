@@ -20,6 +20,7 @@
 //! reads take `&Connection`.
 
 mod alert;
+mod export_alias;
 mod lookup;
 mod product;
 mod treatment;
@@ -30,7 +31,11 @@ mod treatment;
 use terrazgo_core::audit;
 
 pub use alert::{acknowledge_alert, dismiss_alert, list_active_alerts, refresh_alerts};
-pub use lookup::{list_formulation_types, list_reason_categories, list_units};
+pub use export_alias::{ensure_export_alias, find_export_alias};
+pub use lookup::{
+    list_authorisation_kinds, list_efficacies, list_formulation_types, list_justifications,
+    list_reason_categories, list_units,
+};
 // The farm-registry repositories moved to the core (2026-06-12); re-exported so
 // existing callers (demo seeding, tests) keep one repository entry point.
 pub use product::{
@@ -45,8 +50,11 @@ pub use terrazgo_core::repository::{
 };
 pub use treatment::{
     get_treatment_record, insert_treatment_record, list_treatment_records, phi_status_for_farm,
-    soft_delete_treatment_record,
+    set_treatment_efficacy, soft_delete_treatment_record,
 };
+// Export-only query (soft-deleted records included, for the Borrar entries);
+// crate-visible so the seam stays the export module, not general callers.
+pub(crate) use treatment::list_treatment_records_for_export;
 
 use crate::error::CueError;
 
@@ -56,4 +64,30 @@ pub(crate) fn no_rows_to_not_found(e: rusqlite::Error) -> CueError {
         rusqlite::Error::QueryReturnedNoRows => CueError::NotFound,
         other => other.into(),
     }
+}
+
+/// Whether `code` exists in an imported reference catalogue. `Ok(None)` means
+/// the catalogue itself is not imported — nothing to check against (in a
+/// running app the vendored snapshot is imported at startup, so this only
+/// happens for countries without catalogue data). Retired codes count as
+/// existing: providers baja-date codes rather than delete them.
+pub(crate) fn resolve_in_catalogue(
+    conn: &rusqlite::Connection,
+    catalogue_id: &str,
+    code: &str,
+) -> crate::error::Result<Option<bool>> {
+    let imported: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM catalogue WHERE id = ?1)",
+        [catalogue_id],
+        |r| r.get(0),
+    )?;
+    if !imported {
+        return Ok(None);
+    }
+    let known: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM catalogue_code WHERE catalogue_id = ?1 AND code = ?2)",
+        rusqlite::params![catalogue_id, code],
+        |r| r.get(0),
+    )?;
+    Ok(Some(known))
 }

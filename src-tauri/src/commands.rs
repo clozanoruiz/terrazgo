@@ -94,7 +94,8 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
             | CueError::Migration(_)
             | CueError::Json(_)
             | CueError::Io(_)
-            | CueError::Catalogue(_) => ("internal".into(), json!({})),
+            | CueError::Catalogue(_)
+            | CueError::Report(_) => ("internal".into(), json!({})),
         };
     }
 
@@ -525,6 +526,35 @@ pub fn list_reason_categories(state: State<'_, AppState>) -> CmdResult<Vec<Looku
     Ok(repository::list_reason_categories(&conn)?)
 }
 
+#[tauri::command]
+pub fn list_efficacies(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
+    let conn = lock_conn(&state)?;
+    Ok(repository::list_efficacies(&conn)?)
+}
+
+#[tauri::command]
+pub fn list_justifications(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
+    let conn = lock_conn(&state)?;
+    Ok(repository::list_justifications(&conn)?)
+}
+
+/// Active codes of the reference catalogue that problems of one category
+/// resolve against for one country — the treatment form's problem picker.
+/// Empty when the country has no coded list for the category (nothing to
+/// offer; the record then stores whatever the user typed unchecked).
+#[tauri::command]
+pub fn list_problem_codes(
+    state: State<'_, AppState>,
+    country_code: String,
+    reason_category_code: String,
+) -> CmdResult<Vec<terrazgo_core::catalogue::CatalogueCode>> {
+    let conn = lock_conn(&state)?;
+    match module_cue::siex::problem_catalogue(&country_code, &reason_category_code) {
+        Some(catalogue_id) => Ok(terrazgo_core::catalogue::active_codes(&conn, catalogue_id)?),
+        None => Ok(Vec::new()),
+    }
+}
+
 /// Products the treatment form may offer: only those authorised in the given
 /// country (the farm's), because the insert rejects any other.
 #[tauri::command]
@@ -625,6 +655,26 @@ pub fn list_formulation_types(state: State<'_, AppState>) -> CmdResult<Vec<Looku
     Ok(repository::list_formulation_types(&conn)?)
 }
 
+#[tauri::command]
+pub fn list_authorisation_kinds(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
+    let conn = lock_conn(&state)?;
+    Ok(repository::list_authorisation_kinds(&conn)?)
+}
+
+/// Active exceptional-authorisation codes (substance + product per code) for
+/// the product form, shown only when the authorisation kind is 'exceptional'.
+#[tauri::command]
+pub fn list_exceptional_substances(
+    state: State<'_, AppState>,
+    country_code: String,
+) -> CmdResult<Vec<terrazgo_core::catalogue::CatalogueCode>> {
+    let conn = lock_conn(&state)?;
+    match module_cue::siex::exceptional_substance_catalogue(&country_code) {
+        Some(catalogue_id) => Ok(terrazgo_core::catalogue::active_codes(&conn, catalogue_id)?),
+        None => Ok(Vec::new()),
+    }
+}
+
 /// The registry's product list: every active product with its substances and
 /// authorisations (country-agnostic, unlike `list_products`).
 #[tauri::command]
@@ -678,6 +728,8 @@ pub fn add_product_authorisation(
             product_id,
             country_code: authorisation.country_code,
             authorisation_number: authorisation.authorisation_number,
+            kind_code: authorisation.kind_code,
+            exceptional_substance_code: authorisation.exceptional_substance_code,
             status: authorisation.status,
             valid_from: authorisation.valid_from,
             valid_until: authorisation.valid_until,
@@ -769,6 +821,22 @@ pub fn list_treatment_records(
     )?)
 }
 
+/// Record (or correct) the observed efficacy — the one edit a stored treatment
+/// allows, because efficacy is assessed after application.
+#[tauri::command]
+pub fn set_treatment_efficacy(
+    state: State<'_, AppState>,
+    treatment_id: String,
+    efficacy_code: Option<String>,
+) -> CmdResult<TreatmentRecord> {
+    let mut conn = lock_conn(&state)?;
+    Ok(repository::set_treatment_efficacy(
+        &mut conn,
+        &treatment_id,
+        efficacy_code,
+    )?)
+}
+
 /// Soft delete (regulatory records are never hard-deleted), then reconcile
 /// alerts so the record's PHI alert lapses with it.
 #[tauri::command]
@@ -777,6 +845,94 @@ pub fn delete_treatment_record(state: State<'_, AppState>, treatment_id: String)
     repository::soft_delete_treatment_record(&mut conn, &treatment_id)?;
     repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// SIEX cuaderno export
+// ---------------------------------------------------------------------------
+
+/// What blocks a valid SIEX export of the selected farm+season — empty lists
+/// mean ready. Read-only; the UI renders the result as a fix-it list.
+#[tauri::command]
+pub fn export_cuaderno_precheck(
+    state: State<'_, AppState>,
+    season_id: String,
+    farm_id: String,
+) -> CmdResult<module_cue::export::ExportPrecheck> {
+    let conn = lock_conn(&state)?;
+    Ok(module_cue::export::export_precheck(
+        &conn, &season_id, &farm_id,
+    )?)
+}
+
+#[derive(Serialize)]
+pub struct CuadernoExportSummary {
+    pub path: String,
+    pub size_bytes: u64,
+    /// `TratamFito` entries written (after the per-crop splits, so this can
+    /// exceed the record count).
+    pub entries: usize,
+}
+
+/// Build the SIEX descriptor for one farm+season and write it to `dest_path`
+/// (chosen by the user in the save dialog, so overwriting is already
+/// confirmed). Fails with `invalid.export_precheck_failed` while the precheck
+/// is not clean — the frontend runs the precheck first and shows the list.
+/// `async` like the backup commands: the work scales with record count and
+/// must not block the main thread (no `.await` inside, so holding the
+/// connection guard is safe).
+#[tauri::command]
+pub async fn export_cuaderno(
+    state: State<'_, AppState>,
+    season_id: String,
+    farm_id: String,
+    dest_path: String,
+) -> CmdResult<CuadernoExportSummary> {
+    let mut guard = lock_conn(&state)?;
+    let cuaderno = module_cue::export::build_cuaderno(&mut guard, &season_id, &farm_id)?;
+    let json = serde_json::to_string_pretty(&cuaderno)?;
+    std::fs::write(Path::new(&dest_path), &json)?;
+    let entries = cuaderno
+        .cuaderno
+        .iter()
+        .map(|entry| entry.actividades_explotacion.tratam_fito.len())
+        .sum();
+    Ok(CuadernoExportSummary {
+        path: dest_path,
+        size_bytes: json.len() as u64,
+        entries,
+    })
+}
+
+#[derive(Serialize)]
+pub struct CuadernoPdfSummary {
+    pub path: String,
+    pub size_bytes: u64,
+    pub pages: usize,
+}
+
+/// Render the printable cuaderno (official-model sections 1, 2.1 and 3.1)
+/// for one farm+season and write the PDF to `dest_path` (chosen by the user
+/// in the save dialog). No precheck: fields the model asks for but the data
+/// lacks print blank — a farmer can always print the current state. `async`
+/// like the other export: rendering scales with record count.
+#[tauri::command]
+pub async fn export_cuaderno_pdf(
+    state: State<'_, AppState>,
+    season_id: String,
+    farm_id: String,
+    dest_path: String,
+) -> CmdResult<CuadernoPdfSummary> {
+    let guard = lock_conn(&state)?;
+    let today = terrazgo_core::date::now_utc_iso();
+    let generated_on = today.split('T').next().unwrap_or(&today);
+    let pdf = module_cue::report::render_cuaderno(&guard, &season_id, &farm_id, generated_on)?;
+    std::fs::write(Path::new(&dest_path), &pdf.bytes)?;
+    Ok(CuadernoPdfSummary {
+        path: dest_path,
+        size_bytes: pdf.bytes.len() as u64,
+        pages: pdf.page_count,
+    })
 }
 
 // ---------------------------------------------------------------------------

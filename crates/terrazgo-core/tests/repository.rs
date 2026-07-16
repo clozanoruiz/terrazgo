@@ -26,6 +26,7 @@ fn new_farm(name: &str) -> NewFarm {
     NewFarm {
         name: name.into(),
         owner_name: None,
+        owner_tax_id: None,
         country_code: "es".into(),
         es: None,
     }
@@ -72,9 +73,11 @@ fn insert_farm_with_extension_writes_both_rows_and_logs_both() {
         NewFarm {
             name: "Finca".into(),
             owner_name: Some("Carlos".into()),
+            owner_tax_id: None,
             country_code: "es".into(),
             es: Some(FarmEsFields {
                 rega_code: Some("ES470000001".into()),
+                rea_code: None,
                 province_code: Some("47".into()),
             }),
         },
@@ -98,6 +101,68 @@ fn insert_farm_with_extension_writes_both_rows_and_logs_both() {
     let (op, _, after) = last_change(&conn, "farm_es_extension", &farm.id);
     assert_eq!(op, "insert");
     assert_eq!(after["province_code"], "47");
+}
+
+/// The export-facing farm identifiers (docs/siex-export.md → gap 4): the
+/// holder's tax id lives on the core row, the REA registration code on the
+/// Spanish extension. Both must round-trip and appear in the audit images.
+#[test]
+fn farm_identifiers_roundtrip_and_are_audited() {
+    let mut conn = db();
+    let farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Finca".into(),
+            owner_name: Some("Carlos".into()),
+            owner_tax_id: Some("12345678Z".into()),
+            country_code: "es".into(),
+            es: Some(FarmEsFields {
+                rega_code: None,
+                rea_code: Some("REA-47-00123".into()),
+                province_code: Some("47".into()),
+            }),
+        },
+    )
+    .unwrap();
+    assert_eq!(farm.owner_tax_id.as_deref(), Some("12345678Z"));
+
+    let detail = repo::get_farm(&conn, &farm.id).unwrap();
+    assert_eq!(detail.farm.owner_tax_id.as_deref(), Some("12345678Z"));
+    assert_eq!(
+        detail.es.as_ref().unwrap().rea_code.as_deref(),
+        Some("REA-47-00123")
+    );
+
+    let (_, _, after) = last_change(&conn, "farm", &farm.id);
+    assert_eq!(after["owner_tax_id"], "12345678Z");
+    let (_, _, after) = last_change(&conn, "farm_es_extension", &farm.id);
+    assert_eq!(after["rea_code"], "REA-47-00123");
+
+    // Full-row update replaces both, like every other farm field.
+    let detail = repo::update_farm(
+        &mut conn,
+        &farm.id,
+        UpdateFarm {
+            name: "Finca".into(),
+            owner_name: Some("Carlos".into()),
+            owner_tax_id: Some("87654321X".into()),
+            location_text: None,
+            latitude: None,
+            longitude: None,
+            country_code: "es".into(),
+            es: Some(FarmEsFields {
+                rega_code: None,
+                rea_code: Some("REA-47-99999".into()),
+                province_code: Some("47".into()),
+            }),
+        },
+    )
+    .unwrap();
+    assert_eq!(detail.farm.owner_tax_id.as_deref(), Some("87654321X"));
+    assert_eq!(
+        detail.es.as_ref().unwrap().rea_code.as_deref(),
+        Some("REA-47-99999")
+    );
 }
 
 #[test]
@@ -145,6 +210,7 @@ fn update_farm_replaces_fields_and_logs_complete_images() {
         UpdateFarm {
             name: "New name".into(),
             owner_name: Some("Owner".into()),
+            owner_tax_id: None,
             location_text: Some("Valladolid".into()),
             latitude: Some(41.65),
             longitude: Some(-4.72),
@@ -173,6 +239,7 @@ fn update_farm_extension_transitions_are_logged() {
     let base = UpdateFarm {
         name: "Finca".into(),
         owner_name: None,
+        owner_tax_id: None,
         location_text: None,
         latitude: None,
         longitude: None,
@@ -187,6 +254,7 @@ fn update_farm_extension_transitions_are_logged() {
         UpdateFarm {
             es: Some(FarmEsFields {
                 rega_code: None,
+                rea_code: None,
                 province_code: Some("47".into()),
             }),
             ..base
@@ -204,12 +272,14 @@ fn update_farm_extension_transitions_are_logged() {
         UpdateFarm {
             name: "Finca".into(),
             owner_name: None,
+            owner_tax_id: None,
             location_text: None,
             latitude: None,
             longitude: None,
             country_code: "es".into(),
             es: Some(FarmEsFields {
                 rega_code: None,
+                rea_code: None,
                 province_code: Some("09".into()),
             }),
         },
@@ -227,6 +297,7 @@ fn update_farm_extension_transitions_are_logged() {
         UpdateFarm {
             name: "Finca".into(),
             owner_name: None,
+            owner_tax_id: None,
             location_text: None,
             latitude: None,
             longitude: None,

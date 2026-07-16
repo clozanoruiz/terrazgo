@@ -19,6 +19,8 @@
   let operators = $state([]);
   let units = $state([]);
   let reasons = $state([]);
+  let justifications = $state([]);
+  let efficacies = $state([]);
   let productionSystems = $state([]);
 
   let farmId = $state("");
@@ -51,14 +53,17 @@
   let sownOn = $state("");
 
   run(async () => {
-    [farms, seasons, operators, units, reasons, productionSystems] = await Promise.all([
-      invoke("list_farms"),
-      invoke("list_seasons"),
-      invoke("list_operators"),
-      invoke("list_units"),
-      invoke("list_reason_categories"),
-      invoke("list_production_systems"),
-    ]);
+    [farms, seasons, operators, units, reasons, justifications, efficacies, productionSystems] =
+      await Promise.all([
+        invoke("list_farms"),
+        invoke("list_seasons"),
+        invoke("list_operators"),
+        invoke("list_units"),
+        invoke("list_reason_categories"),
+        invoke("list_justifications"),
+        invoke("list_efficacies"),
+        invoke("list_production_systems"),
+      ]);
     // Preselect the first farm and the newest season — the everyday case is
     // one farm, current campaign.
     if (farms.length > 0) farmId = farms[0].id;
@@ -89,11 +94,53 @@
       invoke("list_crops", { seasonId, farmId }),
       invoke("list_treatment_records", { seasonId, farmId }),
     ]);
+    await resolveProblemLabels();
+  }
+
+  // Stored problems carry catalogue CODES (the regulatory payload); labels are
+  // display metadata resolved from the catalogue, one fetch per category used.
+  let problemLabels = $state({});
+
+  async function resolveProblemLabels() {
+    const countryCode = farms.find((f) => f.id === farmId)?.country_code;
+    const categories = new Set(
+      treatments.flatMap(({ problems }) => problems.map((p) => p.reason_category_code)),
+    );
+    const labels = {};
+    for (const category of categories) {
+      const codes = await invoke("list_problem_codes", {
+        countryCode,
+        reasonCategoryCode: category,
+      });
+      for (const code of codes) labels[`${category}:${code.code}`] = code.label;
+    }
+    problemLabels = labels;
+  }
+
+  function problemSummary(problems) {
+    return problems
+      .map(
+        (p) =>
+          problemLabels[`${p.reason_category_code}:${p.problem_code}`] ??
+          `${tCode("reason_category", p.reason_category_code)} ${p.problem_code}`,
+      )
+      .join(", ");
+  }
+
+  function setEfficacy(record, efficacyCode) {
+    run(async () => {
+      await invoke("set_treatment_efficacy", {
+        treatmentId: record.id,
+        efficacyCode: efficacyCode || null,
+      });
+      await loadBook();
+    });
   }
 
   function selectFarm() {
     cropFormOpen = false;
     treatmentFormOpen = false;
+    precheck = null;
     run(async () => {
       await loadFarmScope();
       await loadBook();
@@ -103,6 +150,7 @@
   function selectSeason() {
     cropFormOpen = false;
     treatmentFormOpen = false;
+    precheck = null;
     run(loadBook);
   }
 
@@ -157,6 +205,70 @@
   async function treatmentSaved() {
     treatmentFormOpen = false;
     await loadBook();
+  }
+
+  // --- official export (SIEX descriptor JSON) -----------------------------
+  // Precheck first: the backend refuses to build while data required by the
+  // official format is missing, so the UI shows what to fix instead of a
+  // one-shot error. The save dialog only opens when the precheck is clean.
+  let precheck = $state(null);
+
+  function precheckIsClean(check) {
+    return (
+      check.farm_missing_fields.length === 0 &&
+      check.records_missing_efficacy.length === 0 &&
+      check.records_missing_operator_licence.length === 0 &&
+      check.plots_missing_crop.length === 0
+    );
+  }
+
+  function exportCuaderno() {
+    run(async () => {
+      const check = await invoke("export_cuaderno_precheck", { seasonId, farmId });
+      precheck = check;
+      if (!precheckIsClean(check)) return; // the fix-it list below is the feedback
+      // Season labels can carry path-hostile characters ("2025/2026").
+      const label = (seasons.find((s) => s.id === seasonId)?.label ?? seasonId).replace(
+        /[^\p{L}\p{N}._-]+/gu,
+        "-",
+      );
+      const path = await invoke("plugin:dialog|save", {
+        options: {
+          defaultPath: `cuaderno-siex-${label}.json`,
+          filters: [{ name: "JSON", extensions: ["json"] }],
+        },
+      });
+      if (!path) return;
+      const summary = await invoke("export_cuaderno", { seasonId, farmId, destPath: path });
+      precheck = null;
+      notify(t("message.cuaderno_exported", { path: summary.path, entries: summary.entries }));
+    });
+  }
+
+  // --- printable cuaderno (PDF) --------------------------------------------
+  // No precheck: the printed record book shows the current state, and fields
+  // the official model asks for but the data lacks print blank — so the only
+  // step is choosing where to save.
+  function exportCuadernoPdf() {
+    run(async () => {
+      const label = (seasons.find((s) => s.id === seasonId)?.label ?? seasonId).replace(
+        /[^\p{L}\p{N}._-]+/gu,
+        "-",
+      );
+      const path = await invoke("plugin:dialog|save", {
+        options: {
+          defaultPath: `cuaderno-${label}.pdf`,
+          filters: [{ name: "PDF", extensions: ["pdf"] }],
+        },
+      });
+      if (!path) return;
+      const summary = await invoke("export_cuaderno_pdf", { seasonId, farmId, destPath: path });
+      notify(t("message.cuaderno_pdf_exported", { path: summary.path, pages: summary.pages }));
+    });
+  }
+
+  function recordLabel(ref) {
+    return `${formatDate(ref.application_date)} — ${ref.product_name}`;
   }
 
   function plotName(plotId) {
@@ -333,6 +445,7 @@
       {#if treatmentFormOpen}
         <TreatmentForm
           {farmId}
+          countryCode={farms.find((f) => f.id === farmId)?.country_code}
           {seasonId}
           {plots}
           {crops}
@@ -340,6 +453,8 @@
           {machinery}
           {products}
           {units}
+          {justifications}
+          {efficacies}
           {reasons}
           onSaved={treatmentSaved}
           onCancel={() => (treatmentFormOpen = false)}
@@ -347,7 +462,7 @@
       {/if}
 
       <ul class="card-list">
-        {#each treatments as { record, plots: treatedPlots } (record.id)}
+        {#each treatments as { record, plots: treatedPlots, problems, justifications: recordJustifications } (record.id)}
           <li class="card">
             <div class="stack">
               <strong>{formatDate(record.application_date)} — {record.product_name_snapshot}</strong
@@ -355,13 +470,30 @@
               <span class="detail">
                 {record.dose_value}
                 {tCode("unit", record.dose_unit_code)} ·
-                {tCode("reason_category", record.reason_category_code)} ·
                 {record.operator_name_snapshot}
+              </span>
+              <span class="detail">{problemSummary(problems)}</span>
+              <span class="detail">
+                {recordJustifications
+                  .map((j) => tCode("justification", j.justification_code))
+                  .join(", ")}
               </span>
               <span class="detail">{treatedPlotsSummary(treatedPlots)}</span>
               <span class="detail">
                 {t("treatment.phi_until", { date: formatDate(record.phi_end_date) })}
               </span>
+              <label class="inline-field">
+                <span>{t("treatment.efficacy")}</span>
+                <select
+                  value={record.efficacy_code ?? ""}
+                  onchange={(event) => setEfficacy(record, event.currentTarget.value)}
+                >
+                  <option value="">{t("treatment.efficacy_pending")}</option>
+                  {#each efficacies as efficacy (efficacy.code)}
+                    <option value={efficacy.code}>{tCode("efficacy", efficacy.code)}</option>
+                  {/each}
+                </select>
+              </label>
             </div>
             <button type="button" class="btn-danger" onclick={() => deleteTreatment(record)}>
               {t("treatment.delete")}
@@ -372,6 +504,71 @@
       {#if treatments.length === 0 && !missingRefs}
         <p>{t("treatments.empty")}</p>
       {/if}
+
+      <div class="view-head">
+        <h3>{t("export.title")}</h3>
+        <button type="button" onclick={exportCuaderno} disabled={treatments.length === 0}>
+          {t("export.run")}
+        </button>
+      </div>
+      <p class="detail">{t("export.hint")}</p>
+
+      {#if precheck && !precheckIsClean(precheck)}
+        <p>{t("export.blocked_intro")}</p>
+        <ul class="card-list">
+          {#if precheck.farm_missing_fields.length > 0}
+            <li class="card">
+              <div class="stack">
+                <strong>{t("export.farm_fields")}</strong>
+                <span class="detail">
+                  {precheck.farm_missing_fields.map((f) => t(`export.field_${f}`)).join(", ")}
+                </span>
+                <a href="#/farms">{t("nav.farms")}</a>
+              </div>
+            </li>
+          {/if}
+          {#if precheck.records_missing_efficacy.length > 0}
+            <li class="card">
+              <div class="stack">
+                <strong>{t("export.missing_efficacy")}</strong>
+                <span class="detail">
+                  {precheck.records_missing_efficacy.map(recordLabel).join("; ")}
+                </span>
+              </div>
+            </li>
+          {/if}
+          {#if precheck.records_missing_operator_licence.length > 0}
+            <li class="card">
+              <div class="stack">
+                <strong>{t("export.missing_licence")}</strong>
+                <span class="detail">
+                  {precheck.records_missing_operator_licence.map(recordLabel).join("; ")}
+                </span>
+              </div>
+            </li>
+          {/if}
+          {#if precheck.plots_missing_crop.length > 0}
+            <li class="card">
+              <div class="stack">
+                <strong>{t("export.missing_crop")}</strong>
+                <span class="detail">
+                  {precheck.plots_missing_crop
+                    .map((ref) => `${ref.plot_name} (${formatDate(ref.application_date)})`)
+                    .join("; ")}
+                </span>
+              </div>
+            </li>
+          {/if}
+        </ul>
+      {/if}
+
+      <div class="view-head">
+        <h3>{t("export.pdf_title")}</h3>
+        <button type="button" onclick={exportCuadernoPdf}>
+          {t("export.pdf_run")}
+        </button>
+      </div>
+      <p class="detail">{t("export.pdf_hint")}</p>
     {/if}
   {/if}
 </section>

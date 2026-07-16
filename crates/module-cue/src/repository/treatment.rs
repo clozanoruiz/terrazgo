@@ -3,15 +3,16 @@
 
 //! Treatment record CRUD — the central regulatory entity.
 
-use super::audit::{log_insert, write_change};
+use super::audit::{log_insert, log_update, write_change};
 use super::no_rows_to_not_found;
 use crate::alerts::phi_window_is_active;
 use crate::date::{add_days, now_utc_iso};
 use crate::error::{CueError, Result};
 use crate::models::{
-    NewTreatmentPlot, NewTreatmentRecord, PlotPhiStatus, TreatmentPlot, TreatmentRecord,
-    TreatmentRecordWithPlots,
+    NewTreatmentPlot, NewTreatmentRecord, PlotPhiStatus, TreatmentJustification, TreatmentPlot,
+    TreatmentProblem, TreatmentRecord, TreatmentRecordWithPlots,
 };
+use crate::siex;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
 use uuid::Uuid;
@@ -61,6 +62,25 @@ pub fn insert_treatment_record(
                 farm_id: new.farm_id.clone(),
             });
         }
+    }
+
+    // --- the coded reason for treatment + IPM justifications ---------------
+    // Both are required at record time (they are known when treating, unlike
+    // efficacy); duplicates from the form are folded rather than rejected.
+    let mut problems = new.problems;
+    let mut seen = std::collections::HashSet::new();
+    problems.retain(|p| seen.insert((p.reason_category_code.clone(), p.problem_code.clone())));
+    let mut justifications = new.justifications;
+    let mut seen = std::collections::HashSet::new();
+    justifications.retain(|j| seen.insert(j.clone()));
+    if problems.is_empty() {
+        return Err(CueError::Invalid("no_problems"));
+    }
+    if justifications.is_empty() {
+        return Err(CueError::Invalid("no_justifications"));
+    }
+    for p in &problems {
+        validate_problem_code(&tx, &country_code, &p.reason_category_code, &p.problem_code)?;
     }
 
     // --- resolve legal snapshots from the referenced rows ------------------
@@ -127,8 +147,8 @@ pub fn insert_treatment_record(
         country_code,
         dose_value: new.dose_value,
         dose_unit_code: new.dose_unit_code,
-        reason_category_code: new.reason_category_code,
         target_organism: new.target_organism,
+        efficacy_code: new.efficacy_code,
         operator_id: new.operator_id,
         machinery_id: new.machinery_id,
         phi_days_used: phi_days,
@@ -149,7 +169,7 @@ pub fn insert_treatment_record(
     tx.execute(
         "INSERT INTO treatment_record (
             id, season_id, farm_id, application_date, product_id, country_code, dose_value, dose_unit_code,
-            reason_category_code, target_organism, operator_id, machinery_id, phi_days_used, phi_end_date,
+            target_organism, efficacy_code, operator_id, machinery_id, phi_days_used, phi_end_date,
             product_name_snapshot, authorisation_number_snapshot, active_substances_snapshot,
             operator_name_snapshot, operator_licence_snapshot, machinery_roma_snapshot,
             machinery_reganip_snapshot, notes, created_at, updated_at
@@ -159,13 +179,59 @@ pub fn insert_treatment_record(
          )",
         params![
             record.id, record.season_id, record.farm_id, record.application_date, record.product_id, record.country_code,
-            record.dose_value, record.dose_unit_code, record.reason_category_code, record.target_organism,
+            record.dose_value, record.dose_unit_code, record.target_organism, record.efficacy_code,
             record.operator_id, record.machinery_id, record.phi_days_used, record.phi_end_date,
             record.product_name_snapshot, record.authorisation_number_snapshot, record.active_substances_snapshot,
             record.operator_name_snapshot, record.operator_licence_snapshot, record.machinery_roma_snapshot,
             record.machinery_reganip_snapshot, record.notes, record.created_at, record.updated_at
         ],
     )?;
+
+    // --- the coded problems + justifications (junction rows) ---------------
+    for p in problems {
+        let row = TreatmentProblem {
+            id: Uuid::now_v7().to_string(),
+            treatment_record_id: record.id.clone(),
+            reason_category_code: p.reason_category_code,
+            problem_code: p.problem_code,
+        };
+        tx.execute(
+            "INSERT INTO treatment_problem (id, treatment_record_id, reason_category_code, problem_code)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                row.id,
+                row.treatment_record_id,
+                row.reason_category_code,
+                row.problem_code
+            ],
+        )?;
+        log_insert(
+            &tx,
+            "treatment_problem",
+            &row.id,
+            Some(&record.season_id),
+            &row,
+        )?;
+    }
+    for code in justifications {
+        let row = TreatmentJustification {
+            id: Uuid::now_v7().to_string(),
+            treatment_record_id: record.id.clone(),
+            justification_code: code,
+        };
+        tx.execute(
+            "INSERT INTO treatment_justification (id, treatment_record_id, justification_code)
+             VALUES (?1, ?2, ?3)",
+            params![row.id, row.treatment_record_id, row.justification_code],
+        )?;
+        log_insert(
+            &tx,
+            "treatment_justification",
+            &row.id,
+            Some(&record.season_id),
+            &row,
+        )?;
+    }
 
     // --- the treated plots (multi-plot in one entry) ----------------------
     for p in plots {
@@ -211,7 +277,7 @@ pub fn insert_treatment_record(
     Ok(record)
 }
 
-/// Fetch a treatment record with all of its treated plots.
+/// Fetch a treatment record with its treated plots, problems and justifications.
 pub fn get_treatment_record(conn: &Connection, id: &str) -> Result<TreatmentRecordWithPlots> {
     let record = conn
         .query_row(
@@ -221,8 +287,19 @@ pub fn get_treatment_record(conn: &Connection, id: &str) -> Result<TreatmentReco
         )
         .optional()?
         .ok_or(CueError::NotFound)?;
-    let plots = plots_of(conn, id)?;
-    Ok(TreatmentRecordWithPlots { record, plots })
+    with_details(conn, record)
+}
+
+fn with_details(conn: &Connection, record: TreatmentRecord) -> Result<TreatmentRecordWithPlots> {
+    let plots = plots_of(conn, &record.id)?;
+    let problems = problems_of(conn, &record.id)?;
+    let justifications = justifications_of(conn, &record.id)?;
+    Ok(TreatmentRecordWithPlots {
+        record,
+        plots,
+        problems,
+        justifications,
+    })
 }
 
 /// Active treatment records of one farm in one season, newest application
@@ -242,10 +319,30 @@ pub fn list_treatment_records(
         .collect::<rusqlite::Result<Vec<_>>>()?;
     records
         .into_iter()
-        .map(|record| {
-            let plots = plots_of(conn, &record.id)?;
-            Ok(TreatmentRecordWithPlots { record, plots })
-        })
+        .map(|record| with_details(conn, record))
+        .collect()
+}
+
+/// Every record of one farm+season in application order, soft-deleted ones
+/// INCLUDED — the SIEX exporter emits deletion entries (`Borrar`) for records
+/// that were exported before being deleted, so it must see them. Everything
+/// else reads through `list_treatment_records`, which filters them out.
+pub(crate) fn list_treatment_records_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<TreatmentRecordWithPlots>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM treatment_record
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY application_date ASC, id ASC",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_treatment_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    records
+        .into_iter()
+        .map(|record| with_details(conn, record))
         .collect()
 }
 
@@ -256,6 +353,101 @@ fn plots_of(conn: &Connection, treatment_record_id: &str) -> Result<Vec<Treatmen
         .query_map([treatment_record_id], map_treatment_plot)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(plots)
+}
+
+fn problems_of(conn: &Connection, treatment_record_id: &str) -> Result<Vec<TreatmentProblem>> {
+    let mut stmt =
+        conn.prepare("SELECT * FROM treatment_problem WHERE treatment_record_id = ?1 ORDER BY id")?;
+    let problems = stmt
+        .query_map([treatment_record_id], |row| {
+            Ok(TreatmentProblem {
+                id: row.get("id")?,
+                treatment_record_id: row.get("treatment_record_id")?,
+                reason_category_code: row.get("reason_category_code")?,
+                problem_code: row.get("problem_code")?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(problems)
+}
+
+fn justifications_of(
+    conn: &Connection,
+    treatment_record_id: &str,
+) -> Result<Vec<TreatmentJustification>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM treatment_justification WHERE treatment_record_id = ?1 ORDER BY id",
+    )?;
+    let justifications = stmt
+        .query_map([treatment_record_id], |row| {
+            Ok(TreatmentJustification {
+                id: row.get("id")?,
+                treatment_record_id: row.get("treatment_record_id")?,
+                justification_code: row.get("justification_code")?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(justifications)
+}
+
+/// The one edit a stored treatment record allows: recording (or correcting)
+/// the observed efficacy, which is assessed after application and so cannot be
+/// demanded at insert time. Everything else on the record stays immutable —
+/// it is a legal document. Logged as an update with complete row images.
+pub fn set_treatment_efficacy(
+    conn: &mut Connection,
+    id: &str,
+    efficacy_code: Option<String>,
+) -> Result<TreatmentRecord> {
+    let tx = conn.transaction()?;
+    let before = tx
+        .query_row(
+            "SELECT * FROM treatment_record WHERE id = ?1 AND deleted_at IS NULL",
+            [id],
+            map_treatment_record,
+        )
+        .optional()?
+        .ok_or(CueError::NotFound)?;
+    let mut after = before.clone();
+    after.efficacy_code = efficacy_code;
+    after.updated_at = now_utc_iso();
+    tx.execute(
+        "UPDATE treatment_record SET efficacy_code = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, after.efficacy_code, after.updated_at],
+    )?;
+    log_update(
+        &tx,
+        "treatment_record",
+        id,
+        Some(&before.season_id),
+        &before,
+        &after,
+    )?;
+    tx.commit()?;
+    Ok(after)
+}
+
+/// Insert-time net for catalogue-coded problems: when the record's country
+/// maps the category to a reference catalogue AND that catalogue has been
+/// imported (the app imports the vendored snapshot at startup, so in a running
+/// app it always is), the code must exist there. Retired codes stay
+/// acceptable — providers baja-date codes rather than delete them, and a
+/// late-entered record may legitimately reference one. Without an imported
+/// catalogue there is nothing to check against and the code is stored as
+/// given; the export's schema-validated tests are the second net.
+fn validate_problem_code(
+    tx: &Transaction,
+    country: &str,
+    category: &str,
+    code: &str,
+) -> Result<()> {
+    let Some(catalogue_id) = siex::problem_catalogue(country, category) else {
+        return Ok(());
+    };
+    match super::resolve_in_catalogue(tx, catalogue_id, code)? {
+        Some(false) => Err(CueError::Invalid("unknown_problem_code")),
+        _ => Ok(()),
+    }
 }
 
 /// Per-plot PHI standing across one farm's active treatment records, every
@@ -382,8 +574,8 @@ fn map_treatment_record(row: &Row) -> rusqlite::Result<TreatmentRecord> {
         country_code: row.get("country_code")?,
         dose_value: row.get("dose_value")?,
         dose_unit_code: row.get("dose_unit_code")?,
-        reason_category_code: row.get("reason_category_code")?,
         target_organism: row.get("target_organism")?,
+        efficacy_code: row.get("efficacy_code")?,
         operator_id: row.get("operator_id")?,
         machinery_id: row.get("machinery_id")?,
         phi_days_used: row.get("phi_days_used")?,

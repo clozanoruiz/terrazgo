@@ -95,6 +95,12 @@ CREATE TABLE farm (
     id            TEXT PRIMARY KEY,
     name          TEXT NOT NULL,
     owner_name    TEXT,
+    -- Tax/identity number of the legal holder (titular): NIF in Spain, CUAA in
+    -- Italy, SIREN in France… The *concept* is universal — every country's
+    -- regulatory export names the holder — so it lives in core; format
+    -- validation is per-country config. User-entered from the farm's registry
+    -- papers, never derivable (2026-07-15; SIEX export needs it as IdTitular).
+    owner_tax_id  TEXT,
     location_text TEXT,
     latitude      REAL,
     longitude     REAL,
@@ -106,10 +112,14 @@ CREATE TABLE farm (
     deleted_at    TEXT
 );
 
--- Spanish regional extension for farm: REGA code never lives in the core table.
+-- Spanish regional extension for farm: registry codes never live in the core
+-- table. rega_code is the *livestock* registry; rea_code (added 2026-07-15) is
+-- the farm's REA registration (REACYL in CyL) — the SIEX export's CodigoRea,
+-- user-entered from the REA papers (see docs/siex-export.md → REA-first).
 CREATE TABLE farm_es_extension (
     farm_id       TEXT PRIMARY KEY REFERENCES farm(id) ON DELETE CASCADE,
     rega_code     TEXT,
+    rea_code      TEXT,
     province_code TEXT
 );
 

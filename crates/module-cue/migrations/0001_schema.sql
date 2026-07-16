@@ -41,6 +41,32 @@ CREATE TABLE alert_type (
     i18n_key TEXT NOT NULL
 );
 
+-- Treatment efficacy as observed after application (2026-07-15). Small closed
+-- list with universal meaning → English-coded lookup mapped to each country's
+-- export coding at serialization (the unit/reason_category pattern); Spain:
+-- SIEX EFICACIA_TRATAMIENTO. A contract test keeps the export mapping in sync
+-- with the vendored catalogue snapshot.
+CREATE TABLE efficacy (
+    code     TEXT PRIMARY KEY,   -- 'good', 'fair', 'poor'
+    i18n_key TEXT NOT NULL
+);
+
+-- Why the treatment was applied — the IPM justifications of Directive
+-- 2009/128/CE (thresholds, monitoring, DSS, official warning, advisor…).
+-- Same pattern as efficacy; Spain: SIEX JUSTIFICACION_ACTUACION.
+CREATE TABLE justification (
+    code     TEXT PRIMARY KEY,   -- 'threshold_exceeded', 'monitoring', …
+    i18n_key TEXT NOT NULL
+);
+
+-- Nature of a product's per-country authorisation (2026-07-15). EU-universal
+-- concepts (Reg. 1107/2009: standard registration, parallel trade permit,
+-- Art. 53 emergency authorisation); Spain: SIEX TIPO_PRODFITO.
+CREATE TABLE authorisation_kind (
+    code     TEXT PRIMARY KEY,   -- 'registered', 'common_name', 'parallel_import', 'exceptional'
+    i18n_key TEXT NOT NULL
+);
+
 -- ============================================================================
 -- Core user-data tables (UUIDv7 TEXT PKs)
 -- ============================================================================
@@ -80,14 +106,21 @@ CREATE TABLE product_active_substance (
 );
 
 -- A product carries a different authorisation number per country (MAPA nº for ES).
+-- kind_code (2026-07-15) classifies the authorisation's nature; the default
+-- covers the typical case, so existing forms stay valid. For 'exceptional'
+-- authorisations the export must name the substance by its catalogue code
+-- (SIEX AUTORIZACION_EXCP → the TratamFito MateriaActiva field, mandatory only
+-- for that kind) — stored verbatim, no FK, per the catalogue-code rule.
 CREATE TABLE product_authorisation (
-    id                   TEXT PRIMARY KEY,
-    product_id           TEXT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    country_code         TEXT NOT NULL REFERENCES country(code),
-    authorisation_number TEXT NOT NULL,
-    status               TEXT,
-    valid_from           TEXT,
-    valid_until          TEXT,
+    id                         TEXT PRIMARY KEY,
+    product_id                 TEXT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    country_code               TEXT NOT NULL REFERENCES country(code),
+    authorisation_number       TEXT NOT NULL,
+    kind_code                  TEXT NOT NULL DEFAULT 'registered' REFERENCES authorisation_kind(code),
+    exceptional_substance_code TEXT,   -- catalogue code, only meaningful when kind_code = 'exceptional'
+    status                     TEXT,
+    valid_from                 TEXT,
+    valid_until                TEXT,
     UNIQUE (product_id, country_code, authorisation_number)
 );
 
@@ -106,8 +139,15 @@ CREATE TABLE treatment_record (
     country_code                  TEXT NOT NULL REFERENCES country(code),  -- which authorisation context applies
     dose_value                    REAL NOT NULL,
     dose_unit_code                TEXT NOT NULL REFERENCES unit(code),
-    reason_category_code          TEXT NOT NULL REFERENCES reason_category(code),
+    -- The reason for treatment lives in treatment_problem since 2026-07-15
+    -- (each coded problem carries its own category — one record can target a
+    -- disease AND a pest); target_organism stays as optional free-text nuance
+    -- the coded lists cannot express.
     target_organism               TEXT,
+    -- Observed efficacy, assessed AFTER application — nullable by design: on
+    -- application day it is unknowable, so the export precheck (not the
+    -- insert) demands it. Never force farmers to invent a value at entry.
+    efficacy_code                 TEXT REFERENCES efficacy(code),
     operator_id                   TEXT NOT NULL REFERENCES operator(id),
     machinery_id                  TEXT REFERENCES machinery(id),
     phi_days_used                 INTEGER NOT NULL,              -- input
@@ -138,6 +178,59 @@ CREATE TABLE treatment_plot (
     UNIQUE (treatment_record_id, plot_id)
 );
 
+-- The coded phytosanitary problems a treatment targets (≥1 per record,
+-- enforced in the repository like the other insert validations; 2026-07-15,
+-- design in docs/siex-export.md → gap 3). problem_code is a reference-catalogue
+-- code stored verbatim — deliberately NO FK to catalogue_code (the code is the
+-- regulatory payload, the catalogue row is display metadata; reimports must
+-- never cascade into records). The per-row category picks which catalogue the
+-- code resolves against for the record's country (Spain: disease →
+-- ENFERMEDADES, pest → PLAGAS, weed → MALAS_HIERBAS, growth_regulator/other →
+-- REGULADORES_CRECIMIENTO) and the export bucket it lands in; codes repeat
+-- across catalogues, hence the category in the natural key.
+CREATE TABLE treatment_problem (
+    id                   TEXT PRIMARY KEY,
+    treatment_record_id  TEXT NOT NULL REFERENCES treatment_record(id) ON DELETE CASCADE,
+    reason_category_code TEXT NOT NULL REFERENCES reason_category(code),
+    problem_code         TEXT NOT NULL,
+    UNIQUE (treatment_record_id, reason_category_code, problem_code)
+);
+
+-- The IPM justifications behind a treatment (≥1 per record, enforced in the
+-- repository; 2026-07-15). Known at treatment time, unlike efficacy.
+CREATE TABLE treatment_justification (
+    id                  TEXT PRIMARY KEY,
+    treatment_record_id TEXT NOT NULL REFERENCES treatment_record(id) ON DELETE CASCADE,
+    justification_code  TEXT NOT NULL REFERENCES justification(code),
+    UNIQUE (treatment_record_id, justification_code)
+);
+
+-- Integer aliases regulatory exports assign to activity records (2026-07-15,
+-- design in docs/siex-export.md → gap 1). SIEX's IdAjena* edit/delete keys are
+-- integers ≤ 10 digits, so UUIDs cannot travel; an alias is minted at FIRST
+-- export (MAX+1 per target, race-free behind the connection mutex) and then
+-- NEVER updated or deleted — stability across exports is the point, and a
+-- row's existence doubles as the "previously exported" marker that drives the
+-- export's deletion flag for soft-deleted records. split_key discriminates
+-- when one record maps to several export entries (a multi-crop treatment
+-- splits into one TratamFito per crop); its value is serializer-defined,
+-- opaque here. Polymorphic like record_change, so no FK. Synced user data
+-- (aliases must roam and survive backups — they cannot be re-derived):
+-- insert-logged in record_change. Known limit, recorded in the design doc:
+-- two devices exporting independently before syncing could mint colliding
+-- aliases — a sync-stage-2 design item, acceptable while one device exports.
+CREATE TABLE export_alias (
+    id           TEXT PRIMARY KEY,
+    target       TEXT NOT NULL,              -- 'siex' | future export regimes
+    entity_table TEXT NOT NULL,              -- 'treatment_record' first
+    entity_id    TEXT NOT NULL,
+    split_key    TEXT NOT NULL DEFAULT '',   -- '' when the record maps 1:1
+    alias        INTEGER NOT NULL,
+    created_at   TEXT NOT NULL,
+    UNIQUE (target, entity_table, entity_id, split_key),
+    UNIQUE (target, alias)
+);
+
 -- Derived trigger + user acknowledgement state (PHI / licence / ITV). Rows are owned by
 -- the reconciling refresh: derived from source tables, deleted when the condition lapses.
 -- Derived state → excluded from record_change and from sync (each device re-derives).
@@ -158,6 +251,8 @@ CREATE TABLE alert (
 );
 
 CREATE INDEX idx_treatment_plot_treatment ON treatment_plot(treatment_record_id);
+CREATE INDEX idx_treatment_problem_treatment ON treatment_problem(treatment_record_id);
+CREATE INDEX idx_treatment_justification_treatment ON treatment_justification(treatment_record_id);
 CREATE INDEX idx_treatment_record_season  ON treatment_record(season_id);
 CREATE INDEX idx_treatment_record_farm    ON treatment_record(farm_id);
 CREATE INDEX idx_product_auth_product     ON product_authorisation(product_id, country_code);

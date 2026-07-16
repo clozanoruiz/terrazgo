@@ -71,14 +71,28 @@ jobs:
           # data not surviving upgrades); drop at the first stable release.
           prerelease: true
           includeUpdaterJson: false
-          # Windows also gets the bare terrazgo.exe as a "portable" download
-          # (runs without installing; still needs the WebView2 runtime and
-          # keeps its data in the user profile like the installed app).
-          uploadPlainBinary: ${{ matrix.platform == 'windows-latest' }}
 
-      # Attestation subjects are matched by digest, so the rename tauri-action
-      # applies when uploading (e.g. terrazgo.exe → terrazgo_windows_x64.exe)
-      # does not affect verification of the downloaded assets.
+      # Windows also gets a "portable" download: the bare terrazgo.exe, zipped
+      # (runs without installing; still needs the WebView2 runtime and keeps
+      # its data in the user profile like the installed app). Zipped rather
+      # than uploaded as a naked exe so browsers download it without warnings
+      # and the filename carries the version.
+      - name: Zip the portable build and attach it to the draft release
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart("v")
+          $zip = "terrazgo_${version}_x64_portable.zip"
+          Compress-Archive -Path target/release/terrazgo.exe -DestinationPath $zip
+          # --clobber keeps a re-tagged run idempotent.
+          gh release upload $env:GITHUB_REF_NAME $zip --clobber
+
+      # Attestation subjects are matched by digest, so any rename tauri-action
+      # applies when uploading does not affect verification of the downloaded
+      # assets. The portable download is attested as the zip itself — the file
+      # a user actually downloads and can point gh attestation verify at.
       - name: Attest build provenance (Linux artifacts)
         if: startsWith(matrix.platform, 'ubuntu')
         uses: actions/attest-build-provenance@v4
@@ -93,7 +107,7 @@ jobs:
         with:
           subject-path: |
             target/release/bundle/nsis/*.exe
-            target/release/terrazgo.exe
+            terrazgo_*_portable.zip
 
   # One SBOM per release, derived from the lockfiles (Cargo.lock +
   # package-lock.json — dev-dependencies included, that is the lockfile

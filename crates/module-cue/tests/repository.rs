@@ -46,6 +46,7 @@ fn base_fixture(conn: &mut Connection) -> Fixture {
         NewFarm {
             name: "Finca La Vega".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },
@@ -97,6 +98,8 @@ fn add_es_authorisation(conn: &mut Connection, product_id: &str) {
             product_id: product_id.into(),
             country_code: "es".into(),
             authorisation_number: "ES-25.123".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
             status: Some("authorised".into()),
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
@@ -119,7 +122,12 @@ fn sample_treatment(
         country_code: country_code.map(str::to_string),
         dose_value: 1.0,
         dose_unit_code: "l_ha".into(),
-        reason_category_code: "disease".into(),
+        problems: vec![NewTreatmentProblem {
+            reason_category_code: "disease".into(),
+            problem_code: "1".into(),
+        }],
+        justifications: vec!["monitoring".into()],
+        efficacy_code: None,
         target_organism: None,
         operator_id: fx.operator_id.clone(),
         machinery_id: None,
@@ -282,6 +290,7 @@ fn plot_on_a_different_farm_is_rejected() {
         NewFarm {
             name: "Otra".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },
@@ -438,6 +447,8 @@ fn product_authorisation_number_is_per_country() {
             product_id: fx.product_id.clone(),
             country_code: "es".into(),
             authorisation_number: "ES-25.123".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
             status: None,
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
@@ -450,6 +461,8 @@ fn product_authorisation_number_is_per_country() {
             product_id: fx.product_id.clone(),
             country_code: "fr".into(),
             authorisation_number: "FR-2000999".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
             status: None,
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
@@ -463,6 +476,7 @@ fn product_authorisation_number_is_per_country() {
         NewFarm {
             name: "Ferme".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "fr".into(),
             es: None,
         },
@@ -474,6 +488,7 @@ fn product_authorisation_number_is_per_country() {
         NewFarm {
             name: "Azienda".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "it".into(),
             es: None,
         },
@@ -602,6 +617,7 @@ fn audit_payload_contains_the_full_row_image() {
         NewFarm {
             name: "Finca".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },
@@ -625,6 +641,7 @@ fn audit_payload_contains_the_full_row_image() {
         "id",
         "name",
         "owner_name",
+        "owner_tax_id",
         "location_text",
         "latitude",
         "longitude",
@@ -912,6 +929,8 @@ fn list_products_authorised_is_per_country_and_ordered_by_name() {
             product_id: fr_only_id,
             country_code: "fr".into(),
             authorisation_number: "FR-9999".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
             status: None,
             valid_from: None,
             valid_until: None,
@@ -939,6 +958,8 @@ fn a_product_with_two_authorisations_in_a_country_is_listed_once() {
             product_id: fx.product_id.clone(),
             country_code: "es".into(),
             authorisation_number: "ES-25.123-R".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
             status: Some("authorised".into()),
             valid_from: Some("2026-01-01".into()),
             valid_until: None,
@@ -1087,6 +1108,8 @@ fn es_authorisation_fields(number: &str) -> ProductAuthorisationFields {
     ProductAuthorisationFields {
         country_code: "es".into(),
         authorisation_number: number.into(),
+        kind_code: None,
+        exceptional_substance_code: None,
         status: Some("authorised".into()),
         valid_from: None,
         valid_until: None,
@@ -1488,6 +1511,7 @@ fn phi_status_excludes_deleted_records_untreated_plots_and_other_farms() {
         NewFarm {
             name: "Otra".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },
@@ -1570,4 +1594,394 @@ fn phi_status_excludes_deleted_plots() {
     terrazgo_core::repository::soft_delete_plot(&mut conn, &plot).unwrap();
     let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
     assert!(rows.is_empty(), "a deleted plot has no map presence");
+}
+
+// --- coded problems, justifications and efficacy (SIEX gap 3) ----------------
+// Design in docs/siex-export.md: the coded problems ARE the reason for
+// treatment (RD 1311/2012) and the SIEX export requires ≥1 problem, 1..n
+// justifications and an efficacy per TratamFito (schema v3.11.4).
+
+/// A treated plot to hang the junction tests on.
+fn add_plot(conn: &mut Connection, farm_id: &str, name: &str) -> String {
+    repo::insert_plot(
+        conn,
+        NewPlot {
+            farm_id: farm_id.into(),
+            name: name.into(),
+            area_ha: Some(2.0),
+            es: None,
+        },
+    )
+    .unwrap()
+    .id
+}
+
+/// Minimal imported catalogue so the insert-time code check has something to
+/// resolve against (the app imports the real vendored snapshot at startup;
+/// tests seed only what they assert on).
+fn seed_disease_catalogue(conn: &Connection) {
+    conn.execute(
+        "INSERT INTO catalogue (id, source, imported_at) VALUES ('ENFERMEDADES', 'siex', '2026-07-15T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO catalogue_code (catalogue_id, code, label) VALUES ('ENFERMEDADES', '254', 'Septoriosis')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO catalogue_code (catalogue_id, code, label, retired_on)
+         VALUES ('ENFERMEDADES', '9', 'Retired disease', '2024-01-01')",
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn treatment_captures_problems_justifications_and_efficacy() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "P");
+
+    let mut new = sample_treatment(&fx, None, Some(14));
+    new.problems = vec![
+        NewTreatmentProblem {
+            reason_category_code: "disease".into(),
+            problem_code: "254".into(),
+        },
+        NewTreatmentProblem {
+            reason_category_code: "pest".into(),
+            problem_code: "135".into(),
+        },
+    ];
+    new.justifications = vec!["threshold_exceeded".into(), "monitoring".into()];
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 2.0,
+        }],
+    )
+    .unwrap();
+    assert!(record.efficacy_code.is_none(), "not observed yet at entry");
+
+    let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
+    assert_eq!(fetched.problems.len(), 2);
+    assert_eq!(fetched.problems[0].reason_category_code, "disease");
+    assert_eq!(fetched.problems[0].problem_code, "254");
+    assert_eq!(fetched.problems[1].reason_category_code, "pest");
+    assert_eq!(fetched.justifications.len(), 2);
+    assert_eq!(
+        fetched.justifications[0].justification_code,
+        "threshold_exceeded"
+    );
+
+    // Junction rows are synced user data → their inserts are audit-logged
+    // with complete row images, like treatment_plot rows.
+    let logged: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM record_change
+             WHERE entity_table IN ('treatment_problem', 'treatment_justification')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(logged, 4);
+
+    // The list view carries the details too.
+    let listed = repo::list_treatment_records(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    assert_eq!(listed[0].problems.len(), 2);
+    assert_eq!(listed[0].justifications.len(), 2);
+}
+
+#[test]
+fn treatment_requires_at_least_one_problem_and_justification() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "P");
+    let plots = |p: &str| {
+        vec![NewTreatmentPlot {
+            plot_id: p.into(),
+            crop_id: None,
+            surface_treated_ha: 2.0,
+        }]
+    };
+
+    let mut no_problems = sample_treatment(&fx, None, Some(14));
+    no_problems.problems = vec![];
+    let err = repo::insert_treatment_record(&mut conn, no_problems, plots(&plot)).unwrap_err();
+    assert!(matches!(err, module_cue::CueError::Invalid("no_problems")));
+
+    let mut no_justifications = sample_treatment(&fx, None, Some(14));
+    no_justifications.justifications = vec![];
+    let err =
+        repo::insert_treatment_record(&mut conn, no_justifications, plots(&plot)).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("no_justifications")
+    ));
+}
+
+#[test]
+fn duplicate_problems_and_justifications_are_folded() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "P");
+
+    let mut new = sample_treatment(&fx, None, Some(14));
+    new.problems = vec![
+        NewTreatmentProblem {
+            reason_category_code: "disease".into(),
+            problem_code: "254".into(),
+        },
+        NewTreatmentProblem {
+            reason_category_code: "disease".into(),
+            problem_code: "254".into(),
+        },
+    ];
+    new.justifications = vec!["monitoring".into(), "monitoring".into()];
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 2.0,
+        }],
+    )
+    .unwrap();
+
+    let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
+    assert_eq!(fetched.problems.len(), 1);
+    assert_eq!(fetched.justifications.len(), 1);
+}
+
+#[test]
+fn problem_codes_are_validated_against_imported_catalogues() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "P");
+    seed_disease_catalogue(&conn);
+    let plots = |p: &str| {
+        vec![NewTreatmentPlot {
+            plot_id: p.into(),
+            crop_id: None,
+            surface_treated_ha: 2.0,
+        }]
+    };
+
+    // A code the imported catalogue doesn't know is rejected…
+    let mut bogus = sample_treatment(&fx, None, Some(14));
+    bogus.problems = vec![NewTreatmentProblem {
+        reason_category_code: "disease".into(),
+        problem_code: "999999".into(),
+    }];
+    let err = repo::insert_treatment_record(&mut conn, bogus, plots(&plot)).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("unknown_problem_code")
+    ));
+
+    // …a known code passes…
+    let mut known = sample_treatment(&fx, None, Some(14));
+    known.problems = vec![NewTreatmentProblem {
+        reason_category_code: "disease".into(),
+        problem_code: "254".into(),
+    }];
+    repo::insert_treatment_record(&mut conn, known, plots(&plot)).unwrap();
+
+    // …and so does a RETIRED code: providers baja-date codes rather than
+    // delete them, and a late-entered record may reference one legitimately.
+    let mut retired = sample_treatment(&fx, None, Some(14));
+    retired.application_date = "2026-05-02".into();
+    retired.problems = vec![NewTreatmentProblem {
+        reason_category_code: "disease".into(),
+        problem_code: "9".into(),
+    }];
+    repo::insert_treatment_record(&mut conn, retired, plots(&plot)).unwrap();
+
+    // A category whose catalogue is NOT imported cannot be checked — the code
+    // is stored as given (the export's schema-validated tests are the second
+    // net). In the running app every catalogue is imported at startup.
+    let mut unchecked = sample_treatment(&fx, None, Some(14));
+    unchecked.application_date = "2026-05-03".into();
+    unchecked.problems = vec![NewTreatmentProblem {
+        reason_category_code: "weed".into(),
+        problem_code: "12345".into(),
+    }];
+    repo::insert_treatment_record(&mut conn, unchecked, plots(&plot)).unwrap();
+}
+
+#[test]
+fn set_treatment_efficacy_updates_and_logs() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "P");
+
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 2.0,
+        }],
+    )
+    .unwrap();
+    assert!(record.efficacy_code.is_none());
+
+    // Efficacy is observed after application — the one allowed edit.
+    let updated = repo::set_treatment_efficacy(&mut conn, &record.id, Some("fair".into())).unwrap();
+    assert_eq!(updated.efficacy_code.as_deref(), Some("fair"));
+    let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
+    assert_eq!(fetched.record.efficacy_code.as_deref(), Some("fair"));
+
+    // Logged as an update with complete before/after images.
+    let (before, after): (String, String) = conn
+        .query_row(
+            "SELECT payload, operation FROM record_change
+             WHERE entity_table = 'treatment_record' AND entity_id = ?1 AND operation = 'update'
+             ORDER BY changed_at DESC LIMIT 1",
+            [&record.id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+        )
+        .map(|(payload, _)| {
+            let doc: serde_json::Value = serde_json::from_str(&payload).unwrap();
+            (
+                doc["before"]["efficacy_code"].to_string(),
+                doc["after"]["efficacy_code"].to_string(),
+            )
+        })
+        .unwrap();
+    assert_eq!(before, "null");
+    assert_eq!(after, "\"fair\"");
+
+    // Deleted records are not editable.
+    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    assert!(matches!(
+        repo::set_treatment_efficacy(&mut conn, &record.id, Some("good".into())),
+        Err(module_cue::CueError::NotFound)
+    ));
+}
+
+// --- authorisation kind + exceptional substance (SIEX gap 3, TipoProducto) ---
+
+#[test]
+fn authorisation_kind_defaults_and_gates_the_exceptional_substance() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+
+    // Default: a plain registration.
+    let auth = repo::add_product_authorisation(
+        &mut conn,
+        NewProductAuthorisation {
+            product_id: fx.product_id.clone(),
+            country_code: "es".into(),
+            authorisation_number: "ES-1".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
+            status: None,
+            valid_from: None,
+            valid_until: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(auth.kind_code, "registered");
+    assert!(auth.exceptional_substance_code.is_none());
+
+    // 'exceptional' without its substance code is rejected: SIEX requires
+    // MateriaActiva for TipoProducto 4 and the value exists only on the
+    // authorisation papers — it cannot be derived later.
+    let err = repo::add_product_authorisation(
+        &mut conn,
+        NewProductAuthorisation {
+            product_id: fx.product_id.clone(),
+            country_code: "es".into(),
+            authorisation_number: "ES-2".into(),
+            kind_code: Some("exceptional".into()),
+            exceptional_substance_code: None,
+            status: None,
+            valid_from: None,
+            valid_until: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("missing_exceptional_substance")
+    ));
+
+    // With an imported AUTORIZACION_EXCP catalogue the code must resolve there.
+    conn.execute(
+        "INSERT INTO catalogue (id, source, imported_at) VALUES ('AUTORIZACION_EXCP', 'siex', '2026-07-15T00:00:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO catalogue_code (catalogue_id, code, label) VALUES ('AUTORIZACION_EXCP', '42', 'Substance X')",
+        [],
+    )
+    .unwrap();
+    let err = repo::add_product_authorisation(
+        &mut conn,
+        NewProductAuthorisation {
+            product_id: fx.product_id.clone(),
+            country_code: "es".into(),
+            authorisation_number: "ES-3".into(),
+            kind_code: Some("exceptional".into()),
+            exceptional_substance_code: Some("999999".into()),
+            status: None,
+            valid_from: None,
+            valid_until: None,
+        },
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("unknown_substance_code")
+    ));
+
+    let auth = repo::add_product_authorisation(
+        &mut conn,
+        NewProductAuthorisation {
+            product_id: fx.product_id.clone(),
+            country_code: "es".into(),
+            authorisation_number: "ES-4".into(),
+            kind_code: Some("exceptional".into()),
+            exceptional_substance_code: Some("42".into()),
+            status: None,
+            valid_from: None,
+            valid_until: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(auth.kind_code, "exceptional");
+    assert_eq!(auth.exceptional_substance_code.as_deref(), Some("42"));
+
+    // A substance code on a non-exceptional kind has no SIEX field to land in:
+    // dropped rather than stored as dead data.
+    let auth = repo::add_product_authorisation(
+        &mut conn,
+        NewProductAuthorisation {
+            product_id: fx.product_id.clone(),
+            country_code: "es".into(),
+            authorisation_number: "ES-5".into(),
+            kind_code: Some("parallel_import".into()),
+            exceptional_substance_code: Some("42".into()),
+            status: None,
+            valid_from: None,
+            valid_until: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(auth.kind_code, "parallel_import");
+    assert!(auth.exceptional_substance_code.is_none());
 }

@@ -77,6 +77,8 @@ export default {
   "farm.longitude": "Longitud",
   "farm.es_section": "Datos registrales (España)",
   "farm.rega": "Código REGA",
+  "farm.rea": "Código REA (Reacyl)",
+  "farm.owner_tax_id": "NIF del titular",
   "farm.province": "Código de provincia",
   "farm.delete": "Eliminar explotación",
   "farm.delete_confirm":
@@ -213,6 +215,15 @@ export default {
   "treatment.unit": "Unidad",
   "treatment.reason": "Motivo",
   "treatment.target": "Organismo objetivo",
+  "treatment.problems_section": "Problemáticas tratadas",
+  "treatment.problem": "Problemática (catálogo oficial)",
+  "treatment.problem_filter": "Buscar",
+  "treatment.problem_filter_hint": "Filtra la lista…",
+  "treatment.add_problem": "Añadir problemática",
+  "treatment.justifications_section": "Justificación de la actuación",
+  "treatment.efficacy": "Eficacia",
+  "treatment.efficacy_pending": "Sin valorar",
+  "treatment.efficacy_hint": "Se valora después de la aplicación; puede indicarse más tarde.",
   "treatment.operator": "Operador",
   "treatment.machinery": "Maquinaria",
   "treatment.machinery_none": "— ninguna —",
@@ -234,6 +245,26 @@ export default {
   "message.crop_saved": "Cultivo «{species}» guardado.",
   "message.treatment_saved": "Tratamiento registrado; cosecha permitida a partir del {date}.",
   "message.treatment_deleted": "Tratamiento eliminado.",
+  "message.cuaderno_exported": "Exportación guardada en {path} ({entries} tratamientos).",
+
+  "export.title": "Exportación oficial (SIEX)",
+  "export.run": "Exportar…",
+  "export.hint":
+    "Genera el fichero JSON con los tratamientos de esta campaña en el formato oficial SIEX, para volcarlos a la plataforma regional (CUECYL en Castilla y León).",
+  "export.blocked_intro": "Aún faltan datos para poder exportar:",
+  "export.farm_fields": "Datos de la explotación",
+  "export.field_owner_tax_id": "NIF del titular",
+  "export.field_rea_code": "código REA (14 caracteres)",
+  "export.field_province_code": "provincia (código INE)",
+  "export.missing_efficacy": "Tratamientos sin eficacia registrada",
+  "export.missing_licence": "Tratamientos cuyo aplicador no tiene nº de carnet (ROPO)",
+  "export.missing_crop": "Parcelas tratadas sin cultivo asignado",
+
+  "export.pdf_title": "Cuaderno imprimible (PDF)",
+  "export.pdf_run": "Generar PDF…",
+  "export.pdf_hint":
+    "Genera el cuaderno de explotación en PDF siguiendo el modelo oficial (información general, parcelas y registro de tratamientos). Los datos que falten se imprimen en blanco, como en el formulario en papel.",
+  "message.cuaderno_pdf_exported": "Cuaderno guardado en {path} ({pages} páginas).",
 
   "registry.title": "Catálogo",
 
@@ -249,6 +280,8 @@ export default {
   "product.auth_section": "Autorización",
   "product.auth_country": "País",
   "product.auth_number": "Nº de registro",
+  "product.auth_kind": "Tipo de autorización",
+  "product.exceptional_substance": "Sustancia (autorización excepcional)",
   "product.no_authorisations":
     "Sin autorización en ningún país; no se ofrecerá al registrar tratamientos.",
   "product.substances": "Sustancias activas",
@@ -329,6 +362,21 @@ export default {
   "formulation_type.ec": "EC (concentrado emulsionable)",
   "formulation_type.wg": "WG (granulado dispersable)",
   "formulation_type.sl": "SL (concentrado soluble)",
+  // Eficacia y justificaciones: la redacción oficial de los catálogos SIEX
+  // (EFICACIA_TRATAMIENTO, JUSTIFICACION_ACTUACION), textual.
+  "efficacy.good": "Buena",
+  "efficacy.fair": "Regular",
+  "efficacy.poor": "Mala",
+  "justification.threshold_exceeded": "Superación de umbrales",
+  "justification.monitoring": "Monitorización",
+  "justification.decision_support_system": "Sistema de apoyo a la toma de decisión (DSS)",
+  "justification.authority_warning": "Aviso por Comunidad Autónoma",
+  "justification.advisor_recommendation": "Recomendación de asesor",
+  "justification.alert_device": "Medidor de alerta fitosanitaria",
+  "authorisation_kind.registered": "Producto fitosanitario registrado",
+  "authorisation_kind.common_name": "Denominación común",
+  "authorisation_kind.parallel_import": "Importación paralela",
+  "authorisation_kind.exceptional": "Autorización excepcional",
 
   "settings.general": "General",
   "settings.map": "Mapa",
@@ -357,6 +405,18 @@ export default {
   "error.not_found": "El registro no existe.",
   "error.invalid.empty_name": "El nombre no puede estar vacío.",
   "error.invalid.empty_authorisation_number": "El número de registro no puede estar vacío.",
+  "error.invalid.no_problems": "Indica al menos una problemática (plaga, enfermedad…).",
+  "error.invalid.no_justifications": "Indica al menos una justificación de la actuación.",
+  "error.invalid.unknown_problem_code":
+    "La problemática seleccionada no está en el catálogo oficial.",
+  "error.invalid.export_precheck_failed":
+    "La exportación está bloqueada: faltan datos que exige el formato oficial.",
+  "error.invalid.export_code_unmappable":
+    "Un código guardado no se pudo convertir a los catálogos oficiales.",
+  "error.invalid.missing_exceptional_substance":
+    "Una autorización excepcional debe indicar su sustancia (código del catálogo oficial).",
+  "error.invalid.unknown_substance_code":
+    "La sustancia indicada no está en el catálogo oficial de autorizaciones excepcionales.",
   "error.invalid.nonpositive_area": "La superficie debe ser mayor que cero.",
   "error.invalid.cache_cap_too_small":
     "El espacio para mapas sin conexión es demasiado pequeño (mínimo 64 MB).",

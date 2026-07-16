@@ -9,6 +9,8 @@
 //!   * [`repository`] — CRUD for `TreatmentRecord` and its dependencies, with audit
 //!     logging; one submodule per entity group, re-exported from `repository`.
 //!   * [`alerts`]     — pure alert rules (PHI window, licence/ITV expiry) + `AlertConfig`.
+//!   * [`siex`]       — neutral-code ↔ SIEX-code mapping for the Spanish export.
+//!   * [`export`]     — the SIEX cuaderno export: precheck + descriptor-JSON builder.
 //!   * [`error`]      — `CueError` / `Result`.
 //!   * [`demo`]       — demo-campaign seeding (only with the `demo` feature).
 //!
@@ -21,8 +23,11 @@ pub mod db;
 #[cfg(feature = "demo")]
 pub mod demo;
 pub mod error;
+pub mod export;
 pub mod models;
+pub mod report;
 pub mod repository;
+pub mod siex;
 
 pub use db::{migration_set, migrations, open, open_in_memory};
 pub use error::{CueError, Result};

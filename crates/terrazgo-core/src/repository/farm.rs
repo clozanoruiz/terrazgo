@@ -32,6 +32,7 @@ pub fn insert_farm(conn: &mut Connection, new: NewFarm) -> Result<Farm> {
         id: Uuid::now_v7().to_string(),
         name: new.name,
         owner_name: new.owner_name,
+        owner_tax_id: new.owner_tax_id,
         location_text: None, // not on the create form yet; editable via update_farm
         latitude: None,
         longitude: None,
@@ -42,10 +43,10 @@ pub fn insert_farm(conn: &mut Connection, new: NewFarm) -> Result<Farm> {
     };
     tx.execute(
         "INSERT INTO farm
-           (id, name, owner_name, location_text, latitude, longitude, country_code, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+           (id, name, owner_name, owner_tax_id, location_text, latitude, longitude, country_code, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
-            farm.id, farm.name, farm.owner_name, farm.location_text, farm.latitude,
+            farm.id, farm.name, farm.owner_name, farm.owner_tax_id, farm.location_text, farm.latitude,
             farm.longitude, farm.country_code, farm.created_at, farm.updated_at
         ],
     )?;
@@ -97,6 +98,7 @@ pub fn update_farm(conn: &mut Connection, id: &str, update: UpdateFarm) -> Resul
     let mut after = before.clone();
     after.name = update.name;
     after.owner_name = update.owner_name;
+    after.owner_tax_id = update.owner_tax_id;
     after.location_text = update.location_text;
     after.latitude = update.latitude;
     after.longitude = update.longitude;
@@ -104,13 +106,14 @@ pub fn update_farm(conn: &mut Connection, id: &str, update: UpdateFarm) -> Resul
     after.updated_at = now_utc_iso();
 
     tx.execute(
-        "UPDATE farm SET name = ?2, owner_name = ?3, location_text = ?4, latitude = ?5,
-                         longitude = ?6, country_code = ?7, updated_at = ?8
+        "UPDATE farm SET name = ?2, owner_name = ?3, owner_tax_id = ?4, location_text = ?5,
+                         latitude = ?6, longitude = ?7, country_code = ?8, updated_at = ?9
          WHERE id = ?1",
         params![
             id,
             after.name,
             after.owner_name,
+            after.owner_tax_id,
             after.location_text,
             after.latitude,
             after.longitude,
@@ -269,11 +272,12 @@ fn insert_farm_extension(
     let ext = FarmEsExtension {
         farm_id: farm_id.to_string(),
         rega_code: es.rega_code.clone(),
+        rea_code: es.rea_code.clone(),
         province_code: es.province_code.clone(),
     };
     tx.execute(
-        "INSERT INTO farm_es_extension (farm_id, rega_code, province_code) VALUES (?1, ?2, ?3)",
-        params![ext.farm_id, ext.rega_code, ext.province_code],
+        "INSERT INTO farm_es_extension (farm_id, rega_code, rea_code, province_code) VALUES (?1, ?2, ?3, ?4)",
+        params![ext.farm_id, ext.rega_code, ext.rea_code, ext.province_code],
     )?;
     log_insert(tx, "farm_es_extension", farm_id, None, &ext)?;
     Ok(ext)
@@ -282,15 +286,9 @@ fn insert_farm_extension(
 fn get_farm_extension(conn: &Connection, farm_id: &str) -> Result<Option<FarmEsExtension>> {
     Ok(conn
         .query_row(
-            "SELECT farm_id, rega_code, province_code FROM farm_es_extension WHERE farm_id = ?1",
+            "SELECT * FROM farm_es_extension WHERE farm_id = ?1",
             [farm_id],
-            |r| {
-                Ok(FarmEsExtension {
-                    farm_id: r.get(0)?,
-                    rega_code: r.get(1)?,
-                    province_code: r.get(2)?,
-                })
-            },
+            map_farm_extension,
         )
         .optional()?)
 }
@@ -305,15 +303,9 @@ fn reconcile_farm_extension(
     let current = {
         // Same query as get_farm_extension, but on the open transaction.
         tx.query_row(
-            "SELECT farm_id, rega_code, province_code FROM farm_es_extension WHERE farm_id = ?1",
+            "SELECT * FROM farm_es_extension WHERE farm_id = ?1",
             [farm_id],
-            |r| {
-                Ok(FarmEsExtension {
-                    farm_id: r.get(0)?,
-                    rega_code: r.get(1)?,
-                    province_code: r.get(2)?,
-                })
-            },
+            map_farm_extension,
         )
         .optional()?
     };
@@ -332,11 +324,12 @@ fn reconcile_farm_extension(
             let after = FarmEsExtension {
                 farm_id: farm_id.to_string(),
                 rega_code: es.rega_code,
+                rea_code: es.rea_code,
                 province_code: es.province_code,
             };
             tx.execute(
-                "UPDATE farm_es_extension SET rega_code = ?2, province_code = ?3 WHERE farm_id = ?1",
-                params![farm_id, after.rega_code, after.province_code],
+                "UPDATE farm_es_extension SET rega_code = ?2, rea_code = ?3, province_code = ?4 WHERE farm_id = ?1",
+                params![farm_id, after.rega_code, after.rea_code, after.province_code],
             )?;
             log_update(tx, "farm_es_extension", farm_id, None, &before, &after)?;
             Ok(Some(after))
@@ -457,6 +450,7 @@ fn map_farm(row: &Row) -> rusqlite::Result<Farm> {
         id: row.get("id")?,
         name: row.get("name")?,
         owner_name: row.get("owner_name")?,
+        owner_tax_id: row.get("owner_tax_id")?,
         location_text: row.get("location_text")?,
         latitude: row.get("latitude")?,
         longitude: row.get("longitude")?,
@@ -476,6 +470,15 @@ fn map_plot(row: &Row) -> rusqlite::Result<Plot> {
         created_at: row.get("created_at")?,
         updated_at: row.get("updated_at")?,
         deleted_at: row.get("deleted_at")?,
+    })
+}
+
+fn map_farm_extension(row: &Row) -> rusqlite::Result<FarmEsExtension> {
+    Ok(FarmEsExtension {
+        farm_id: row.get("farm_id")?,
+        rega_code: row.get("rega_code")?,
+        rea_code: row.get("rea_code")?,
+        province_code: row.get("province_code")?,
     })
 }
 

@@ -95,6 +95,9 @@ pub struct Farm {
     pub id: String,
     pub name: String,
     pub owner_name: Option<String>,
+    /// Tax/identity number of the legal holder (NIF/CUAA/SIREN…); regulatory
+    /// exports name the holder with it. Format validation is per-country.
+    pub owner_tax_id: Option<String>,
     pub location_text: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
@@ -110,6 +113,10 @@ pub struct Farm {
 pub struct FarmEsExtension {
     pub farm_id: String,
     pub rega_code: Option<String>,
+    /// REA registration code (REACYL in CyL) — the SIEX export's CodigoRea,
+    /// user-entered from the farm's REA papers. REGA is the livestock registry;
+    /// the two are different registrations.
+    pub rea_code: Option<String>,
     pub province_code: Option<String>,
 }
 
@@ -184,6 +191,7 @@ pub struct GeoFeature {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FarmEsFields {
     pub rega_code: Option<String>,
+    pub rea_code: Option<String>,
     pub province_code: Option<String>,
 }
 
@@ -241,6 +249,7 @@ pub struct NewMachinery {
 pub struct NewFarm {
     pub name: String,
     pub owner_name: Option<String>,
+    pub owner_tax_id: Option<String>,
     /// The farm's country (ISO 3166-1 alpha-2 code). Required: treatment records derive
     /// their country from here.
     pub country_code: String,
@@ -263,6 +272,7 @@ pub struct NewPlot {
 pub struct UpdateFarm {
     pub name: String,
     pub owner_name: Option<String>,
+    pub owner_tax_id: Option<String>,
     pub location_text: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,

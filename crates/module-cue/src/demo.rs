@@ -16,7 +16,7 @@
 use crate::error::Result;
 use crate::models::{
     NewCrop, NewFarm, NewMachinery, NewOperator, NewPlot, NewProduct, NewProductAuthorisation,
-    NewSeason, NewTreatmentPlot, NewTreatmentRecord,
+    NewSeason, NewTreatmentPlot, NewTreatmentProblem, NewTreatmentRecord,
 };
 use crate::repository;
 use rusqlite::Connection;
@@ -89,9 +89,11 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
         NewFarm {
             name: "Finca Los Llanos".into(),
             owner_name: Some("Carlos Lozano".into()),
+            owner_tax_id: None,
             country_code: "es".into(),
             es: Some(FarmEsFields {
-                rega_code: None,                  // no livestock on the demo farm
+                rega_code: None, // no livestock on the demo farm
+                rea_code: None,
                 province_code: Some("47".into()), // Valladolid
             }),
         },
@@ -291,6 +293,8 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             product_id: prosaro.id.clone(),
             country_code: "es".into(),
             authorisation_number: "ES-25182".into(),
+            kind_code: None, // defaults to 'registered'
+            exceptional_substance_code: None,
             status: Some("authorised".into()),
             valid_from: Some("2019-03-01".into()),
             valid_until: Some("2031-12-31".into()),
@@ -321,6 +325,8 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             product_id: karate.id.clone(),
             country_code: "es".into(),
             authorisation_number: "ES-22755".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
             status: Some("authorised".into()),
             valid_from: Some("2017-06-01".into()),
             valid_until: Some("2030-06-30".into()),
@@ -338,8 +344,22 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             country_code: None, // derived from the farm
             dose_value: 1.0,
             dose_unit_code: "l_ha".into(),
-            reason_category_code: "disease".into(),
             target_organism: Some("Septoria tritici, brown rust".into()),
+            // Real SIEX ENFERMEDADES codes: 254 Septoriosis (Septoria spp.),
+            // 416 Roya parda del trigo (Puccinia triticina).
+            problems: vec![
+                NewTreatmentProblem {
+                    reason_category_code: "disease".into(),
+                    problem_code: "254".into(),
+                },
+                NewTreatmentProblem {
+                    reason_category_code: "disease".into(),
+                    problem_code: "416".into(),
+                },
+            ],
+            justifications: vec!["monitoring".into(), "advisor_recommendation".into()],
+            // The PHI window is already past, so the efficacy has been observed.
+            efficacy_code: Some("good".into()),
             operator_id: operator.id.clone(),
             machinery_id: Some(sprayer.id.clone()),
             phi_days_used: None, // falls back to the product default (35)
@@ -370,8 +390,15 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             country_code: None,
             dose_value: 75.0,
             dose_unit_code: "ml_ha".into(),
-            reason_category_code: "pest".into(),
             target_organism: Some("aphids (Sitobion avenae)".into()),
+            // Real SIEX PLAGAS code: 135 Pulgón de la espiga (Sitobion avenae).
+            problems: vec![NewTreatmentProblem {
+                reason_category_code: "pest".into(),
+                problem_code: "135".into(),
+            }],
+            justifications: vec!["threshold_exceeded".into()],
+            // Recent treatment: efficacy not yet assessed — the realistic state.
+            efficacy_code: None,
             operator_id: operator.id.clone(),
             machinery_id: Some(sprayer.id.clone()),
             phi_days_used: None, // product default (30)

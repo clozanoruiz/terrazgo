@@ -4,6 +4,9 @@
 > tile/resource source (`crates/terrazgo-geo/src/sources.rs`), a map overlay
 > (`src/lib/mapLayers.js`), or an external map-data seam. A source that is
 > not listed here does not exist as far as reviews are concerned.
+> Endpoints, refresh procedures and what-if-the-provider-dies notes live in
+> [maintenance.md](maintenance.md); this file owns what each source shows
+> and why the app uses it.
 
 Everything below reaches the webview exclusively through the `geo://`
 protocol served by `terrazgo-geo`'s cache-through fetch — the single

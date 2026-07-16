@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "terrazgo-report"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo report engine — in-process PDF generation via Typst; templates and fonts embedded, fully offline (no user data, no UI)"
+
+[lints]
+workspace = true
+
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+typst = { workspace = true }
+typst-layout = { workspace = true }
+typst-pdf = { workspace = true }
+typst-as-lib = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+# Dev-only font-parsing deps deliberately absent: the glyph-coverage test
+# reads the vendored faces through typst's own Font type, so the test and the
+# renderer can never disagree on how a font is parsed.

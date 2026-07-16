@@ -16,8 +16,21 @@
   let products = $state([]);
   let countries = $state([]);
   let formulationTypes = $state([]);
+  let authorisationKinds = $state([]);
   let units = $state([]);
   let substances = $state([]);
+
+  // Exceptional-authorisation substance catalogue per country, fetched when a
+  // form first selects the 'exceptional' kind.
+  let excSubstances = $state({});
+
+  function ensureExcSubstances(countryCode) {
+    if (!countryCode || excSubstances[countryCode]) return;
+    run(async () => {
+      const codes = await invoke("list_exceptional_substances", { countryCode });
+      excSubstances = { ...excSubstances, [countryCode]: codes };
+    });
+  }
 
   // Create form.
   let createOpen = $state(false);
@@ -27,6 +40,8 @@
   let phiDays = $state("");
   let authCountry = $state("");
   let authNumber = $state("");
+  let authKind = $state("registered");
+  let authExcSubstance = $state("");
 
   // Per-card management panel (edit fields + substances + authorisations).
   let openId = $state(null);
@@ -45,15 +60,19 @@
   // Add-authorisation controls.
   let addAuthCountry = $state("");
   let addAuthNumber = $state("");
+  let addAuthKind = $state("registered");
+  let addAuthExcSubstance = $state("");
 
   run(async () => {
-    [products, countries, formulationTypes, units, substances] = await Promise.all([
-      invoke("list_product_details"),
-      invoke("list_countries"),
-      invoke("list_formulation_types"),
-      invoke("list_units"),
-      invoke("list_active_substances"),
-    ]);
+    [products, countries, formulationTypes, authorisationKinds, units, substances] =
+      await Promise.all([
+        invoke("list_product_details"),
+        invoke("list_countries"),
+        invoke("list_formulation_types"),
+        invoke("list_authorisation_kinds"),
+        invoke("list_units"),
+        invoke("list_active_substances"),
+      ]);
     authCountry ||= countries[0]?.code ?? "";
     addAuthCountry ||= countries[0]?.code ?? "";
   }).finally(() => (loading = false));
@@ -77,6 +96,8 @@
     formulationCode = "";
     phiDays = "";
     authNumber = "";
+    authKind = "registered";
+    authExcSubstance = "";
     createOpen = true;
     openId = null;
   }
@@ -92,6 +113,8 @@
     const authorisation = {
       country_code: authCountry,
       authorisation_number: authNumber.trim(),
+      kind_code: authKind,
+      exceptional_substance_code: authKind === "exceptional" ? authExcSubstance || null : null,
       status: null,
       valid_from: null,
       valid_until: null,
@@ -123,6 +146,8 @@
     subConcentration = "";
     subUnitCode = "";
     addAuthNumber = "";
+    addAuthKind = "registered";
+    addAuthExcSubstance = "";
   }
 
   function submitEdit(event) {
@@ -193,6 +218,9 @@
         authorisation: {
           country_code: addAuthCountry,
           authorisation_number: addAuthNumber.trim(),
+          kind_code: addAuthKind,
+          exceptional_substance_code:
+            addAuthKind === "exceptional" ? addAuthExcSubstance || null : null,
           status: null,
           valid_from: null,
           valid_until: null,
@@ -230,7 +258,11 @@
 
   function authSummary(detail) {
     return detail.authorisations
-      .map((a) => `${tCode("country", a.country_code)} ${a.authorisation_number}`)
+      .map((a) => {
+        const kind =
+          a.kind_code !== "registered" ? ` (${tCode("authorisation_kind", a.kind_code)})` : "";
+        return `${tCode("country", a.country_code)} ${a.authorisation_number}${kind}`;
+      })
       .join(" · ");
   }
 
@@ -283,6 +315,28 @@
           <span>{t("product.auth_number")}</span>
           <input required bind:value={authNumber} />
         </label>
+        <label>
+          <span>{t("product.auth_kind")}</span>
+          <select
+            bind:value={authKind}
+            onchange={() => authKind === "exceptional" && ensureExcSubstances(authCountry)}
+          >
+            {#each authorisationKinds as kind (kind.code)}
+              <option value={kind.code}>{tCode("authorisation_kind", kind.code)}</option>
+            {/each}
+          </select>
+        </label>
+        {#if authKind === "exceptional"}
+          <label>
+            <span>{t("product.exceptional_substance")}</span>
+            <select required bind:value={authExcSubstance}>
+              <option value="" disabled hidden></option>
+              {#each excSubstances[authCountry] ?? [] as code (code.id)}
+                <option value={code.code}>{code.label}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
       </div>
     </fieldset>
     <div class="form-actions">
@@ -420,6 +474,29 @@
               <span>{t("product.auth_number")}</span>
               <input bind:value={addAuthNumber} />
             </label>
+            <label>
+              <span>{t("product.auth_kind")}</span>
+              <select
+                bind:value={addAuthKind}
+                onchange={() =>
+                  addAuthKind === "exceptional" && ensureExcSubstances(addAuthCountry)}
+              >
+                {#each authorisationKinds as kind (kind.code)}
+                  <option value={kind.code}>{tCode("authorisation_kind", kind.code)}</option>
+                {/each}
+              </select>
+            </label>
+            {#if addAuthKind === "exceptional"}
+              <label>
+                <span>{t("product.exceptional_substance")}</span>
+                <select bind:value={addAuthExcSubstance}>
+                  <option value="" disabled hidden></option>
+                  {#each excSubstances[addAuthCountry] ?? [] as code (code.id)}
+                    <option value={code.code}>{code.label}</option>
+                  {/each}
+                </select>
+              </label>
+            {/if}
             <label class="selector-action">
               <span>&nbsp;</span>
               <button type="button" onclick={addAuthorisation} disabled={!addAuthNumber.trim()}>

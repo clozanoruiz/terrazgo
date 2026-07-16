@@ -59,6 +59,12 @@ compiler, not discipline, prevents a core→module import:
 - `terrazgo-geo` depends on `terrazgo-core` only (for the GeoJSON validator
   and error conventions) and owns **all network I/O in the app** plus the
   boundary-file importers. No user data lives there.
+- `terrazgo-report` depends on no other workspace crate — pure
+  infrastructure: in-process PDF generation via Typst, with the Liberation
+  Sans faces embedded in the binary. Modules own their `.typ` templates and
+  depend on this crate to render them (see "The report engine" below); the
+  first consumer is the CUE printable cuaderno (`module_cue::report` +
+  `crates/module-cue/templates/cuaderno.typ`).
 - The shell depends on all three and owns everything Tauri-specific: command
   wrappers, the migration runner, the `geo://` protocol, managed state, the
   window.
@@ -287,6 +293,40 @@ tripwire test turns any future encoding drift into a loud test failure at
 the snapshot refresh. Tests run against the real
 vendored FEGA files; the upsert-never-delete invariant has its own test.
 
+How records *use* the catalogues splits by list size (2026-07-15; per-table
+detail in docs/data-model.md, design in docs/siex-export.md → "Capture
+design"). Small closed lists with universal meaning (efficacy, IPM
+justification, authorisation kind) are **owned as English-coded lookup
+tables** and translated to the provider's integers at export by
+`module_cue::siex` — records stay country-neutral, the `es` dictionary
+carries the official Castilian wording verbatim, and a bidirectional
+contract test against the vendored CSVs fails the suite when the provider
+adds or retires a code. Provider lists too large to own (the ~1,400
+phytosanitary problems) store the **catalogue code verbatim** on the record
+(`treatment_problem`), validated at insert against the imported catalogue
+(existence only — retired codes stay legal). Integer export identities live
+in `export_alias`: minted at first export, frozen forever, because the
+authority keys edits and deletions on them.
+
+The export itself lives in `module_cue::export` (added 2026-07-16; mapping
+design in docs/siex-export.md): `export_precheck` lists what blocks a valid
+export (records missing efficacy or an operator licence, treated plots
+without a crop, farm identity fields not yet entered from the REA papers)
+and `build_cuaderno` turns one farm+season into the official CUE descriptor
+JSON (`TratamFito` block), refusing while the precheck is not clean so
+nothing is silently dropped. Multi-crop treatments split into one
+`TratamFito` per crop snapshot (3.11.4 descriptor rule), each split keyed by
+its own frozen alias; a core `crop` row is the SIEX plot+crop+season unit
+(DGC) and is referenced by a client-assigned integer (`CodigoDGCAjena`,
+aliases again). Soft-deleted records emit `Borrar` entries under their
+existing aliases; never-exported deletions leave no trace. The serializer's
+output is schema-validated in tests against the vendored official JSON
+Schema (the `jsonschema` crate, dev-dependency only — never in the shipped
+binary). The shell exposes both as commands (`export_cuaderno_precheck`,
+async `export_cuaderno` writing the JSON to a dialog-chosen path), and the
+record-book view runs precheck-then-export, rendering the blockers as a
+fix-it list.
+
 **Backup** (in `terrazgo_core::backup`): export is a `VACUUM INTO` snapshot
 — consistent and compact while the app runs, no WAL sidecars — which is then
 re-opened and integrity-checked before success is reported; an unverified
@@ -307,6 +347,62 @@ UUIDv7 everywhere and full row images in `record_change` exist precisely so
 Stages 2–3 need no schema rework. The live db file itself must never be
 placed on a network drive or file-sync service — WAL breaks across network
 filesystems; sync travels through exported bundles only.
+
+## The report engine: Typst in-process
+
+Printable documents (the official cuaderno first; fertilisation plans, cost
+reports and analytics dossiers later) are rendered by `crates/terrazgo-report`
+(added 2026-07-16): **Typst as a library**, not a webview `print()` (never
+wired on Linux/wry or Android) and not a low-level PDF writer (no layout
+engine — an unbounded treatments table needs per-cell wrapping, cross-page
+row breaking and repeating headers).
+
+The whole pipeline is offline by construction:
+
+- **Templates** are Typst source owned by the consuming module, embedded via
+  `include_str!`. Report labels are per-country template content (Spanish
+  for the official cuaderno), never UI i18n keys.
+- **Fonts**: the four Liberation Sans faces (~1.6 MB, OFL-1.1 — licence
+  vendored alongside in `crates/terrazgo-report/fonts/`) are embedded with
+  `include_bytes!`. Liberation Sans is metric-compatible with Arial, the
+  look of the Spanish administrative forms. No system-font scanning: output
+  is identical on every platform.
+- **No package resolution**: typst-as-lib's network-capable features stay
+  off, so an `@preview` import in a template fails the compile loudly
+  instead of reaching for the network.
+
+The API is one function: `render_pdf(template, &serde_json::Value)` →
+`RenderedPdf { bytes, page_count, warnings }`. Inputs must be a JSON object
+and arrive in the template as `sys.inputs` (strings, ints, floats, bools,
+`null`→`none`, arrays, nested objects). Two contracts matter for template
+authors:
+
+- **Pin the family** (`#set text(font: "Liberation Sans")`) and assert the
+  render produced **zero warnings** in the template's tests. Typst treats an
+  unknown font family as a warning plus silent fallback — the warnings list
+  is where that surfaces, and the crate's own tests pin the tripwire (an
+  unknown family must produce a warning; the embedded faces must index under
+  exactly that family name and cover the Spanish glyph set).
+- **A failed template `#assert` aborts compilation** — templates can assert
+  on their `sys.inputs` shape, turning data-contract drift into a test
+  failure instead of a wrong document.
+
+Rendering is synchronous and CPU-bound; commands that call it follow the
+long-running-command rule (`async fn`).
+
+**The printable cuaderno** (first consumer, added 2026-07-16) follows one
+more rule worth copying: `module_cue::report::cuaderno_inputs` pre-formats
+EVERYTHING into strings (dd/mm/yyyy dates, decimal-comma numbers, the
+official Spanish words for closed lookups) so the template does layout only,
+and the data contract is pinned as plain JSON in `tests/report.rs` without
+parsing a PDF. The document mirrors the official model's sections 1, 2.1 and
+3.1 with its cross-reference scheme (the treatments register names
+operators, equipment and plots by the order numbers of the earlier tables —
+all built from the same records, so a reference cannot dangle), prints
+missing fields blank like the paper form (no precheck — unlike the SIEX
+export, a farmer can always print the current state), and adds a
+plazo-de-seguridad column the model lacks (the content list of RD 1311/2012
+Anexo III is what binds, and PHI is on it).
 
 ## Device-local settings
 
@@ -669,7 +765,7 @@ Selective test-first, by code category:
 Releases live at
 [github.com/clozanoruiz/terrazgo](https://github.com/clozanoruiz/terrazgo),
 together with the issue tracker: per-platform installers (Linux AppImage/deb,
-Windows NSIS + portable `.exe`) plus the **complete source of that version** —
+Windows NSIS + portable `.zip`) plus the **complete source of that version** —
 one snapshot commit per release, so the AGPL source-offer travels with every
 distributed binary. The installers are built by that repository's own
 `build.yml` workflow from the tagged source itself, so every binary comes from

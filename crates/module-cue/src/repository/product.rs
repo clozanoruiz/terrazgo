@@ -335,6 +335,8 @@ pub fn add_product_authorisation(
         ProductAuthorisationFields {
             country_code: new.country_code,
             authorisation_number: new.authorisation_number,
+            kind_code: new.kind_code,
+            exceptional_substance_code: new.exceptional_substance_code,
             status: new.status,
             valid_from: new.valid_from,
             valid_until: new.valid_until,
@@ -381,24 +383,49 @@ fn insert_authorisation_tx(
     if fields.authorisation_number.trim().is_empty() {
         return Err(CueError::Invalid("empty_authorisation_number"));
     }
+    let kind_code = fields.kind_code.unwrap_or_else(|| "registered".to_string());
+    // The exceptional-authorisation substance code travels with (and only
+    // with) an 'exceptional' kind: SIEX requires it for that kind and has no
+    // field for it otherwise, so a code on any other kind is dropped rather
+    // than stored as dead data.
+    let exceptional_substance_code = if kind_code == "exceptional" {
+        let code = fields
+            .exceptional_substance_code
+            .filter(|c| !c.trim().is_empty())
+            .ok_or(CueError::Invalid("missing_exceptional_substance"))?;
+        if let Some(catalogue_id) =
+            crate::siex::exceptional_substance_catalogue(&fields.country_code)
+            && super::resolve_in_catalogue(tx, catalogue_id, &code)? == Some(false)
+        {
+            return Err(CueError::Invalid("unknown_substance_code"));
+        }
+        Some(code)
+    } else {
+        None
+    };
     let auth = ProductAuthorisation {
         id: Uuid::now_v7().to_string(),
         product_id: product_id.to_string(),
         country_code: fields.country_code,
         authorisation_number: fields.authorisation_number,
+        kind_code,
+        exceptional_substance_code,
         status: fields.status,
         valid_from: fields.valid_from,
         valid_until: fields.valid_until,
     };
     tx.execute(
         "INSERT INTO product_authorisation
-           (id, product_id, country_code, authorisation_number, status, valid_from, valid_until)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+           (id, product_id, country_code, authorisation_number, kind_code, exceptional_substance_code,
+            status, valid_from, valid_until)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             auth.id,
             auth.product_id,
             auth.country_code,
             auth.authorisation_number,
+            auth.kind_code,
+            auth.exceptional_substance_code,
             auth.status,
             auth.valid_from,
             auth.valid_until
@@ -437,6 +464,8 @@ fn map_authorisation(row: &Row) -> rusqlite::Result<ProductAuthorisation> {
         product_id: row.get("product_id")?,
         country_code: row.get("country_code")?,
         authorisation_number: row.get("authorisation_number")?,
+        kind_code: row.get("kind_code")?,
+        exceptional_substance_code: row.get("exceptional_substance_code")?,
         status: row.get("status")?,
         valid_from: row.get("valid_from")?,
         valid_until: row.get("valid_until")?,

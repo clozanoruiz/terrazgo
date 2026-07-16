@@ -11,6 +11,7 @@
 
   let {
     farmId,
+    countryCode,
     seasonId,
     plots,
     crops,
@@ -18,6 +19,8 @@
     machinery,
     products,
     units,
+    justifications,
+    efficacies,
     reasons,
     onSaved,
     onCancel,
@@ -27,7 +30,6 @@
   let productId = $state("");
   let doseValue = $state("");
   let doseUnit = $state("l_ha");
-  let reasonCode = $state("");
   let targetOrganism = $state("");
   let operatorId = $state("");
   let machineryId = $state("");
@@ -35,8 +37,53 @@
   let notes = $state("");
   let rows = $state([emptyRow()]);
 
+  // The coded problems treated (≥1) and IPM justifications (≥1) — required by
+  // the record rules; efficacy is optional here because it is observed after
+  // application (the record list offers it once known).
+  let problemRows = $state([emptyProblemRow()]);
+  let checkedJustifications = $state([]);
+  let efficacyCode = $state("");
+
+  // Official problem catalogues per category, fetched once per category used
+  // (600-entry lists — never re-fetched while the form is open).
+  let problemCatalogues = $state({});
+
   function emptyRow() {
     return { plotId: "", cropId: "", surface: "" };
+  }
+
+  function emptyProblemRow() {
+    return { category: "", code: "", filter: "" };
+  }
+
+  function onCategoryChosen(row) {
+    row.code = "";
+    row.filter = "";
+    const category = row.category;
+    if (!category || problemCatalogues[category]) return;
+    run(async () => {
+      const codes = await invoke("list_problem_codes", {
+        countryCode,
+        reasonCategoryCode: category,
+      });
+      problemCatalogues = { ...problemCatalogues, [category]: codes };
+    });
+  }
+
+  function problemOptions(row) {
+    const codes = problemCatalogues[row.category] ?? [];
+    const needle = row.filter.trim().toLowerCase();
+    if (!needle) return codes;
+    // Keep the selected entry visible even when the filter excludes it.
+    return codes.filter((c) => c.label.toLowerCase().includes(needle) || c.code === row.code);
+  }
+
+  function addProblemRow() {
+    problemRows.push(emptyProblemRow());
+  }
+
+  function removeProblemRow(index) {
+    problemRows.splice(index, 1);
   }
 
   // Shown as a hint so the farmer knows what leaving PHI blank means.
@@ -77,8 +124,12 @@
       country_code: null, // derived from the farm in Rust
       dose_value: Number(doseValue),
       dose_unit_code: doseUnit,
-      reason_category_code: reasonCode,
       target_organism: targetOrganism.trim() || null,
+      problems: problemRows
+        .filter((row) => row.category && row.code)
+        .map((row) => ({ reason_category_code: row.category, problem_code: row.code })),
+      justifications: [...checkedJustifications],
+      efficacy_code: efficacyCode || null,
       operator_id: operatorId,
       machinery_id: machineryId || null,
       phi_days_used: String(phiDays).trim() === "" ? null : Number(phiDays),
@@ -125,15 +176,6 @@
       </select>
     </label>
     <label>
-      <span>{t("treatment.reason")}</span>
-      <select required bind:value={reasonCode}>
-        <option value="" disabled hidden></option>
-        {#each reasons as reason (reason.code)}
-          <option value={reason.code}>{tCode("reason_category", reason.code)}</option>
-        {/each}
-      </select>
-    </label>
-    <label>
       <span>{t("treatment.target")}</span>
       <input bind:value={targetOrganism} />
     </label>
@@ -163,10 +205,72 @@
       {/if}
     </label>
     <label>
+      <span>{t("treatment.efficacy")}</span>
+      <select bind:value={efficacyCode}>
+        <option value="">{t("treatment.efficacy_pending")}</option>
+        {#each efficacies as efficacy (efficacy.code)}
+          <option value={efficacy.code}>{tCode("efficacy", efficacy.code)}</option>
+        {/each}
+      </select>
+      <small>{t("treatment.efficacy_hint")}</small>
+    </label>
+    <label>
       <span>{t("treatment.notes")}</span>
       <input bind:value={notes} />
     </label>
   </div>
+
+  <fieldset class="subsection">
+    <legend>{t("treatment.problems_section")}</legend>
+    {#each problemRows as row, index (row)}
+      <div class="form-grid plot-row">
+        <label>
+          <span>{t("treatment.reason")}</span>
+          <select required bind:value={row.category} onchange={() => onCategoryChosen(row)}>
+            <option value="" disabled hidden></option>
+            {#each reasons as reason (reason.code)}
+              <option value={reason.code}>{tCode("reason_category", reason.code)}</option>
+            {/each}
+          </select>
+        </label>
+        <label>
+          <span>{t("treatment.problem_filter")}</span>
+          <input
+            bind:value={row.filter}
+            disabled={!row.category}
+            placeholder={t("treatment.problem_filter_hint")}
+          />
+        </label>
+        <label>
+          <span>{t("treatment.problem")}</span>
+          <select required bind:value={row.code} disabled={!row.category}>
+            <option value="" disabled hidden></option>
+            {#each problemOptions(row) as code (code.id)}
+              <option value={code.code}>{code.label}</option>
+            {/each}
+          </select>
+        </label>
+        {#if problemRows.length > 1}
+          <button type="button" class="btn-danger" onclick={() => removeProblemRow(index)}>
+            {t("treatment.remove")}
+          </button>
+        {/if}
+      </div>
+    {/each}
+    <button type="button" onclick={addProblemRow}>{t("treatment.add_problem")}</button>
+  </fieldset>
+
+  <fieldset class="subsection">
+    <legend>{t("treatment.justifications_section")}</legend>
+    <div class="checkbox-grid">
+      {#each justifications as justification (justification.code)}
+        <label class="checkbox">
+          <input type="checkbox" value={justification.code} bind:group={checkedJustifications} />
+          <span>{tCode("justification", justification.code)}</span>
+        </label>
+      {/each}
+    </div>
+  </fieldset>
 
   <fieldset class="subsection">
     <legend>{t("treatment.plots_section")}</legend>

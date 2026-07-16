@@ -76,6 +76,7 @@ fn plot_with_reference(conn: &mut Connection, parts: [&str; 7]) -> String {
         NewFarm {
             name: "La Vega".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },
@@ -242,6 +243,7 @@ fn verify_plot_needs_an_existing_plot_with_a_complete_reference() {
         NewFarm {
             name: "Sin referencia".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },

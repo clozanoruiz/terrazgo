@@ -12,6 +12,9 @@ workspace = true
 # Versions live in [workspace.dependencies] at the repo root.
 [dependencies]
 terrazgo-core = { workspace = true }
+# The printable cuaderno rides the shared report engine; the module owns the
+# Typst template (templates/cuaderno.typ) and the data assembly (src/report.rs).
+terrazgo-report = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
 uuid = { workspace = true }
@@ -24,6 +27,9 @@ serde_json = { workspace = true }
 # for tests/ to inspect record_change payloads. Same crate, no new dependency.
 [dev-dependencies]
 serde_json = { workspace = true }
+# tests/export.rs validates the serializer's output against the vendored
+# official CUE JSON Schema (docs/references/cue-schema-3.11.4.json).
+jsonschema = { workspace = true }
 
 [features]
 # Demo-campaign seeding (src/demo.rs). Enabled by the shell for its dev-only

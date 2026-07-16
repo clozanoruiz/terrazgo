@@ -36,6 +36,12 @@ pub enum CueError {
     #[error("catalogue data error: {0}")]
     Catalogue(String),
 
+    /// PDF rendering failed (template compile, font, export). Always a
+    /// developer error — templates ship inside the binary — so the boundary
+    /// maps it to `internal`.
+    #[error("report error: {0}")]
+    Report(#[from] terrazgo_report::ReportError),
+
     #[error("product {product_id} has no authorisation for country '{country}'")]
     AuthorisationMissing { product_id: String, country: String },
 

@@ -60,6 +60,10 @@ pub struct ProductAuthorisation {
     pub product_id: String,
     pub country_code: String,
     pub authorisation_number: String,
+    /// Nature of the authorisation ('registered' by default); 'exceptional'
+    /// (Art. 53 emergency) additionally names its substance by catalogue code.
+    pub kind_code: String,
+    pub exceptional_substance_code: Option<String>,
     pub status: Option<String>,
     pub valid_from: Option<String>,
     pub valid_until: Option<String>,
@@ -75,8 +79,12 @@ pub struct TreatmentRecord {
     pub country_code: String,
     pub dose_value: f64,
     pub dose_unit_code: String,
-    pub reason_category_code: String,
+    /// Free-text nuance the coded problem lists cannot express; the reason for
+    /// treatment itself lives in the `treatment_problem` junction rows.
     pub target_organism: Option<String>,
+    /// Observed efficacy, assessed after application — `None` until the farmer
+    /// records it (`set_treatment_efficacy`); the export precheck demands it.
+    pub efficacy_code: Option<String>,
     pub operator_id: String,
     pub machinery_id: Option<String>,
     pub phi_days_used: i64,
@@ -105,11 +113,34 @@ pub struct TreatmentPlot {
     pub variety_snapshot: Option<String>,
 }
 
-/// A treatment record together with every plot it was applied to.
+/// One coded phytosanitary problem a treatment targets. The category picks the
+/// catalogue the code resolves against (per the record's country) and the
+/// export bucket; `problem_code` is the catalogue code verbatim (no FK — the
+/// code is the regulatory payload, the catalogue row is display metadata).
+#[derive(Debug, Clone, Serialize)]
+pub struct TreatmentProblem {
+    pub id: String,
+    pub treatment_record_id: String,
+    pub reason_category_code: String,
+    pub problem_code: String,
+}
+
+/// One IPM justification behind a treatment (Directive 2009/128/CE).
+#[derive(Debug, Clone, Serialize)]
+pub struct TreatmentJustification {
+    pub id: String,
+    pub treatment_record_id: String,
+    pub justification_code: String,
+}
+
+/// A treatment record together with its detail rows: treated plots, coded
+/// problems and justifications — what the record-book list and form need.
 #[derive(Debug, Clone, Serialize)]
 pub struct TreatmentRecordWithPlots {
     pub record: TreatmentRecord,
     pub plots: Vec<TreatmentPlot>,
+    pub problems: Vec<TreatmentProblem>,
+    pub justifications: Vec<TreatmentJustification>,
 }
 
 /// Per-plot PHI standing, derived on read for the map overlay: whether any
@@ -122,6 +153,24 @@ pub struct PlotPhiStatus {
     /// Latest `phi_end_date` among the windows containing today — the first
     /// day harvest is allowed again. `None` whenever `in_phi` is false.
     pub phi_until: Option<String>,
+}
+
+/// Integer alias a regulatory export assigns to an activity record the first
+/// time it is exported (SIEX's `IdAjena*` keys are integers, our ids UUIDs).
+/// Never updated, never deleted: the alias is the edit/delete key on the
+/// authority's side, and the row's existence marks the record as previously
+/// exported. `split_key` discriminates when one record maps to several export
+/// entries (a multi-crop treatment splits into one `TratamFito` per crop);
+/// its value is serializer-defined, opaque here ('' for a 1:1 record).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportAlias {
+    pub id: String,
+    pub target: String,
+    pub entity_table: String,
+    pub entity_id: String,
+    pub split_key: String,
+    pub alias: i64,
+    pub created_at: String,
 }
 
 /// Derived alert row, owned by `repository::refresh_alerts` (reconciliation). Serialize
@@ -160,6 +209,10 @@ pub struct NewProductAuthorisation {
     pub product_id: String,
     pub country_code: String,
     pub authorisation_number: String,
+    /// Defaults to 'registered' — the overwhelmingly common case.
+    pub kind_code: Option<String>,
+    /// Required (and only meaningful) when the kind is 'exceptional'.
+    pub exceptional_substance_code: Option<String>,
     pub status: Option<String>,
     pub valid_from: Option<String>,
     pub valid_until: Option<String>,
@@ -171,6 +224,10 @@ pub struct NewProductAuthorisation {
 pub struct ProductAuthorisationFields {
     pub country_code: String,
     pub authorisation_number: String,
+    /// Defaults to 'registered' — the overwhelmingly common case.
+    pub kind_code: Option<String>,
+    /// Required (and only meaningful) when the kind is 'exceptional'.
+    pub exceptional_substance_code: Option<String>,
     pub status: Option<String>,
     pub valid_from: Option<String>,
     pub valid_until: Option<String>,
@@ -223,13 +280,25 @@ pub struct NewTreatmentRecord {
     pub country_code: Option<String>,
     pub dose_value: f64,
     pub dose_unit_code: String,
-    pub reason_category_code: String,
     pub target_organism: Option<String>,
+    /// The coded problems treated (≥1 required — they ARE the reason for
+    /// treatment) and the IPM justifications (≥1 required, known at treatment
+    /// time). Efficacy is optional here: it is observed after application.
+    pub problems: Vec<NewTreatmentProblem>,
+    pub justifications: Vec<String>,
+    pub efficacy_code: Option<String>,
     pub operator_id: String,
     pub machinery_id: Option<String>,
     /// PHI days actually used; falls back to `product.default_phi_days` when `None`.
     pub phi_days_used: Option<i64>,
     pub notes: Option<String>,
+}
+
+/// One coded problem as form input (the repository fills ids).
+#[derive(Debug, Deserialize)]
+pub struct NewTreatmentProblem {
+    pub reason_category_code: String,
+    pub problem_code: String,
 }
 
 #[derive(Debug, Deserialize)]

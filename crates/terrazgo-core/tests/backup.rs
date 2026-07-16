@@ -47,6 +47,7 @@ fn seeded_db(path: &PathBuf) -> Connection {
         NewFarm {
             name: "Finca".into(),
             owner_name: None,
+            owner_tax_id: None,
             country_code: "es".into(),
             es: None,
         },

@@ -76,6 +76,8 @@ export default {
   "farm.longitude": "Longitude",
   "farm.es_section": "Spanish registry data",
   "farm.rega": "REGA code",
+  "farm.rea": "REA code",
+  "farm.owner_tax_id": "Holder tax ID",
   "farm.province": "Province code",
   "farm.delete": "Delete farm",
   "farm.delete_confirm":
@@ -212,6 +214,15 @@ export default {
   "treatment.unit": "Unit",
   "treatment.reason": "Reason",
   "treatment.target": "Target organism",
+  "treatment.problems_section": "Problems treated",
+  "treatment.problem": "Problem (official catalogue)",
+  "treatment.problem_filter": "Search",
+  "treatment.problem_filter_hint": "Filter the list…",
+  "treatment.add_problem": "Add problem",
+  "treatment.justifications_section": "Justification for treating",
+  "treatment.efficacy": "Efficacy",
+  "treatment.efficacy_pending": "Not yet assessed",
+  "treatment.efficacy_hint": "Assessed after application; it can be recorded later.",
   "treatment.operator": "Operator",
   "treatment.machinery": "Machinery",
   "treatment.machinery_none": "— none —",
@@ -233,6 +244,26 @@ export default {
   "message.crop_saved": 'Crop "{species}" saved.',
   "message.treatment_saved": "Treatment recorded — harvest allowed from {date}.",
   "message.treatment_deleted": "Treatment deleted.",
+  "message.cuaderno_exported": "Export saved to {path} ({entries} treatments).",
+
+  "export.title": "Official export (SIEX)",
+  "export.run": "Export…",
+  "export.hint":
+    "Generates the JSON file with this season's treatments in the official SIEX format, for transfer to the regional platform (CUECYL in Castilla y León).",
+  "export.blocked_intro": "Some data is still missing before the export can run:",
+  "export.farm_fields": "Farm data",
+  "export.field_owner_tax_id": "holder tax ID (NIF)",
+  "export.field_rea_code": "REA code (14 characters)",
+  "export.field_province_code": "province (INE code)",
+  "export.missing_efficacy": "Treatments without recorded efficacy",
+  "export.missing_licence": "Treatments whose operator has no licence number (ROPO)",
+  "export.missing_crop": "Treated plots without a crop",
+
+  "export.pdf_title": "Printable record book (PDF)",
+  "export.pdf_run": "Generate PDF…",
+  "export.pdf_hint":
+    "Generates the record book as a PDF following the official model (general information, plots and the treatments register). Missing data prints blank, like on the paper form.",
+  "message.cuaderno_pdf_exported": "Record book saved to {path} ({pages} pages).",
 
   "registry.title": "Catalogue",
 
@@ -248,6 +279,8 @@ export default {
   "product.auth_section": "Authorisation",
   "product.auth_country": "Country",
   "product.auth_number": "Registration number",
+  "product.auth_kind": "Authorisation kind",
+  "product.exceptional_substance": "Substance (exceptional authorisation)",
   "product.no_authorisations":
     "Not authorised in any country — it will not be offered when recording treatments.",
   "product.substances": "Active substances",
@@ -328,6 +361,19 @@ export default {
   "formulation_type.ec": "EC (emulsifiable concentrate)",
   "formulation_type.wg": "WG (water-dispersible granules)",
   "formulation_type.sl": "SL (soluble concentrate)",
+  "efficacy.good": "Good",
+  "efficacy.fair": "Fair",
+  "efficacy.poor": "Poor",
+  "justification.threshold_exceeded": "Treatment threshold exceeded",
+  "justification.monitoring": "Monitoring",
+  "justification.decision_support_system": "Decision support system (DSS)",
+  "justification.authority_warning": "Regional authority warning",
+  "justification.advisor_recommendation": "Advisor recommendation",
+  "justification.alert_device": "Phytosanitary alert device",
+  "authorisation_kind.registered": "Registered plant protection product",
+  "authorisation_kind.common_name": "Common name",
+  "authorisation_kind.parallel_import": "Parallel import",
+  "authorisation_kind.exceptional": "Exceptional authorisation",
 
   "settings.general": "General",
   "settings.map": "Map",
@@ -356,6 +402,17 @@ export default {
   "error.not_found": "Record not found.",
   "error.invalid.empty_name": "The name must not be empty.",
   "error.invalid.empty_authorisation_number": "The registration number must not be empty.",
+  "error.invalid.no_problems": "Add at least one problem treated (pest, disease…).",
+  "error.invalid.no_justifications": "Add at least one justification for the treatment.",
+  "error.invalid.unknown_problem_code": "The selected problem is not in the official catalogue.",
+  "error.invalid.export_precheck_failed":
+    "The export is blocked: some data required by the official format is still missing.",
+  "error.invalid.export_code_unmappable":
+    "A stored code could not be converted to the official catalogues.",
+  "error.invalid.missing_exceptional_substance":
+    "An exceptional authorisation must name its substance (official catalogue code).",
+  "error.invalid.unknown_substance_code":
+    "The substance is not in the official exceptional-authorisations catalogue.",
   "error.invalid.nonpositive_area": "The area must be greater than zero.",
   "error.invalid.cache_cap_too_small": "The space for offline maps is too small (minimum 64 MB).",
   "error.invalid_date": 'Invalid date "{date}" (expected YYYY-MM-DD).',

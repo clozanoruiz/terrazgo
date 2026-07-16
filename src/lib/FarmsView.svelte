@@ -16,8 +16,10 @@
 
   let name = $state("");
   let ownerName = $state("");
+  let ownerTaxId = $state("");
   let countryCode = $state("");
   let regaCode = $state("");
+  let reaCode = $state("");
   let provinceCode = $state("");
 
   run(async () => {
@@ -29,7 +31,9 @@
   function startCreate() {
     name = "";
     ownerName = "";
+    ownerTaxId = "";
     regaCode = "";
+    reaCode = "";
     provinceCode = "";
     creating = true;
   }
@@ -37,8 +41,11 @@
   function collectEs() {
     if (countryCode !== "es") return null;
     const rega = regaCode.trim() || null;
+    const rea = reaCode.trim() || null;
     const province = provinceCode.trim() || null;
-    return rega || province ? { rega_code: rega, province_code: province } : null;
+    return rega || rea || province
+      ? { rega_code: rega, rea_code: rea, province_code: province }
+      : null;
   }
 
   function submit(event) {
@@ -46,6 +53,7 @@
     const farm = {
       name: name.trim(),
       owner_name: ownerName.trim() || null,
+      owner_tax_id: ownerTaxId.trim() || null,
       country_code: countryCode,
       es: collectEs(),
     };
@@ -73,6 +81,7 @@
       <div class="form-grid">
         <label><span>{t("farm.name")}</span><input required bind:value={name} /></label>
         <label><span>{t("farm.owner")}</span><input bind:value={ownerName} /></label>
+        <label><span>{t("farm.owner_tax_id")}</span><input bind:value={ownerTaxId} /></label>
         <label
           ><span>{t("farm.country")}</span>
           <select bind:value={countryCode}>
@@ -86,6 +95,7 @@
         <fieldset class="es-only">
           <legend>{t("farm.es_section")}</legend>
           <div class="form-grid">
+            <label><span>{t("farm.rea")}</span><input bind:value={reaCode} /></label>
             <label><span>{t("farm.rega")}</span><input bind:value={regaCode} /></label>
             <label><span>{t("farm.province")}</span><input bind:value={provinceCode} /></label>
           </div>
