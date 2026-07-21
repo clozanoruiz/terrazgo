@@ -81,6 +81,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             starts_on: Some("2025-09-01".into()),
             ends_on: Some("2026-08-31".into()),
         },
+        None,
     )?;
 
     // --- farm and plots -----------------------------------------------------
@@ -97,6 +98,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
                 province_code: Some("47".into()), // Valladolid
             }),
         },
+        None,
     )?;
 
     let la_vega = repository::insert_plot(
@@ -118,6 +120,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
                 sigpac_enclosure: Some("1".into()),
             }),
         },
+        None,
     )?;
     let el_paramo = repository::insert_plot(
         conn,
@@ -127,6 +130,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             area_ha: Some(5.8),
             es: None,
         },
+        None,
     )?;
     let carrascal = repository::insert_plot(
         conn,
@@ -136,6 +140,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             area_ha: Some(2.1),
             es: None,
         },
+        None,
     )?;
     // A plot with REAL SIGPAC data: the reference exists (irrigated arable
     // land on the Montes Torozos, official surface 8.897 ha), so "verify
@@ -158,6 +163,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
                 sigpac_enclosure: Some("1".into()),
             }),
         },
+        None,
     )?;
 
     // Store the vendored official boundary the same way a live verification
@@ -185,6 +191,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             properties: Some(serde_json::to_string(&recinto.properties)?),
             fetched_at: Some(now_utc_iso()),
         },
+        None,
     )?;
 
     // --- crops for the campaign ----------------------------------------------
@@ -198,6 +205,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             production_system_code: Some("conventional".into()),
             sown_on: Some("2025-11-10".into()),
         },
+        None,
     )?;
     let wheat_el_paramo = repository::insert_crop(
         conn,
@@ -209,6 +217,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             production_system_code: Some("conventional".into()),
             sown_on: Some("2025-11-12".into()),
         },
+        None,
     )?;
     let barley_carrascal = repository::insert_crop(
         conn,
@@ -220,6 +229,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             production_system_code: Some("conventional".into()),
             sown_on: Some("2025-11-20".into()),
         },
+        None,
     )?;
     // Spring-sown irrigated maize — the recinto's real coef_regadio is 100.
     repository::insert_crop(
@@ -232,6 +242,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             production_system_code: Some("conventional".into()),
             sown_on: Some("2026-04-20".into()),
         },
+        None,
     )?;
 
     // --- operator and machinery ----------------------------------------------
@@ -243,6 +254,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2026-08-15".into()),
         },
+        None,
     )?;
 
     let sprayer = repository::insert_machinery(
@@ -257,6 +269,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             roma_number: Some("VA-00123".into()),
             reganip_number: None,
         },
+        None,
     )?;
 
     // --- products: fungicide and insecticide ----------------------------------
@@ -268,17 +281,19 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             formulation_type_code: Some("ec".into()),
             default_phi_days: Some(35),
         },
+        None,
     )?;
     let prothioconazole =
-        repository::insert_active_substance(conn, "prothioconazole", Some("178928-70-6"))?;
+        repository::insert_active_substance(conn, "prothioconazole", Some("178928-70-6"), None)?;
     let tebuconazole =
-        repository::insert_active_substance(conn, "tebuconazole", Some("107534-96-3"))?;
+        repository::insert_active_substance(conn, "tebuconazole", Some("107534-96-3"), None)?;
     repository::add_product_active_substance(
         conn,
         &prosaro.id,
         &prothioconazole.id,
         Some(125.0),
         Some("g_l"),
+        None,
     )?;
     repository::add_product_active_substance(
         conn,
@@ -286,6 +301,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
         &tebuconazole.id,
         Some(125.0),
         Some("g_l"),
+        None,
     )?;
     repository::add_product_authorisation(
         conn,
@@ -299,6 +315,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             valid_from: Some("2019-03-01".into()),
             valid_until: Some("2031-12-31".into()),
         },
+        None,
     )?;
 
     let karate = repository::insert_product(
@@ -309,15 +326,17 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             formulation_type_code: Some("sc".into()),
             default_phi_days: Some(30),
         },
+        None,
     )?;
     let lambda_cyhalothrin =
-        repository::insert_active_substance(conn, "lambda-cyhalothrin", Some("91465-08-6"))?;
+        repository::insert_active_substance(conn, "lambda-cyhalothrin", Some("91465-08-6"), None)?;
     repository::add_product_active_substance(
         conn,
         &karate.id,
         &lambda_cyhalothrin.id,
         Some(100.0),
         Some("g_l"),
+        None,
     )?;
     repository::add_product_authorisation(
         conn,
@@ -331,6 +350,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             valid_from: Some("2017-06-01".into()),
             valid_until: Some("2030-06-30".into()),
         },
+        None,
     )?;
 
     // --- treatment 1: fungicide on both wheat plots (PHI window already past) --
@@ -377,6 +397,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
                 surface_treated_ha: 5.8,
             },
         ],
+        None,
     )?;
 
     // --- treatment 2: insecticide on the barley plot (PHI window still open) ---
@@ -409,6 +430,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             crop_id: Some(barley_carrascal.id.clone()),
             surface_treated_ha: 2.1,
         }],
+        None,
     )?;
 
     Ok(DemoSeedSummary {

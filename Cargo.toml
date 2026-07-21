@@ -11,7 +11,7 @@ resolver = "3"
 
 # Shared package metadata; crates inherit with `<field>.workspace = true`.
 [workspace.package]
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 # Floor set by rusqlite_migration 2.6; raise as dependencies demand.
 rust-version = "1.95"
@@ -54,6 +54,16 @@ jsonschema = { version = "0.47", default-features = false }
 # pinned Mozilla roots — antivirus/proxy HTTPS interception re-signs traffic
 # with a locally-installed CA that only the platform store knows (fetch.rs).
 ureq = { version = "3", features = ["platform-verifier"] }
+# Android TLS bootstrap (terrazgo-geo, Android-only): ureq's platform verifier
+# reaches the Android trust store over JNI and panics on first use if it was
+# never handed the JVM + app context (2026-07-17 field test: silent blank
+# maps). terrazgo-geo initializes it lazily before the first fetch with the
+# handles tao's ndk_glue captures at activity creation. `tao` must resolve to
+# the SAME crate copy tauri-runtime-wry links (its statics hold that context)
+# and `jni` to the version rustls-platform-verifier's signatures use.
+jni = { version = "0.21", default-features = false }
+tao = { version = "0.35", default-features = false }
+rustls-platform-verifier = "0.6"
 # GPKG geometry blobs (WKB) → GeoJSON, for boundary-file import. `with-gpkg`
 # deliberately NOT enabled: it pulls sqlx, and we read GeoPackage files (they
 # are SQLite) with the rusqlite we already have.
@@ -76,6 +86,14 @@ tauri-build = "2"
 # Floor 2.7: that release removed the `confirm`/`ask` IPC commands (merged
 # into `message`), and backend.js's confirmDialog() targets the 2.7+ shape.
 tauri-plugin-dialog = "2.7"
+# Android SAF: the native dialogs return content:// URIs there, not filesystem
+# paths, and std::fs cannot open those (first field bug: 0-byte "saved" PDFs).
+# The fs plugin resolves them to plain file descriptors through the platform
+# ContentResolver — used Rust-side only (src-tauri/src/user_files.rs); no fs
+# commands are exposed to the webview. Already in the tree via
+# tauri-plugin-dialog. Floor 2.5: the minor whose Rust-side `Fs::open` does
+# the content-URI resolution we invoke.
+tauri-plugin-fs = "2.5"
 terrazgo-core = { path = "crates/terrazgo-core" }
 terrazgo-geo = { path = "crates/terrazgo-geo" }
 terrazgo-report = { path = "crates/terrazgo-report" }

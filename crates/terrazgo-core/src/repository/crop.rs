@@ -12,7 +12,7 @@ use crate::models::{Crop, NewCrop};
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
 
-pub fn insert_crop(conn: &mut Connection, new: NewCrop) -> Result<Crop> {
+pub fn insert_crop(conn: &mut Connection, new: NewCrop, actor: Option<&str>) -> Result<Crop> {
     validate_name(&new.species_name)?;
     let tx = conn.transaction()?;
     let now = now_utc_iso();
@@ -37,7 +37,7 @@ pub fn insert_crop(conn: &mut Connection, new: NewCrop) -> Result<Crop> {
             crop.production_system_code, crop.sown_on, crop.created_at, crop.updated_at
         ],
     )?;
-    log_insert(&tx, "crop", &crop.id, Some(&crop.season_id), &crop)?;
+    log_insert(&tx, "crop", &crop.id, Some(&crop.season_id), actor, &crop)?;
     tx.commit()?;
     Ok(crop)
 }

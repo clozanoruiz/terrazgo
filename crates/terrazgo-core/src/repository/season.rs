@@ -11,7 +11,7 @@ use crate::models::{NewSeason, Season};
 use rusqlite::{Connection, Row, params};
 use uuid::Uuid;
 
-pub fn insert_season(conn: &mut Connection, new: NewSeason) -> Result<Season> {
+pub fn insert_season(conn: &mut Connection, new: NewSeason, actor: Option<&str>) -> Result<Season> {
     validate_name(&new.label)?;
     let tx = conn.transaction()?;
     let now = now_utc_iso();
@@ -33,7 +33,7 @@ pub fn insert_season(conn: &mut Connection, new: NewSeason) -> Result<Season> {
             season.ends_on, season.status, season.created_at, season.updated_at
         ],
     )?;
-    log_insert(&tx, "season", &season.id, Some(&season.id), &season)?;
+    log_insert(&tx, "season", &season.id, Some(&season.id), actor, &season)?;
     tx.commit()?;
     Ok(season)
 }

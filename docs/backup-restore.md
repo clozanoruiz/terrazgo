@@ -8,9 +8,9 @@ a lost or broken device, so back up regularly and keep copies off the device
 
 | OS | Path |
 |---|---|
-| Linux | `~/.local/share/org.terrazgo.desktop/terrazgo.db` |
-| macOS | `~/Library/Application Support/org.terrazgo.desktop/terrazgo.db` |
-| Windows | `%APPDATA%\org.terrazgo.desktop\terrazgo.db` |
+| Linux | `~/.local/share/org.terrazgo.app/terrazgo.db` |
+| macOS | `~/Library/Application Support/org.terrazgo.app/terrazgo.db` |
+| Windows | `%APPDATA%\org.terrazgo.app\terrazgo.db` |
 
 While the app runs, `terrazgo.db-wal` and `terrazgo.db-shm` sidecar files may
 exist next to it. **Never copy the live file by hand while the app is running**

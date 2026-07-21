@@ -41,7 +41,7 @@ fn assert_schema_valid(doc: &Value) {
 }
 
 fn export_json(conn: &mut Connection, season_id: &str, farm_id: &str) -> Value {
-    let cuaderno = build_cuaderno(conn, season_id, farm_id).unwrap();
+    let cuaderno = build_cuaderno(conn, season_id, farm_id, None).unwrap();
     serde_json::to_value(&cuaderno).unwrap()
 }
 
@@ -69,6 +69,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -86,6 +87,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
                 province_code: Some("47".into()),
             }),
         },
+        None,
     )
     .unwrap();
 
@@ -97,6 +99,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2027-03-01".into()),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -109,6 +112,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             formulation_type_code: None,
             default_phi_days: Some(21),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -124,6 +128,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -153,6 +158,7 @@ fn insert_plot(conn: &mut Connection, farm_id: &str, name: &str, area_ha: f64) -
             area_ha: Some(area_ha),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id
@@ -175,6 +181,7 @@ fn insert_crop(
             production_system_code: None,
             sown_on: None,
         },
+        None,
     )
     .unwrap()
     .id
@@ -231,6 +238,7 @@ fn insert_machinery(
             roma_number: roma.map(Into::into),
             reganip_number: reganip.map(Into::into),
         },
+        None,
     )
     .unwrap()
     .id
@@ -257,6 +265,7 @@ fn export_validates_against_the_official_schema() {
         &mut conn,
         treatment(&fx, "2026-04-10"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -276,6 +285,7 @@ fn export_validates_against_the_official_schema() {
             on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 2.5),
             on_plot(&fx.barley_plot_id, Some(&fx.barley_crop_id), 3.0),
         ],
+        None,
     )
     .unwrap();
 
@@ -293,6 +303,7 @@ fn envelope_carries_the_farm_identity() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -318,6 +329,7 @@ fn dates_are_rendered_dd_mm_yyyy() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -339,6 +351,7 @@ fn codes_map_through_the_siex_catalogues() {
         &mut conn,
         new,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -396,6 +409,7 @@ fn problems_land_in_their_export_buckets() {
         &mut conn,
         new,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -427,6 +441,7 @@ fn absent_problem_buckets_are_omitted() {
         &mut conn,
         treatment(&fx, "2026-05-01"), // disease only
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -450,6 +465,7 @@ fn dose_units_convert_with_their_exact_factor() {
         &mut conn,
         new,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -477,6 +493,7 @@ fn exceptional_authorisations_emit_their_substance_code() {
             formulation_type_code: None,
             default_phi_days: Some(7),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -492,6 +509,7 @@ fn exceptional_authorisations_emit_their_substance_code() {
             valid_from: Some("2026-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -501,6 +519,7 @@ fn exceptional_authorisations_emit_their_substance_code() {
         &mut conn,
         new,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -524,6 +543,7 @@ fn applicator_equipment_emits_exactly_one_identifier() {
         &mut conn,
         treatment(&fx, "2026-04-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -535,6 +555,7 @@ fn applicator_equipment_emits_exactly_one_identifier() {
         &mut conn,
         with_both,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -546,6 +567,7 @@ fn applicator_equipment_emits_exactly_one_identifier() {
         &mut conn,
         with_unregistered,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -593,6 +615,7 @@ fn multi_crop_treatments_split_into_one_tratamfito_per_crop() {
             on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 2.5),
             on_plot(&fx.barley_plot_id, Some(&fx.barley_crop_id), 3.0),
         ],
+        None,
     )
     .unwrap();
 
@@ -630,6 +653,7 @@ fn re_exporting_reuses_every_alias() {
             on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 2.5),
             on_plot(&fx.barley_plot_id, Some(&fx.barley_crop_id), 3.0),
         ],
+        None,
     )
     .unwrap();
 
@@ -649,6 +673,7 @@ fn dgc_aliases_are_shared_across_treatments_of_the_same_crop() {
             &mut conn,
             treatment(&fx, date),
             vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+            None,
         )
         .unwrap();
     }
@@ -678,6 +703,7 @@ fn deleted_records_export_borrar_only_if_previously_exported() {
         &mut conn,
         treatment(&fx, "2026-04-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -691,11 +717,12 @@ fn deleted_records_export_borrar_only_if_previously_exported() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
-    repo::soft_delete_treatment_record(&mut conn, &never_exported.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &never_exported.id, None).unwrap();
     // …while the exported one becomes a deletion entry under its frozen alias.
-    repo::soft_delete_treatment_record(&mut conn, &exported.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &exported.id, None).unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
     let ts = tratamientos(&doc);
@@ -713,6 +740,7 @@ fn active_entries_do_not_carry_borrar() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -732,6 +760,7 @@ fn precheck_is_clean_on_an_export_ready_farm() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -752,6 +781,7 @@ fn precheck_lists_missing_farm_identity_fields() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
 
@@ -780,6 +810,7 @@ fn precheck_flags_an_unmappable_province() {
                 province_code: Some("99".into()), // no such INE province
             }),
         },
+        None,
     )
     .unwrap();
 
@@ -806,6 +837,7 @@ fn precheck_flags_a_malformed_rea_code() {
                 province_code: Some("47".into()),
             }),
         },
+        None,
     )
     .unwrap();
 
@@ -824,6 +856,7 @@ fn precheck_lists_records_missing_efficacy_or_licence_and_plots_missing_crop() {
         &mut conn,
         no_efficacy,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -835,6 +868,7 @@ fn precheck_lists_records_missing_efficacy_or_licence_and_plots_missing_crop() {
             licence_level_code: None,
             licence_expiry_date: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -844,6 +878,7 @@ fn precheck_lists_records_missing_efficacy_or_licence_and_plots_missing_crop() {
         &mut conn,
         bad_operator,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -851,6 +886,7 @@ fn precheck_lists_records_missing_efficacy_or_licence_and_plots_missing_crop() {
         &mut conn,
         treatment(&fx, "2026-04-03"),
         vec![on_plot(&fx.barley_plot_id, None, 3.0)],
+        None,
     )
     .unwrap();
 
@@ -882,9 +918,10 @@ fn precheck_ignores_deleted_records() {
         &mut conn,
         no_efficacy,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
-    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
 
     let check = export_precheck(&conn, &fx.season_id, &fx.farm_id).unwrap();
     assert!(
@@ -903,10 +940,11 @@ fn build_refuses_while_the_precheck_is_not_clean() {
         &mut conn,
         no_efficacy,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
-    let err = build_cuaderno(&mut conn, &fx.season_id, &fx.farm_id).unwrap_err();
+    let err = build_cuaderno(&mut conn, &fx.season_id, &fx.farm_id, None).unwrap_err();
     assert!(
         matches!(err, CueError::Invalid("export_precheck_failed")),
         "got {err:?}"

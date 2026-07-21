@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Terrazgo",
-  "version": "0.1.4",
-  "identifier": "org.terrazgo.desktop",
+  "version": "0.1.5",
+  "identifier": "org.terrazgo.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:5173",

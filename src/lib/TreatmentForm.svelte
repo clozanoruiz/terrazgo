@@ -48,6 +48,27 @@
   // (600-entry lists — never re-fetched while the form is open).
   let problemCatalogues = $state({});
 
+  // Prefill the applicator from the active profile's linked operator (the
+  // user_profile.operator_id link, the convention that the applicator records
+  // their own treatment). A convenience default only: silently skipped when
+  // there is no active profile, no link, or the linked operator is missing
+  // from the picker — and never overriding a choice already made.
+  (async () => {
+    try {
+      const [info, profiles] = await Promise.all([
+        invoke("get_settings"),
+        invoke("list_user_profiles"),
+      ]);
+      const active = profiles.find((profile) => profile.id === info.settings.active_user_id);
+      const linked = active?.operator_id;
+      if (linked && !operatorId && operators.some((operator) => operator.id === linked)) {
+        operatorId = linked;
+      }
+    } catch (err) {
+      console.error(err); // prefill must never block treatment entry
+    }
+  })();
+
   function emptyRow() {
     return { plotId: "", cropId: "", surface: "" };
   }

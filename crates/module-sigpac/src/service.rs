@@ -80,18 +80,19 @@ pub fn verify_plot(
     cache: &Mutex<Connection>,
     plot_id: &str,
     refresh: bool,
+    actor: Option<&str>,
 ) -> Result<Option<PlotVerification>> {
     let reference = storage::plot_reference(app, plot_id)?;
     let Some(recinto) = client::recinto_by_reference(cache, &reference, refresh)? else {
         return Ok(None);
     };
-    let feature = storage::save_recinto_boundary(app, plot_id, &recinto)?;
-    let (zone_flags, zone_check_error) = match check_zones(app, cache, plot_id, &reference, refresh)
-    {
-        Ok(flags) => (Some(flags), None),
-        // The boundary is already stored; a zone failure must not undo that.
-        Err(err) => (None, Some(format!("{err}"))),
-    };
+    let feature = storage::save_recinto_boundary(app, plot_id, &recinto, actor)?;
+    let (zone_flags, zone_check_error) =
+        match check_zones(app, cache, plot_id, &reference, refresh, actor) {
+            Ok(flags) => (Some(flags), None),
+            // The boundary is already stored; a zone failure must not undo that.
+            Err(err) => (None, Some(format!("{err}"))),
+        };
     Ok(Some(PlotVerification {
         recinto,
         feature,
@@ -107,6 +108,7 @@ fn check_zones(
     plot_id: &str,
     reference: &SigpacRef,
     refresh: bool,
+    actor: Option<&str>,
 ) -> Result<Vec<ZoneFlag>> {
     let campaign = client::current_campaign(cache, refresh)?;
     let mut results = Vec::with_capacity(client::ZONE_LAYERS.len());
@@ -114,7 +116,7 @@ fn check_zones(
         let intersection = client::zone_intersection(cache, reference, layer, refresh)?;
         results.push((*zone_type_code, intersection));
     }
-    storage::save_zone_checks(app, plot_id, campaign, results)
+    storage::save_zone_checks(app, plot_id, campaign, results, actor)
 }
 
 /// Shared lookup shape: fetch, then attach the dedup matches.

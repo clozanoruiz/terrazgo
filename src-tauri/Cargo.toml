@@ -13,7 +13,9 @@ workspace = true
 # target to link against (the migration-composition tests need one).
 [lib]
 name = "terrazgo"
-crate-type = ["lib"] # desktop-only; mobile builds would add staticlib/cdylib later
+# rlib for the desktop binary + tests; cdylib is what the Android app loads;
+# staticlib is for iOS when that milestone arrives.
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { workspace = true }
@@ -22,6 +24,8 @@ tauri-build = { workspace = true }
 tauri = { workspace = true }
 # Native save/open dialogs for backup export/import (added 2026-07-02).
 tauri-plugin-dialog = { workspace = true }
+# Opens the content:// URIs those dialogs return on Android (user_files.rs).
+tauri-plugin-fs = { workspace = true }
 # `demo` is enabled unconditionally because cargo features cannot be
 # debug-profile-conditional; the seed command itself refuses in release builds.
 module-cue = { workspace = true, features = ["demo"] }

@@ -14,7 +14,8 @@ use serde_json::Value;
 use terrazgo_core::CoreError;
 use terrazgo_core::models::{
     FarmEsFields, NewCrop, NewFarm, NewGeoFeature, NewMachinery, NewOperator, NewPlot, NewSeason,
-    NewZoneFlag, PlotEsFields, UpdateFarm, UpdateMachinery, UpdateOperator, UpdatePlot,
+    NewUserProfile, NewZoneFlag, PlotEsFields, UpdateFarm, UpdateMachinery, UpdateOperator,
+    UpdatePlot, UpdateUserProfile,
 };
 use terrazgo_core::repository as repo;
 
@@ -81,6 +82,7 @@ fn insert_farm_with_extension_writes_both_rows_and_logs_both() {
                 province_code: Some("47".into()),
             }),
         },
+        None,
     )
     .unwrap();
 
@@ -122,6 +124,7 @@ fn farm_identifiers_roundtrip_and_are_audited() {
                 province_code: Some("47".into()),
             }),
         },
+        None,
     )
     .unwrap();
     assert_eq!(farm.owner_tax_id.as_deref(), Some("12345678Z"));
@@ -156,6 +159,7 @@ fn farm_identifiers_roundtrip_and_are_audited() {
                 province_code: Some("47".into()),
             }),
         },
+        None,
     )
     .unwrap();
     assert_eq!(detail.farm.owner_tax_id.as_deref(), Some("87654321X"));
@@ -168,10 +172,10 @@ fn farm_identifiers_roundtrip_and_are_audited() {
 #[test]
 fn list_farms_excludes_soft_deleted() {
     let mut conn = db();
-    let keep = repo::insert_farm(&mut conn, new_farm("Keep")).unwrap();
-    let gone = repo::insert_farm(&mut conn, new_farm("Gone")).unwrap();
+    let keep = repo::insert_farm(&mut conn, new_farm("Keep"), None).unwrap();
+    let gone = repo::insert_farm(&mut conn, new_farm("Gone"), None).unwrap();
 
-    repo::soft_delete_farm(&mut conn, &gone.id).unwrap();
+    repo::soft_delete_farm(&mut conn, &gone.id, None).unwrap();
 
     let farms = repo::list_farms(&conn).unwrap();
     assert_eq!(farms.len(), 1);
@@ -202,7 +206,7 @@ fn list_farms_excludes_soft_deleted() {
 #[test]
 fn update_farm_replaces_fields_and_logs_complete_images() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Old name")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Old name"), None).unwrap();
 
     let detail = repo::update_farm(
         &mut conn,
@@ -217,6 +221,7 @@ fn update_farm_replaces_fields_and_logs_complete_images() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(detail.farm.name, "New name");
@@ -235,7 +240,7 @@ fn update_farm_replaces_fields_and_logs_complete_images() {
 #[test]
 fn update_farm_extension_transitions_are_logged() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let base = UpdateFarm {
         name: "Finca".into(),
         owner_name: None,
@@ -259,6 +264,7 @@ fn update_farm_extension_transitions_are_logged() {
             }),
             ..base
         },
+        None,
     )
     .unwrap();
     assert!(detail.es.is_some());
@@ -283,6 +289,7 @@ fn update_farm_extension_transitions_are_logged() {
                 province_code: Some("09".into()),
             }),
         },
+        None,
     )
     .unwrap();
     let (op, before, after) = last_change(&conn, "farm_es_extension", &farm.id);
@@ -304,6 +311,7 @@ fn update_farm_extension_transitions_are_logged() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
     assert!(detail.es.is_none());
@@ -328,7 +336,7 @@ fn update_farm_extension_transitions_are_logged() {
 fn farm_validation_rejects_blank_name() {
     let mut conn = db();
     assert!(matches!(
-        repo::insert_farm(&mut conn, new_farm("   ")),
+        repo::insert_farm(&mut conn, new_farm("   "), None),
         Err(CoreError::Invalid(_))
     ));
 }
@@ -336,10 +344,10 @@ fn farm_validation_rejects_blank_name() {
 #[test]
 fn soft_delete_farm_twice_is_not_found() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    repo::soft_delete_farm(&mut conn, &farm.id).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    repo::soft_delete_farm(&mut conn, &farm.id, None).unwrap();
     assert!(matches!(
-        repo::soft_delete_farm(&mut conn, &farm.id),
+        repo::soft_delete_farm(&mut conn, &farm.id, None),
         Err(CoreError::NotFound)
     ));
 }
@@ -351,7 +359,7 @@ fn soft_delete_farm_twice_is_not_found() {
 #[test]
 fn insert_plot_with_sigpac_extension_round_trips() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(
         &mut conn,
         NewPlot {
@@ -368,6 +376,7 @@ fn insert_plot_with_sigpac_extension_round_trips() {
                 sigpac_enclosure: Some("1".into()),
             }),
         },
+        None,
     )
     .unwrap();
 
@@ -385,13 +394,13 @@ fn insert_plot_with_sigpac_extension_round_trips() {
 #[test]
 fn list_plots_is_per_farm_and_excludes_soft_deleted() {
     let mut conn = db();
-    let farm_a = repo::insert_farm(&mut conn, new_farm("A")).unwrap();
-    let farm_b = repo::insert_farm(&mut conn, new_farm("B")).unwrap();
-    let keep = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "Keep")).unwrap();
-    let gone = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "Gone")).unwrap();
-    repo::insert_plot(&mut conn, new_plot(&farm_b.id, "Other farm")).unwrap();
+    let farm_a = repo::insert_farm(&mut conn, new_farm("A"), None).unwrap();
+    let farm_b = repo::insert_farm(&mut conn, new_farm("B"), None).unwrap();
+    let keep = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "Keep"), None).unwrap();
+    let gone = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "Gone"), None).unwrap();
+    repo::insert_plot(&mut conn, new_plot(&farm_b.id, "Other farm"), None).unwrap();
 
-    repo::soft_delete_plot(&mut conn, &gone.id).unwrap();
+    repo::soft_delete_plot(&mut conn, &gone.id, None).unwrap();
 
     let plots = repo::list_plots(&conn, &farm_a.id).unwrap();
     assert_eq!(plots.len(), 1);
@@ -405,8 +414,8 @@ fn list_plots_is_per_farm_and_excludes_soft_deleted() {
 #[test]
 fn update_plot_changes_fields_and_reconciles_extension() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Old")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Old"), None).unwrap();
 
     let detail = repo::update_plot(
         &mut conn,
@@ -424,6 +433,7 @@ fn update_plot_changes_fields_and_reconciles_extension() {
                 sigpac_enclosure: None,
             }),
         },
+        None,
     )
     .unwrap();
     assert_eq!(detail.plot.name, "New");
@@ -441,7 +451,7 @@ fn update_plot_changes_fields_and_reconciles_extension() {
 #[test]
 fn plot_validation_rejects_non_positive_area() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let bad = NewPlot {
         farm_id: farm.id.clone(),
         name: "P".into(),
@@ -449,7 +459,7 @@ fn plot_validation_rejects_non_positive_area() {
         es: None,
     };
     assert!(matches!(
-        repo::insert_plot(&mut conn, bad),
+        repo::insert_plot(&mut conn, bad, None),
         Err(CoreError::Invalid(_))
     ));
 }
@@ -493,6 +503,7 @@ fn insert_season_starts_active_and_logs_full_image() {
             starts_on: Some("2025-09-01".into()),
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -525,8 +536,8 @@ fn insert_season_starts_active_and_logs_full_image() {
 #[test]
 fn insert_crop_ties_plot_to_season_and_logs_full_image() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
     let season = repo::insert_season(
         &mut conn,
         NewSeason {
@@ -535,6 +546,7 @@ fn insert_crop_ties_plot_to_season_and_logs_full_image() {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -548,6 +560,7 @@ fn insert_crop_ties_plot_to_season_and_logs_full_image() {
             production_system_code: Some("conventional".into()),
             sown_on: Some("2025-11-02".into()),
         },
+        None,
     )
     .unwrap();
 
@@ -589,6 +602,7 @@ fn insert_crop_with_unknown_plot_is_rejected_by_the_schema() {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -602,6 +616,7 @@ fn insert_crop_with_unknown_plot_is_rejected_by_the_schema() {
             production_system_code: None,
             sown_on: None,
         },
+        None,
     );
     assert!(
         matches!(result, Err(CoreError::Sqlite(_))),
@@ -620,6 +635,7 @@ fn insert_operator_round_trips_and_logs_full_image() {
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2027-03-01".into()),
         },
+        None,
     )
     .unwrap();
 
@@ -653,7 +669,7 @@ fn insert_operator_round_trips_and_logs_full_image() {
 #[test]
 fn insert_machinery_without_registry_numbers_writes_no_extension() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let machine = repo::insert_machinery(
         &mut conn,
         NewMachinery {
@@ -665,6 +681,7 @@ fn insert_machinery_without_registry_numbers_writes_no_extension() {
             roma_number: None,
             reganip_number: None,
         },
+        None,
     )
     .unwrap();
 
@@ -699,9 +716,9 @@ fn insert_machinery_without_registry_numbers_writes_no_extension() {
 #[test]
 fn list_seasons_orders_newest_campaign_first() {
     let mut conn = db();
-    repo::insert_season(&mut conn, new_season(2025, "2025")).unwrap();
-    repo::insert_season(&mut conn, new_season(2027, "2027")).unwrap();
-    repo::insert_season(&mut conn, new_season(2026, "2026")).unwrap();
+    repo::insert_season(&mut conn, new_season(2025, "2025"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(2027, "2027"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
 
     let years: Vec<i64> = repo::list_seasons(&conn)
         .unwrap()
@@ -714,16 +731,16 @@ fn list_seasons_orders_newest_campaign_first() {
 #[test]
 fn season_validation_rejects_blank_label() {
     let mut conn = db();
-    let result = repo::insert_season(&mut conn, new_season(2026, "   "));
+    let result = repo::insert_season(&mut conn, new_season(2026, "   "), None);
     assert!(matches!(result, Err(CoreError::Invalid("empty_name"))));
 }
 
 #[test]
 fn crop_validation_rejects_blank_species() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1")).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
 
     let result = repo::insert_crop(
         &mut conn,
@@ -735,6 +752,7 @@ fn crop_validation_rejects_blank_species() {
             production_system_code: None,
             sown_on: None,
         },
+        None,
     );
     assert!(matches!(result, Err(CoreError::Invalid("empty_name"))));
 }
@@ -742,12 +760,12 @@ fn crop_validation_rejects_blank_species() {
 #[test]
 fn list_crops_is_per_season_and_farm() {
     let mut conn = db();
-    let farm_a = repo::insert_farm(&mut conn, new_farm("Finca A")).unwrap();
-    let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B")).unwrap();
-    let plot_a = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "A1")).unwrap();
-    let plot_b = repo::insert_plot(&mut conn, new_plot(&farm_b.id, "B1")).unwrap();
-    let season_1 = repo::insert_season(&mut conn, new_season(2026, "2026")).unwrap();
-    let season_2 = repo::insert_season(&mut conn, new_season(2027, "2027")).unwrap();
+    let farm_a = repo::insert_farm(&mut conn, new_farm("Finca A"), None).unwrap();
+    let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B"), None).unwrap();
+    let plot_a = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "A1"), None).unwrap();
+    let plot_b = repo::insert_plot(&mut conn, new_plot(&farm_b.id, "B1"), None).unwrap();
+    let season_1 = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season_2 = repo::insert_season(&mut conn, new_season(2027, "2027"), None).unwrap();
 
     let crop = |plot_id: &str, season_id: &str, species: &str| NewCrop {
         plot_id: plot_id.into(),
@@ -758,10 +776,11 @@ fn list_crops_is_per_season_and_farm() {
         sown_on: None,
     };
     // Only this one matches (farm A, season 1):
-    let wheat = repo::insert_crop(&mut conn, crop(&plot_a.id, &season_1.id, "trigo")).unwrap();
+    let wheat =
+        repo::insert_crop(&mut conn, crop(&plot_a.id, &season_1.id, "trigo"), None).unwrap();
     // Same farm, other season; other farm, same season:
-    repo::insert_crop(&mut conn, crop(&plot_a.id, &season_2.id, "cebada")).unwrap();
-    repo::insert_crop(&mut conn, crop(&plot_b.id, &season_1.id, "girasol")).unwrap();
+    repo::insert_crop(&mut conn, crop(&plot_a.id, &season_2.id, "cebada"), None).unwrap();
+    repo::insert_crop(&mut conn, crop(&plot_b.id, &season_1.id, "girasol"), None).unwrap();
 
     let listed = repo::list_crops(&conn, &season_1.id, &farm_a.id).unwrap();
     assert_eq!(listed.len(), 1);
@@ -778,8 +797,8 @@ fn list_operators_orders_by_name() {
         licence_level_code: None,
         licence_expiry_date: None,
     };
-    repo::insert_operator(&mut conn, operator("Marta Ruiz")).unwrap();
-    repo::insert_operator(&mut conn, operator("Ana López")).unwrap();
+    repo::insert_operator(&mut conn, operator("Marta Ruiz"), None).unwrap();
+    repo::insert_operator(&mut conn, operator("Ana López"), None).unwrap();
 
     let names: Vec<String> = repo::list_operators(&conn)
         .unwrap()
@@ -792,8 +811,8 @@ fn list_operators_orders_by_name() {
 #[test]
 fn list_machinery_is_per_farm() {
     let mut conn = db();
-    let farm_a = repo::insert_farm(&mut conn, new_farm("Finca A")).unwrap();
-    let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B")).unwrap();
+    let farm_a = repo::insert_farm(&mut conn, new_farm("Finca A"), None).unwrap();
+    let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B"), None).unwrap();
     let machine = |farm_id: &str, name: &str| NewMachinery {
         farm_id: farm_id.into(),
         name: name.into(),
@@ -803,8 +822,8 @@ fn list_machinery_is_per_farm() {
         roma_number: None,
         reganip_number: None,
     };
-    repo::insert_machinery(&mut conn, machine(&farm_a.id, "Atomizador")).unwrap();
-    repo::insert_machinery(&mut conn, machine(&farm_b.id, "Pulverizador")).unwrap();
+    repo::insert_machinery(&mut conn, machine(&farm_a.id, "Atomizador"), None).unwrap();
+    repo::insert_machinery(&mut conn, machine(&farm_b.id, "Pulverizador"), None).unwrap();
 
     let listed = repo::list_machinery(&conn, &farm_a.id).unwrap();
     assert_eq!(listed.len(), 1);
@@ -840,7 +859,7 @@ fn plain_machinery(farm_id: &str, name: &str) -> NewMachinery {
 fn operator_validation_rejects_blank_name() {
     let mut conn = db();
     assert!(matches!(
-        repo::insert_operator(&mut conn, plain_operator("  ")),
+        repo::insert_operator(&mut conn, plain_operator("  "), None),
         Err(CoreError::Invalid("empty_name"))
     ));
 }
@@ -848,7 +867,7 @@ fn operator_validation_rejects_blank_name() {
 #[test]
 fn update_operator_replaces_fields_and_logs_complete_images() {
     let mut conn = db();
-    let operator = repo::insert_operator(&mut conn, plain_operator("Ana López")).unwrap();
+    let operator = repo::insert_operator(&mut conn, plain_operator("Ana López"), None).unwrap();
 
     let updated = repo::update_operator(
         &mut conn,
@@ -859,6 +878,7 @@ fn update_operator_replaces_fields_and_logs_complete_images() {
             licence_level_code: Some("basic".into()),
             licence_expiry_date: Some("2028-01-01".into()),
         },
+        None,
     )
     .unwrap();
     assert_eq!(updated.full_name, "Ana López García");
@@ -876,7 +896,7 @@ fn update_operator_replaces_fields_and_logs_complete_images() {
 #[test]
 fn update_operator_rejects_blank_name_and_missing_row() {
     let mut conn = db();
-    let operator = repo::insert_operator(&mut conn, plain_operator("Ana")).unwrap();
+    let operator = repo::insert_operator(&mut conn, plain_operator("Ana"), None).unwrap();
     let update = |name: &str| UpdateOperator {
         full_name: name.into(),
         licence_number: None,
@@ -884,12 +904,12 @@ fn update_operator_rejects_blank_name_and_missing_row() {
         licence_expiry_date: None,
     };
     assert!(matches!(
-        repo::update_operator(&mut conn, &operator.id, update("  ")),
+        repo::update_operator(&mut conn, &operator.id, update("  "), None),
         Err(CoreError::Invalid("empty_name"))
     ));
-    repo::soft_delete_operator(&mut conn, &operator.id).unwrap();
+    repo::soft_delete_operator(&mut conn, &operator.id, None).unwrap();
     assert!(matches!(
-        repo::update_operator(&mut conn, &operator.id, update("Ana")),
+        repo::update_operator(&mut conn, &operator.id, update("Ana"), None),
         Err(CoreError::NotFound)
     ));
 }
@@ -897,10 +917,10 @@ fn update_operator_rejects_blank_name_and_missing_row() {
 #[test]
 fn soft_delete_operator_hides_from_list_and_keeps_row() {
     let mut conn = db();
-    let keep = repo::insert_operator(&mut conn, plain_operator("Keep")).unwrap();
-    let gone = repo::insert_operator(&mut conn, plain_operator("Gone")).unwrap();
+    let keep = repo::insert_operator(&mut conn, plain_operator("Keep"), None).unwrap();
+    let gone = repo::insert_operator(&mut conn, plain_operator("Gone"), None).unwrap();
 
-    repo::soft_delete_operator(&mut conn, &gone.id).unwrap();
+    repo::soft_delete_operator(&mut conn, &gone.id, None).unwrap();
 
     let listed = repo::list_operators(&conn).unwrap();
     assert_eq!(listed.len(), 1);
@@ -924,9 +944,9 @@ fn soft_delete_operator_hides_from_list_and_keeps_row() {
 #[test]
 fn machinery_validation_rejects_blank_name() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     assert!(matches!(
-        repo::insert_machinery(&mut conn, plain_machinery(&farm.id, " ")),
+        repo::insert_machinery(&mut conn, plain_machinery(&farm.id, " "), None),
         Err(CoreError::Invalid("empty_name"))
     ));
 }
@@ -934,8 +954,9 @@ fn machinery_validation_rejects_blank_name() {
 #[test]
 fn update_machinery_replaces_fields_and_keeps_farm() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let machine = repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Old")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let machine =
+        repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Old"), None).unwrap();
 
     let detail = repo::update_machinery(
         &mut conn,
@@ -948,6 +969,7 @@ fn update_machinery_replaces_fields_and_keeps_farm() {
             roma_number: None,
             reganip_number: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(detail.machinery.name, "New");
@@ -964,9 +986,9 @@ fn update_machinery_replaces_fields_and_keeps_farm() {
 #[test]
 fn update_machinery_reconciles_registry_extension_transitions() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let machine =
-        repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Atomizador")).unwrap();
+        repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Atomizador"), None).unwrap();
     let update = |roma: Option<&str>, reganip: Option<&str>| UpdateMachinery {
         name: "Atomizador".into(),
         kind: None,
@@ -978,7 +1000,7 @@ fn update_machinery_reconciles_registry_extension_transitions() {
 
     // none -> some: extension inserted.
     let detail =
-        repo::update_machinery(&mut conn, &machine.id, update(None, Some("REG-1"))).unwrap();
+        repo::update_machinery(&mut conn, &machine.id, update(None, Some("REG-1")), None).unwrap();
     assert_eq!(detail.es.unwrap().reganip_number.as_deref(), Some("REG-1"));
     let (op, _, after) = last_change(&conn, "machinery_es_extension", &machine.id);
     assert_eq!(op, "insert");
@@ -986,7 +1008,13 @@ fn update_machinery_reconciles_registry_extension_transitions() {
     assert_eq!(after["reganip_number"], "REG-1");
 
     // some -> some: extension updated, both registries carried.
-    repo::update_machinery(&mut conn, &machine.id, update(Some("VA-1"), Some("REG-2"))).unwrap();
+    repo::update_machinery(
+        &mut conn,
+        &machine.id,
+        update(Some("VA-1"), Some("REG-2")),
+        None,
+    )
+    .unwrap();
     let (op, before, after) = last_change(&conn, "machinery_es_extension", &machine.id);
     assert_eq!(op, "update");
     assert_eq!(before["reganip_number"], "REG-1");
@@ -995,13 +1023,13 @@ fn update_machinery_reconciles_registry_extension_transitions() {
 
     // Dropping one registry keeps the row while the other remains.
     let detail =
-        repo::update_machinery(&mut conn, &machine.id, update(Some("VA-1"), None)).unwrap();
+        repo::update_machinery(&mut conn, &machine.id, update(Some("VA-1"), None), None).unwrap();
     let es = detail.es.unwrap();
     assert_eq!(es.roma_number.as_deref(), Some("VA-1"));
     assert!(es.reganip_number.is_none());
 
     // both none: extension hard-deleted, null after-image.
-    let detail = repo::update_machinery(&mut conn, &machine.id, update(None, None)).unwrap();
+    let detail = repo::update_machinery(&mut conn, &machine.id, update(None, None), None).unwrap();
     assert!(detail.es.is_none());
     let (op, before, after) = last_change(&conn, "machinery_es_extension", &machine.id);
     assert_eq!(op, "delete");
@@ -1020,11 +1048,11 @@ fn update_machinery_reconciles_registry_extension_transitions() {
 #[test]
 fn soft_delete_machinery_hides_from_lists() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let keep = repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Keep")).unwrap();
-    let gone = repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Gone")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let keep = repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Keep"), None).unwrap();
+    let gone = repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Gone"), None).unwrap();
 
-    repo::soft_delete_machinery(&mut conn, &gone.id).unwrap();
+    repo::soft_delete_machinery(&mut conn, &gone.id, None).unwrap();
 
     let listed = repo::list_machinery(&conn, &farm.id).unwrap();
     assert_eq!(listed.len(), 1);
@@ -1038,16 +1066,17 @@ fn soft_delete_machinery_hides_from_lists() {
 #[test]
 fn list_machinery_details_pairs_rows_with_their_extension() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     repo::insert_machinery(
         &mut conn,
         NewMachinery {
             reganip_number: Some("REG-7".into()),
             ..plain_machinery(&farm.id, "Atomizador")
         },
+        None,
     )
     .unwrap();
-    repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Remolque")).unwrap();
+    repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Remolque"), None).unwrap();
 
     let details = repo::list_machinery_details(&conn, &farm.id).unwrap();
     assert_eq!(details.len(), 2);
@@ -1110,11 +1139,15 @@ fn boundary_for_plot(plot_id: &str, source: &str, geometry: &str) -> NewGeoFeatu
 #[test]
 fn save_geo_feature_inserts_and_logs_complete_image() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
 
-    let feature =
-        repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", SQUARE)).unwrap();
+    let feature = repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot.id, "manual", SQUARE),
+        None,
+    )
+    .unwrap();
     assert_eq!(feature.plot_id.as_deref(), Some(plot.id.as_str()));
     assert!(feature.farm_id.is_none());
 
@@ -1136,13 +1169,21 @@ fn save_geo_feature_inserts_and_logs_complete_image() {
 #[test]
 fn save_geo_feature_replaces_active_row_within_same_source() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
 
-    let first =
-        repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", SQUARE)).unwrap();
-    let second =
-        repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", SQUARE_B)).unwrap();
+    let first = repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot.id, "manual", SQUARE),
+        None,
+    )
+    .unwrap();
+    let second = repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot.id, "manual", SQUARE_B),
+        None,
+    )
+    .unwrap();
 
     // Replacement soft-deletes the first row (history kept), with full images.
     let (op, before, after) = last_change(&conn, "geo_feature", &first.id);
@@ -1165,11 +1206,21 @@ fn save_geo_feature_replaces_active_row_within_same_source() {
 #[test]
 fn geo_feature_sources_coexist() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
 
-    repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", SQUARE)).unwrap();
-    repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "import", SQUARE_B)).unwrap();
+    repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot.id, "manual", SQUARE),
+        None,
+    )
+    .unwrap();
+    repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot.id, "import", SQUARE_B),
+        None,
+    )
+    .unwrap();
 
     // A manual boundary and an imported one are both active (discrepancy
     // display case), because replacement is scoped to (subject, role, source).
@@ -1180,7 +1231,7 @@ fn geo_feature_sources_coexist() {
 #[test]
 fn geo_feature_farm_arc_saves_and_lists() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
 
     let feature = repo::save_geo_feature(
         &mut conn,
@@ -1195,6 +1246,7 @@ fn geo_feature_farm_arc_saves_and_lists() {
             properties: None,
             fetched_at: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(feature.farm_id.as_deref(), Some(farm.id.as_str()));
@@ -1206,20 +1258,20 @@ fn geo_feature_farm_arc_saves_and_lists() {
 #[test]
 fn geo_feature_arc_validation_rejects_bad_shapes() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
 
     let mut no_subject = boundary_for_plot(&plot.id, "manual", SQUARE);
     no_subject.plot_id = None;
     assert!(matches!(
-        repo::save_geo_feature(&mut conn, no_subject),
+        repo::save_geo_feature(&mut conn, no_subject, None),
         Err(CoreError::Invalid("geo_subject_missing"))
     ));
 
     let mut both_subjects = boundary_for_plot(&plot.id, "manual", SQUARE);
     both_subjects.farm_id = Some(farm.id.clone());
     assert!(matches!(
-        repo::save_geo_feature(&mut conn, both_subjects),
+        repo::save_geo_feature(&mut conn, both_subjects, None),
         Err(CoreError::Invalid("geo_subject_ambiguous"))
     ));
 }
@@ -1227,22 +1279,27 @@ fn geo_feature_arc_validation_rejects_bad_shapes() {
 #[test]
 fn geo_feature_requires_active_subject() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
 
     // Unknown plot id.
     assert!(matches!(
         repo::save_geo_feature(
             &mut conn,
-            boundary_for_plot("no-such-plot", "manual", SQUARE)
+            boundary_for_plot("no-such-plot", "manual", SQUARE),
+            None
         ),
         Err(CoreError::NotFound)
     ));
 
     // Soft-deleted plot: hidden subjects don't take geometry.
-    repo::soft_delete_plot(&mut conn, &plot.id).unwrap();
+    repo::soft_delete_plot(&mut conn, &plot.id, None).unwrap();
     assert!(matches!(
-        repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", SQUARE)),
+        repo::save_geo_feature(
+            &mut conn,
+            boundary_for_plot(&plot.id, "manual", SQUARE),
+            None
+        ),
         Err(CoreError::NotFound)
     ));
 }
@@ -1250,12 +1307,16 @@ fn geo_feature_requires_active_subject() {
 #[test]
 fn geo_feature_rejects_invalid_geometry() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
 
     let unclosed = r#"{"type":"Polygon","coordinates":[[[-4.72,41.65],[-4.71,41.65],[-4.71,41.66],[-4.70,41.60]]]}"#;
     assert!(matches!(
-        repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", unclosed)),
+        repo::save_geo_feature(
+            &mut conn,
+            boundary_for_plot(&plot.id, "manual", unclosed),
+            None
+        ),
         Err(CoreError::Invalid("geometry_invalid"))
     ));
 }
@@ -1263,12 +1324,16 @@ fn geo_feature_rejects_invalid_geometry() {
 #[test]
 fn soft_delete_geo_feature_hides_row_and_logs() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Finca")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1")).unwrap();
-    let feature =
-        repo::save_geo_feature(&mut conn, boundary_for_plot(&plot.id, "manual", SQUARE)).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Recinto 1"), None).unwrap();
+    let feature = repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot.id, "manual", SQUARE),
+        None,
+    )
+    .unwrap();
 
-    repo::soft_delete_geo_feature(&mut conn, &feature.id).unwrap();
+    repo::soft_delete_geo_feature(&mut conn, &feature.id, None).unwrap();
 
     assert!(
         repo::list_geo_features_for_farm(&conn, &farm.id)
@@ -1281,7 +1346,7 @@ fn soft_delete_geo_feature_hides_row_and_logs() {
 
     // Second delete: already hidden.
     assert!(matches!(
-        repo::soft_delete_geo_feature(&mut conn, &feature.id),
+        repo::soft_delete_geo_feature(&mut conn, &feature.id, None),
         Err(CoreError::NotFound)
     ));
 }
@@ -1289,13 +1354,23 @@ fn soft_delete_geo_feature_hides_row_and_logs() {
 #[test]
 fn list_geo_features_is_scoped_to_the_farm() {
     let mut conn = db();
-    let farm_a = repo::insert_farm(&mut conn, new_farm("A")).unwrap();
-    let farm_b = repo::insert_farm(&mut conn, new_farm("B")).unwrap();
-    let plot_a = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "Recinto A")).unwrap();
-    let plot_b = repo::insert_plot(&mut conn, new_plot(&farm_b.id, "Recinto B")).unwrap();
+    let farm_a = repo::insert_farm(&mut conn, new_farm("A"), None).unwrap();
+    let farm_b = repo::insert_farm(&mut conn, new_farm("B"), None).unwrap();
+    let plot_a = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "Recinto A"), None).unwrap();
+    let plot_b = repo::insert_plot(&mut conn, new_plot(&farm_b.id, "Recinto B"), None).unwrap();
 
-    repo::save_geo_feature(&mut conn, boundary_for_plot(&plot_a.id, "manual", SQUARE)).unwrap();
-    repo::save_geo_feature(&mut conn, boundary_for_plot(&plot_b.id, "manual", SQUARE_B)).unwrap();
+    repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot_a.id, "manual", SQUARE),
+        None,
+    )
+    .unwrap();
+    repo::save_geo_feature(
+        &mut conn,
+        boundary_for_plot(&plot_b.id, "manual", SQUARE_B),
+        None,
+    )
+    .unwrap();
 
     let listed = repo::list_geo_features_for_farm(&conn, &farm_a.id).unwrap();
     assert_eq!(listed.len(), 1);
@@ -1318,8 +1393,8 @@ fn zone_flag(zone: &str, status: &str, pct: Option<f64>) -> NewZoneFlag {
 #[test]
 fn replace_zone_flags_stores_results_and_logs_inserts() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Zonas")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Zonas"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1"), None).unwrap();
 
     let stored = repo::replace_zone_flags(
         &mut conn,
@@ -1332,6 +1407,7 @@ fn replace_zone_flags_stores_results_and_logs_inserts() {
             // Negative results are stored too: proof the check ran and was clear.
             zone_flag("natura_2000", "outside", None),
         ],
+        None,
     )
     .unwrap();
     assert_eq!(stored.len(), 3);
@@ -1358,8 +1434,8 @@ fn replace_zone_flags_stores_results_and_logs_inserts() {
 #[test]
 fn recheck_replaces_within_campaign_and_appends_across_campaigns() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Zonas")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Zonas"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1"), None).unwrap();
 
     let first = repo::replace_zone_flags(
         &mut conn,
@@ -1367,6 +1443,7 @@ fn recheck_replaces_within_campaign_and_appends_across_campaigns() {
         2026,
         "sigpac",
         vec![zone_flag("nitrate_vulnerable", "outside", None)],
+        None,
     )
     .unwrap();
     // Re-check the SAME campaign: the zone declaration changed → replace.
@@ -1376,6 +1453,7 @@ fn recheck_replaces_within_campaign_and_appends_across_campaigns() {
         2026,
         "sigpac",
         vec![zone_flag("nitrate_vulnerable", "inside", Some(100.0))],
+        None,
     )
     .unwrap();
     // A NEW campaign appends; the 2026 history stays provable.
@@ -1385,6 +1463,7 @@ fn recheck_replaces_within_campaign_and_appends_across_campaigns() {
         2027,
         "sigpac",
         vec![zone_flag("nitrate_vulnerable", "inside", Some(100.0))],
+        None,
     )
     .unwrap();
 
@@ -1403,8 +1482,8 @@ fn recheck_replaces_within_campaign_and_appends_across_campaigns() {
 #[test]
 fn zone_flags_validate_status_and_plot() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Zonas")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Zonas"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1"), None).unwrap();
 
     assert!(matches!(
         repo::replace_zone_flags(
@@ -1413,11 +1492,12 @@ fn zone_flags_validate_status_and_plot() {
             2026,
             "sigpac",
             vec![zone_flag("nitrate_vulnerable", "maybe", None)],
+            None,
         ),
         Err(CoreError::Invalid("zone_status_invalid"))
     ));
     assert!(matches!(
-        repo::replace_zone_flags(&mut conn, "missing-plot", 2026, "sigpac", vec![]),
+        repo::replace_zone_flags(&mut conn, "missing-plot", 2026, "sigpac", vec![], None),
         Err(CoreError::NotFound)
     ));
 }
@@ -1425,10 +1505,10 @@ fn zone_flags_validate_status_and_plot() {
 #[test]
 fn zone_flag_listing_is_scoped_to_the_farms_active_plots() {
     let mut conn = db();
-    let farm = repo::insert_farm(&mut conn, new_farm("Mine")).unwrap();
-    let other = repo::insert_farm(&mut conn, new_farm("Other")).unwrap();
-    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1")).unwrap();
-    let foreign = repo::insert_plot(&mut conn, new_plot(&other.id, "P2")).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Mine"), None).unwrap();
+    let other = repo::insert_farm(&mut conn, new_farm("Other"), None).unwrap();
+    let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "P1"), None).unwrap();
+    let foreign = repo::insert_plot(&mut conn, new_plot(&other.id, "P2"), None).unwrap();
 
     repo::replace_zone_flags(
         &mut conn,
@@ -1436,6 +1516,7 @@ fn zone_flag_listing_is_scoped_to_the_farms_active_plots() {
         2026,
         "sigpac",
         vec![zone_flag("natura_2000", "inside", Some(12.5))],
+        None,
     )
     .unwrap();
     repo::replace_zone_flags(
@@ -1444,6 +1525,7 @@ fn zone_flag_listing_is_scoped_to_the_farms_active_plots() {
         2026,
         "sigpac",
         vec![zone_flag("natura_2000", "inside", Some(50.0))],
+        None,
     )
     .unwrap();
 
@@ -1452,10 +1534,292 @@ fn zone_flag_listing_is_scoped_to_the_farms_active_plots() {
     assert_eq!(flags[0].plot_id, plot.id);
 
     // Deleting the plot hides its flags from the listing.
-    repo::soft_delete_plot(&mut conn, &plot.id).unwrap();
+    repo::soft_delete_plot(&mut conn, &plot.id, None).unwrap();
     assert!(
         repo::list_zone_flags_for_farm(&conn, &farm.id)
             .unwrap()
             .is_empty()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// User profile
+// ---------------------------------------------------------------------------
+
+fn plain_profile(name: &str) -> NewUserProfile {
+    NewUserProfile {
+        display_name: name.into(),
+        operator_id: None,
+    }
+}
+
+#[test]
+fn insert_user_profile_round_trips_and_logs_full_image() {
+    let mut conn = db();
+    let operator = repo::insert_operator(&mut conn, plain_operator("Ana López"), None).unwrap();
+    let profile = repo::insert_user_profile(
+        &mut conn,
+        NewUserProfile {
+            display_name: "Ana".into(),
+            operator_id: Some(operator.id.clone()),
+        },
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(profile.id.len(), 36, "UUIDv7 TEXT id");
+    assert_eq!(profile.operator_id.as_deref(), Some(operator.id.as_str()));
+
+    let (op, before, after) = last_change(&conn, "user_profile", &profile.id);
+    assert_eq!(op, "insert");
+    assert!(before.is_null());
+    for column in [
+        "id",
+        "display_name",
+        "operator_id",
+        "created_at",
+        "updated_at",
+        "deleted_at",
+    ] {
+        assert!(
+            after.get(column).is_some(),
+            "after-image is missing column '{column}'"
+        );
+    }
+    assert_eq!(after["operator_id"], operator.id.as_str());
+}
+
+#[test]
+fn user_profile_validation_rejects_blank_name_and_bad_operator_link() {
+    let mut conn = db();
+    assert!(matches!(
+        repo::insert_user_profile(&mut conn, plain_profile("  "), None),
+        Err(CoreError::Invalid("empty_name"))
+    ));
+    // Nonexistent operator id.
+    assert!(matches!(
+        repo::insert_user_profile(
+            &mut conn,
+            NewUserProfile {
+                display_name: "Ana".into(),
+                operator_id: Some("00000000-0000-0000-0000-000000000000".into()),
+            },
+            None,
+        ),
+        Err(CoreError::Invalid("operator_not_found"))
+    ));
+    // A soft-deleted operator satisfies the SQL FK but must still be rejected:
+    // the link points at someone the pickers can no longer show.
+    let operator = repo::insert_operator(&mut conn, plain_operator("Gone"), None).unwrap();
+    repo::soft_delete_operator(&mut conn, &operator.id, None).unwrap();
+    assert!(matches!(
+        repo::insert_user_profile(
+            &mut conn,
+            NewUserProfile {
+                display_name: "Ana".into(),
+                operator_id: Some(operator.id),
+            },
+            None,
+        ),
+        Err(CoreError::Invalid("operator_not_found"))
+    ));
+}
+
+#[test]
+fn list_user_profiles_orders_by_name_and_hides_deleted() {
+    let mut conn = db();
+    let marta = repo::insert_user_profile(&mut conn, plain_profile("Marta"), None).unwrap();
+    repo::insert_user_profile(&mut conn, plain_profile("Ana"), None).unwrap();
+    repo::insert_user_profile(&mut conn, plain_profile("Carlos"), None).unwrap();
+    repo::soft_delete_user_profile(&mut conn, &marta.id, None).unwrap();
+
+    let names: Vec<String> = repo::list_user_profiles(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|p| p.display_name)
+        .collect();
+    assert_eq!(names, ["Ana", "Carlos"]);
+}
+
+#[test]
+fn update_user_profile_replaces_fields_and_logs_complete_images() {
+    let mut conn = db();
+    let operator = repo::insert_operator(&mut conn, plain_operator("Ana López"), None).unwrap();
+    let profile = repo::insert_user_profile(
+        &mut conn,
+        NewUserProfile {
+            display_name: "Ana".into(),
+            operator_id: Some(operator.id.clone()),
+        },
+        None,
+    )
+    .unwrap();
+
+    // operator_id: None unlinks — the submitted state replaces the stored one.
+    let updated = repo::update_user_profile(
+        &mut conn,
+        &profile.id,
+        UpdateUserProfile {
+            display_name: "Ana María".into(),
+            operator_id: None,
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(updated.display_name, "Ana María");
+    assert_eq!(updated.operator_id, None);
+
+    let (op, before, after) = last_change(&conn, "user_profile", &profile.id);
+    assert_eq!(op, "update");
+    assert_eq!(before["display_name"], "Ana");
+    assert_eq!(before["operator_id"], operator.id.as_str());
+    assert_eq!(after["display_name"], "Ana María");
+    assert!(after["operator_id"].is_null());
+}
+
+#[test]
+fn update_user_profile_rejects_blank_name_bad_link_and_missing_row() {
+    let mut conn = db();
+    let profile = repo::insert_user_profile(&mut conn, plain_profile("Ana"), None).unwrap();
+    let update = |name: &str, operator_id: Option<String>| UpdateUserProfile {
+        display_name: name.into(),
+        operator_id,
+    };
+    assert!(matches!(
+        repo::update_user_profile(&mut conn, &profile.id, update("  ", None), None),
+        Err(CoreError::Invalid("empty_name"))
+    ));
+    assert!(matches!(
+        repo::update_user_profile(
+            &mut conn,
+            &profile.id,
+            update("Ana", Some("00000000-0000-0000-0000-000000000000".into())),
+            None,
+        ),
+        Err(CoreError::Invalid("operator_not_found"))
+    ));
+    repo::soft_delete_user_profile(&mut conn, &profile.id, None).unwrap();
+    assert!(matches!(
+        repo::update_user_profile(&mut conn, &profile.id, update("Ana", None), None),
+        Err(CoreError::NotFound)
+    ));
+}
+
+#[test]
+fn soft_delete_user_profile_hides_from_list_and_keeps_row() {
+    let mut conn = db();
+    let keep = repo::insert_user_profile(&mut conn, plain_profile("Keep"), None).unwrap();
+    let gone = repo::insert_user_profile(&mut conn, plain_profile("Gone"), None).unwrap();
+
+    repo::soft_delete_user_profile(&mut conn, &gone.id, None).unwrap();
+
+    let listed = repo::list_user_profiles(&conn).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, keep.id);
+
+    // The row survives: author-stamp ids must resolve forever.
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM user_profile WHERE id = ?1",
+            [gone.id.as_str()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+
+    let (op, before, after) = last_change(&conn, "user_profile", &gone.id);
+    assert_eq!(op, "delete");
+    assert!(before["deleted_at"].is_null());
+    assert!(!after["deleted_at"].is_null(), "full after-image logged");
+
+    // Double delete: the row is already hidden.
+    assert!(matches!(
+        repo::soft_delete_user_profile(&mut conn, &gone.id, None),
+        Err(CoreError::NotFound)
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// Actor stamping (record_change.actor)
+// ---------------------------------------------------------------------------
+
+/// The actor column of the latest record_change row for an entity.
+fn change_actor(conn: &Connection, table: &str, id: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT actor FROM record_change
+         WHERE entity_table = ?1 AND entity_id = ?2
+         ORDER BY changed_at DESC, id DESC LIMIT 1",
+        [table, id],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+/// Every write stamps the acting profile id verbatim — including the extension
+/// entity logged inside the same transaction — and a `None` actor stays NULL
+/// (the honest "no active profile" state, also the state of every pre-profile
+/// row).
+#[test]
+fn writes_stamp_the_actor_and_none_stays_null() {
+    let mut conn = db();
+    let profile = repo::insert_user_profile(&mut conn, plain_profile("Ana"), None).unwrap();
+    // Before any active profile exists, writes are unattributed.
+    assert_eq!(change_actor(&conn, "user_profile", &profile.id), None);
+
+    let farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Finca".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            country_code: "es".into(),
+            es: Some(FarmEsFields {
+                rega_code: Some("ES470000001".into()),
+                rea_code: None,
+                province_code: None,
+            }),
+        },
+        Some(&profile.id),
+    )
+    .unwrap();
+    assert_eq!(
+        change_actor(&conn, "farm", &farm.id).as_deref(),
+        Some(profile.id.as_str())
+    );
+    assert_eq!(
+        change_actor(&conn, "farm_es_extension", &farm.id).as_deref(),
+        Some(profile.id.as_str()),
+        "the extension row logged in the same write carries the same author"
+    );
+
+    // Update and soft delete stamp whoever acted THEN — each row of the log
+    // records its own author, not the row's original creator.
+    let other = repo::insert_user_profile(&mut conn, plain_profile("Marta"), None).unwrap();
+    repo::update_farm(
+        &mut conn,
+        &farm.id,
+        UpdateFarm {
+            name: "Finca 2".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            location_text: None,
+            latitude: None,
+            longitude: None,
+            country_code: "es".into(),
+            es: None,
+        },
+        Some(&other.id),
+    )
+    .unwrap();
+    assert_eq!(
+        change_actor(&conn, "farm", &farm.id).as_deref(),
+        Some(other.id.as_str())
+    );
+
+    repo::soft_delete_farm(&mut conn, &farm.id, None).unwrap();
+    assert_eq!(
+        change_actor(&conn, "farm", &farm.id),
+        None,
+        "a write with no active profile stays unattributed even on a row previously edited under one"
     );
 }

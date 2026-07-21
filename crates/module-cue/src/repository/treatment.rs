@@ -24,6 +24,7 @@ pub fn insert_treatment_record(
     conn: &mut Connection,
     new: NewTreatmentRecord,
     plots: Vec<NewTreatmentPlot>,
+    actor: Option<&str>,
 ) -> Result<TreatmentRecord> {
     let tx = conn.transaction()?;
 
@@ -210,6 +211,7 @@ pub fn insert_treatment_record(
             "treatment_problem",
             &row.id,
             Some(&record.season_id),
+            actor,
             &row,
         )?;
     }
@@ -229,6 +231,7 @@ pub fn insert_treatment_record(
             "treatment_justification",
             &row.id,
             Some(&record.season_id),
+            actor,
             &row,
         )?;
     }
@@ -263,7 +266,14 @@ pub fn insert_treatment_record(
                 tp.surface_treated_ha, tp.crop_name_snapshot, tp.variety_snapshot
             ],
         )?;
-        log_insert(&tx, "treatment_plot", &tp.id, Some(&record.season_id), &tp)?;
+        log_insert(
+            &tx,
+            "treatment_plot",
+            &tp.id,
+            Some(&record.season_id),
+            actor,
+            &tp,
+        )?;
     }
 
     log_insert(
@@ -271,6 +281,7 @@ pub fn insert_treatment_record(
         "treatment_record",
         &record.id,
         Some(&record.season_id),
+        actor,
         &record,
     )?;
     tx.commit()?;
@@ -398,6 +409,7 @@ pub fn set_treatment_efficacy(
     conn: &mut Connection,
     id: &str,
     efficacy_code: Option<String>,
+    actor: Option<&str>,
 ) -> Result<TreatmentRecord> {
     let tx = conn.transaction()?;
     let before = tx
@@ -420,6 +432,7 @@ pub fn set_treatment_efficacy(
         "treatment_record",
         id,
         Some(&before.season_id),
+        actor,
         &before,
         &after,
     )?;
@@ -504,7 +517,11 @@ pub fn phi_status_for_farm(
 
 /// Soft-delete a regulatory record (official records are never hard-deleted).
 /// Both the before- and after-images in the audit log are complete rows.
-pub fn soft_delete_treatment_record(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_treatment_record(
+    conn: &mut Connection,
+    id: &str,
+    actor: Option<&str>,
+) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -528,6 +545,7 @@ pub fn soft_delete_treatment_record(conn: &mut Connection, id: &str) -> Result<(
         id,
         Some(&before.season_id),
         "delete",
+        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
     tx.commit()?;

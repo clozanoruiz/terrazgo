@@ -24,6 +24,10 @@
 //!   * [`import`]  — boundary files (GeoJSON, GeoPackage) → GeoJSON geometries.
 //!   * [`error`]   — `GeoError` / `Result`.
 
+// Android-only TLS bootstrap for the platform verifier; private — its one
+// entry point is called from `fetch::http_get`.
+#[cfg(target_os = "android")]
+mod android;
 pub mod db;
 pub mod error;
 pub mod fetch;

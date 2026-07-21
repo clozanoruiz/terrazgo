@@ -23,12 +23,16 @@ use uuid::Uuid;
 /// Save a geometry for its subject, replacing any active row with the same
 /// (subject, role, source). Validates the exclusive arc, the subject's
 /// existence and the GeoJSON geometry before touching the database.
-pub fn save_geo_feature(conn: &mut Connection, new: NewGeoFeature) -> Result<GeoFeature> {
+pub fn save_geo_feature(
+    conn: &mut Connection,
+    new: NewGeoFeature,
+    actor: Option<&str>,
+) -> Result<GeoFeature> {
     validate_arc(&new)?;
     validate_boundary_geometry(&new.geometry)?;
     let tx = conn.transaction()?;
     ensure_subject_exists(&tx, &new)?;
-    replace_active(&tx, &new)?;
+    replace_active(&tx, &new, actor)?;
 
     let now = now_utc_iso();
     let feature = GeoFeature {
@@ -66,7 +70,7 @@ pub fn save_geo_feature(conn: &mut Connection, new: NewGeoFeature) -> Result<Geo
             feature.updated_at
         ],
     )?;
-    log_insert(&tx, "geo_feature", &feature.id, None, &feature)?;
+    log_insert(&tx, "geo_feature", &feature.id, None, actor, &feature)?;
     tx.commit()?;
     Ok(feature)
 }
@@ -88,7 +92,7 @@ pub fn list_geo_features_for_farm(conn: &Connection, farm_id: &str) -> Result<Ve
 }
 
 /// Soft delete one geometry row (e.g. the user discards a drawn boundary).
-pub fn soft_delete_geo_feature(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_geo_feature(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -98,7 +102,7 @@ pub fn soft_delete_geo_feature(conn: &mut Connection, id: &str) -> Result<()> {
         )
         .optional()?
         .ok_or(CoreError::NotFound)?;
-    soft_delete_row(&tx, &before)?;
+    soft_delete_row(&tx, &before, actor)?;
     tx.commit()?;
     Ok(())
 }
@@ -138,7 +142,7 @@ fn ensure_subject_exists(tx: &Transaction, new: &NewGeoFeature) -> Result<()> {
 }
 
 /// Soft-delete the currently active row for this (subject, role, source), if any.
-fn replace_active(tx: &Transaction, new: &NewGeoFeature) -> Result<()> {
+fn replace_active(tx: &Transaction, new: &NewGeoFeature, actor: Option<&str>) -> Result<()> {
     let current = tx
         .query_row(
             "SELECT * FROM geo_feature
@@ -149,12 +153,12 @@ fn replace_active(tx: &Transaction, new: &NewGeoFeature) -> Result<()> {
         )
         .optional()?;
     if let Some(before) = current {
-        soft_delete_row(tx, &before)?;
+        soft_delete_row(tx, &before, actor)?;
     }
     Ok(())
 }
 
-fn soft_delete_row(tx: &Transaction, before: &GeoFeature) -> Result<()> {
+fn soft_delete_row(tx: &Transaction, before: &GeoFeature, actor: Option<&str>) -> Result<()> {
     let now = now_utc_iso();
     let mut after = before.clone();
     after.deleted_at = Some(now.clone());
@@ -163,7 +167,15 @@ fn soft_delete_row(tx: &Transaction, before: &GeoFeature) -> Result<()> {
         "UPDATE geo_feature SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![before.id, now],
     )?;
-    log_delete(tx, "geo_feature", &before.id, None, before, Some(&after))?;
+    log_delete(
+        tx,
+        "geo_feature",
+        &before.id,
+        None,
+        actor,
+        before,
+        Some(&after),
+    )?;
     Ok(())
 }
 

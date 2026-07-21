@@ -320,6 +320,12 @@ fn agent() -> &'static ureq::Agent {
 }
 
 fn http_get(url: &str, fallback_content_type: &str) -> Result<Fetched> {
+    // Android: the platform verifier PANICS inside the request if it never
+    // got its JNI handles (silent blank map, 2026-07-17 field test) — hand
+    // them over before ureq can need them. A failure surfaces through the
+    // normal offline diagnosis instead of a dead tokio worker.
+    #[cfg(target_os = "android")]
+    crate::android::ensure_platform_verifier().map_err(GeoError::Offline)?;
     let mut response = agent().get(url).call().map_err(|err| match err {
         ureq::Error::StatusCode(status) => GeoError::Http { status },
         other => GeoError::Offline(other.to_string()),

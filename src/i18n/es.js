@@ -390,6 +390,20 @@ export default {
   "message.settings_saved": "Ajustes guardados.",
   "message.cache_cleared": "Mapas guardados borrados ({count}).",
 
+  "settings.profiles": "Perfiles de usuario",
+  "profiles.hint":
+    "Los perfiles identifican quién usa la aplicación. El perfil activo es una preferencia de este dispositivo.",
+  "profiles.active_label": "Perfil activo en este dispositivo",
+  "profiles.active_none": "Sin perfil activo",
+  "profiles.new": "Nuevo perfil",
+  "profiles.empty": "Aún no hay perfiles.",
+  "profile.display_name": "Nombre",
+  "profile.operator_link": "Operador vinculado (aplicador)",
+  "profile.operator_detail": "Aplicador: {name}",
+  "profile.delete_confirm": "¿Eliminar el perfil «{name}»? Dejará de aparecer en las listas.",
+  "message.profile_saved": "Perfil «{name}» guardado.",
+  "message.profile_deleted": "Perfil eliminado.",
+
   "backup.title": "Copia de seguridad",
   "actions.export_backup": "Exportar copia de seguridad",
   "actions.import_backup": "Importar copia de seguridad",
@@ -404,6 +418,7 @@ export default {
   "error.internal_intro": "Se ha producido un error interno:",
   "error.not_found": "El registro no existe.",
   "error.invalid.empty_name": "El nombre no puede estar vacío.",
+  "error.invalid.operator_not_found": "El operador seleccionado ya no existe.",
   "error.invalid.empty_authorisation_number": "El número de registro no puede estar vacío.",
   "error.invalid.no_problems": "Indica al menos una problemática (plaga, enfermedad…).",
   "error.invalid.no_justifications": "Indica al menos una justificación de la actuación.",

@@ -10,6 +10,7 @@
   import { locale, locales, nativeName, setLocale, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
+  import SettingsProfiles from "./SettingsProfiles.svelte";
   import Skeleton from "./Skeleton.svelte";
 
   // { settings, tile_cache_default_bytes } — the default rides along so an
@@ -136,6 +137,8 @@
       <button type="button" onclick={clearCache}>{t("settings.clear_cache")}</button>
     </div>
   {/if}
+
+  <SettingsProfiles bind:info />
 
   <h3>{t("backup.title")}</h3>
   <div id="backup-actions" aria-label={t("backup.title")}>

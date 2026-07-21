@@ -21,3 +21,10 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ureq = { workspace = true }
 geozero = { workspace = true }
+
+# Android-only: lazy platform-verifier initialization before the first fetch
+# (see src/android.rs for why it lives at the fetch chokepoint, not startup).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { workspace = true }
+tao = { workspace = true }
+rustls-platform-verifier = { workspace = true }

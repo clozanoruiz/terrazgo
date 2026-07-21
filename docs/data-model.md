@@ -56,7 +56,7 @@ questions about it:
 |---|---|---|---|---|---|
 | **Reference / lookup** — ships with the app, seeded by migration | `country`, `production_system`, `licence_level`, `unit`, `reason_category`, `formulation_type`, `alert_type`, `efficacy`, `justification`, `authorisation_kind` | TEXT code | no (app-versioned) | no | no |
 | **Imported reference** — provider catalogue snapshot vendored in the binary, imported at startup | `catalogue`, `catalogue_code` | TEXT id / INTEGER | no (each device imports its own copy) | no | no — the provider retires codes by baja date; imports upsert and never delete |
-| **User data** — created on a device | `season`, `farm`, `plot`, `crop`, `operator`, `machinery`, `geo_feature`, `active_substance`, `product`, `product_active_substance`, `product_authorisation`, `treatment_record`, `treatment_plot`, `treatment_problem`, `treatment_justification`, `export_alias` | UUIDv7 | yes (Stage 2+) | yes, full row images | on the regulatory ones (see below) |
+| **User data** — created on a device | `season`, `farm`, `plot`, `crop`, `operator`, `machinery`, `user_profile`, `geo_feature`, `active_substance`, `product`, `product_active_substance`, `product_authorisation`, `treatment_record`, `treatment_plot`, `treatment_problem`, `treatment_justification`, `export_alias` | UUIDv7 | yes (Stage 2+) | yes, full row images | on the regulatory ones (see below) |
 | **Regional extension** — attributes of a user-data row for one country | `farm_es_extension`, `plot_es_extension`, `machinery_es_extension` | parent's id | yes (as part of parent's domain) | yes (own entity) | no — hard-deleted when the form clears them (null after-image logged) |
 | **Derived / infrastructure** | `alert` (derived), `record_change` (infrastructure) | UUIDv7 | no / is the sync source | `alert`: never. `record_change`: is the log | no |
 
@@ -66,7 +66,8 @@ offline farmer must be able to record an unknown substance) even though it
 feels like a catalogue.
 
 Soft delete (`deleted_at`) exists on: `farm`, `plot`, `crop`, `operator`,
-`machinery`, `geo_feature`, `product`, `treatment_record`. `season` is never
+`machinery`, `user_profile`, `geo_feature`, `product`, `treatment_record`.
+`season` is never
 deleted — it archives (`status`). Junction rows (`treatment_plot`,
 `treatment_problem`, `treatment_justification`, `product_active_substance`,
 `product_authorisation`) live and die with their parent (`ON DELETE CASCADE`
@@ -95,6 +96,8 @@ country (lookup)
    │
   operator (standalone — people are not owned by a farm)
    └── licence_level (lookup)
+
+  user_profile (standalone — who uses the app; optional operator_id link)
 ```
 
 | Table | What it is | Worth knowing |
@@ -104,6 +107,7 @@ country (lookup)
 | `plot` | Parcela / recinto | `farm_id` is **immutable by design** — no API moves a plot between farms, since that would silently re-home its history |
 | `crop` | What grows on a plot in a season | The (plot, season) pair is the unit treatments point at; indexed on it |
 | `operator` | Aplicador with licence | `licence_expiry_date` drives `licence_expiry` alerts |
+| `user_profile` | Who uses the app | Identification, not security: no credentials — real authentication belongs to cloud sync. The id is the author stamp on `record_change.actor` (every repository write takes an `actor` parameter; the shell passes the device's active profile id), so rows are only ever soft-deleted. The stamp is verbatim, never validated: a foreign device's claim must survive sync. Optional `operator_id` link ("this user is this applicator") must point at a non-deleted operator. The ACTIVE profile is a per-device choice in `settings.json`, never in this table |
 | `machinery` | Equipment, per farm | `next_inspection_due_date` (ITV) drives `itv_expiry` alerts |
 | `*_es_extension` | Spanish registry identifiers | Regional IDs never sit in core tables; a French module would add `*_fr_extension` tables, not columns. Farm carries both `rea_code` (the farm registry — the SIEX export's CodigoRea) and `rega_code` (the *livestock* registry): different registrations, both user-entered |
 | `geo_feature` | Geometry attached to a plot or farm (boundaries) | **Exclusive arc**: one nullable FK per subject (`plot_id`/`farm_id`) + CHECK exactly one — real FK enforcement where `record_change`/`alert` deliberately go polymorphic, because a geometry must die with its subject. GeoJSON in EPSG:4326; `source` (`manual`/`import`/future `sigpac`) rows coexist for discrepancy display; partial unique indexes allow one ACTIVE row per (subject, role, source) — replacement soft-deletes, history is kept. `official_area_ha` is provider-declared and never overwrites `plot.area_ha`; `properties` holds provider attributes as JSON (promoted to real columns only on proven need). Fetched geometry cannot be re-derived offline, so it syncs and is audited like any user data — unlike map *tiles*, which live in the separate `geo-cache.db` (own migration runner, never in backups or `record_change`) |

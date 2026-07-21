@@ -170,8 +170,8 @@ becomes JSON anyway.
 `src-tauri/src/lib.rs::run()`, in order — any failure aborts startup, which
 is the correct behaviour for "the database didn't open or migrate":
 
-1. Resolve the data dir from the app identifier (`org.terrazgo.desktop` →
-   `~/.local/share/org.terrazgo.desktop/` on Linux) and open/create
+1. Resolve the data dir from the app identifier (`org.terrazgo.app` →
+   `~/.local/share/org.terrazgo.app/` on Linux) and open/create
    `terrazgo.db` — WAL mode, `foreign_keys = ON`.
 2. Run `composed_migrations()` — core steps first, then each registered
    module's steps in registration order, one global `user_version`.
@@ -433,8 +433,43 @@ such as CDSE accounts need their own storage decision).
 
 In the UI, the Settings view hosts the language selector, the offline-map
 cache size (applied immediately — shrinking evicts on the spot), the
-clear-stored-maps action and the backup export/import moved from the Status
-view.
+clear-stored-maps action, the user-profiles section and the backup
+export/import moved from the Status view.
+
+**User profiles** (added 2026-07-17) split across both stores by the same
+lifecycle test. The profiles themselves (`user_profile`: display name,
+optional operator link) are farm data in the full sense — synced,
+`record_change`-logged, soft-deleted only, because a profile id is the
+author stamp on `record_change.actor` and must resolve in years-old
+audit rows on any device. But *which* profile is active is a property of
+the device ("who is using THIS phone"), so it is `active_user_id` in
+`settings.json` — tolerated when dangling (profile deleted elsewhere,
+backup restored onto a new install): the shell degrades to "no active
+profile", never errors. Deleting the active profile clears the setting in
+the same command. Profiles are identification, not security — no
+credentials; real authentication arrives with cloud sync, and a local
+password guarding a SQLite file the user owns would be theatre.
+
+**The author stamp** (wired 2026-07-17): every repository write function —
+core, module-cue, module-sigpac — takes an `actor: Option<&str>` parameter
+and hands it to the audit helpers, which write it to `record_change.actor`.
+module-sigpac is in that list despite being "the lookup module" because
+verification writes: `verify_plot` persists the fetched boundary as a
+`geo_feature` row and the zone results as `plot_zone_flag` rows — synced,
+audit-logged user data — and "who verified this plot" is attribution like
+any other.
+The shell's write commands read the active profile id from `SettingsState`
+per call (`active_actor`, settings lock released before any other lock is
+taken) and pass it down; the demo seed passes `None`. Explicit threading
+was chosen over connection-attached session state deliberately: the backup
+import swaps the connection mid-session, which would silently drop an
+attached actor, while a parameter cannot be forgotten without the compiler
+noticing. The stamp is verbatim and unvalidated — profiles are soft-deleted
+only, so it resolves at inspection time, and a foreign device's claim must
+survive sync even where it can't be resolved locally. `None` stays NULL:
+the honest "no active profile" state, shared by every row written before
+profiles existed. Each log row records who performed THAT write, not the
+row's original creator.
 
 **Conflicts are two different problems** (Stage-2 design notes, 2026-07-05
 — nothing here is built yet, but the strategy is decided):
@@ -479,7 +514,28 @@ Stage-2 design list therefore carries: pick the natural key per regulatory
 table, spec the suspect queue, and (already parked there) decide whether
 alert acknowledgements roam.
 
-## The map tier: geo://, two databases, layers as data
+## Files the user picks: paths on desktop, content URIs on Android
+
+Every file a user chooses in a native dialog (backup export/import, the SIEX
+and PDF exports, boundary-file import) flows through
+`src-tauri/src/user_files.rs`. The reason is Android (2026-07-18): there the
+dialogs are the system document picker (Storage Access Framework), which
+*creates* the destination itself and returns a `content://` URI — `std::fs`
+cannot open one, which is how the first on-device exports produced 0-byte
+files in Downloads plus an os-error-2 notification. The fs plugin
+(`tauri-plugin-fs`, Rust-side only — no fs commands are granted to the
+webview) resolves a content URI into an ordinary file descriptor through the
+platform `ContentResolver`; plain desktop paths take the `std::fs` route
+inside the same call, so commands have one code path.
+
+Three helpers cover every caller: `write_user_file` (in-memory bytes →
+destination, truncating), `stage_dest` + `copy_to_user_file` (for producers
+that need a real filesystem path to write to — SQLite's `VACUUM INTO` — the
+verified snapshot lands in a private staging file and is then streamed out),
+and `stage_user_source` (read side: plain paths pass through untouched; a
+URI is streamed into a staging copy first, because rusqlite and the GPKG
+reader need real paths). Staging files live under the app *cache* dir and
+delete themselves on drop — transient by construction, never in backups.
 
 Mapping is whole-app infrastructure (plots today; irrigation, zone flags,
 treatments as overlays later), not a SIGPAC feature. Three pieces
@@ -509,6 +565,27 @@ the cache-through semantics, source registry and style rewriting stay
 geo. terrazgo-core never gains a network dependency: core having no HTTP
 crate in its tree is the structural enforcement of "no network calls in
 core or module code paths", not an accident.
+
+**Android TLS bootstrap (2026-07-18).** The platform verifier delegates to
+the Android trust store over JNI and panics on first use if it was never
+handed the JVM + app context — on the first on-device test that panic killed
+a tokio worker mid-fetch and left a silently blank map. `terrazgo-geo`'s
+`android` module (Android-only compile target) initializes it lazily at the
+top of `fetch::http_get`, the single chokepoint every network request passes
+through. Lazy-at-fetch rather than at-startup is load-bearing: the Rust main
+thread is spawned from the process-lifecycle `onCreate` and races the
+activity's own `onCreate`, where tao captures the activity context — but a
+fetch can only be triggered once the webview exists, and the webview lives
+inside the activity, so by then the context is guaranteed. The JNI handles
+come from tao's `main_android_context()` (the same tao copy the Tauri
+runtime links — the version pin matters, its statics hold the context). The
+verifier's Kotlin half is pulled into the APK by
+`src-tauri/gen/android/app/build.gradle.kts`, which locates the crate's
+bundled Maven repository via `cargo metadata` so the Kotlin version tracks
+the Rust crate automatically; a ProGuard keep rule protects the
+JNI-only-reachable class from release-build shrinking. An init failure
+surfaces through the normal `geo_offline {reason}` diagnosis instead of a
+dead worker.
 
 **Two databases, two natures.** Geometry a user attaches to a plot is *user
 data*: the core `geo_feature` table (exclusive-arc FKs, audit-logged,

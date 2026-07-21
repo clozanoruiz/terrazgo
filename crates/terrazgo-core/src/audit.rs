@@ -15,12 +15,20 @@ use uuid::Uuid;
 
 /// Append one row to the append-only `record_change` log. `payload` is the full
 /// `{"before": ..., "after": ...}` document for the change.
+///
+/// `actor` is the author stamp: the `user_profile.id` of the device's active
+/// profile at write time, passed down from the shell. `None` means "recorded
+/// with no active profile" — including every row written before profiles
+/// existed. The id is stamped verbatim, never validated here: profiles are
+/// soft-deleted only, so it resolves at inspection time, and a claim from a
+/// foreign device must survive sync even if this device can't resolve it yet.
 pub fn write_change(
     tx: &Transaction,
     entity_table: &str,
     entity_id: &str,
     season_id: Option<&str>,
     operation: &str,
+    actor: Option<&str>,
     payload: Value,
 ) -> Result<()> {
     tx.execute(
@@ -34,7 +42,7 @@ pub fn write_change(
             season_id,
             operation,
             now_utc_iso(),
-            Option::<String>::None, // actor: filled once multi-device sync exists
+            actor,
             payload.to_string(),
         ],
     )?;
@@ -51,6 +59,7 @@ pub fn log_insert<T: Serialize>(
     table: &str,
     id: &str,
     season_id: Option<&str>,
+    actor: Option<&str>,
     after: &T,
 ) -> Result<()> {
     write_change(
@@ -59,6 +68,7 @@ pub fn log_insert<T: Serialize>(
         id,
         season_id,
         "insert",
+        actor,
         json!({ "before": Value::Null, "after": serde_json::to_value(after)? }),
     )
 }
@@ -69,6 +79,7 @@ pub fn log_update<T: Serialize>(
     table: &str,
     id: &str,
     season_id: Option<&str>,
+    actor: Option<&str>,
     before: &T,
     after: &T,
 ) -> Result<()> {
@@ -78,6 +89,7 @@ pub fn log_update<T: Serialize>(
         id,
         season_id,
         "update",
+        actor,
         json!({ "before": serde_json::to_value(before)?, "after": serde_json::to_value(after)? }),
     )
 }
@@ -90,6 +102,7 @@ pub fn log_delete<T: Serialize>(
     table: &str,
     id: &str,
     season_id: Option<&str>,
+    actor: Option<&str>,
     before: &T,
     after: Option<&T>,
 ) -> Result<()> {
@@ -103,6 +116,7 @@ pub fn log_delete<T: Serialize>(
         id,
         season_id,
         "delete",
+        actor,
         json!({ "before": serde_json::to_value(before)?, "after": after }),
     )
 }

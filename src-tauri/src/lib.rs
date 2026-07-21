@@ -10,6 +10,7 @@ pub mod db;
 pub mod geo_protocol;
 pub mod registry;
 pub mod state;
+pub mod user_files;
 
 use module_cue::alerts::AlertConfig;
 use std::sync::Mutex;
@@ -20,16 +21,25 @@ use terrazgo_core::date::today_utc;
 /// first, refresh alerts against today, then hand the connection to Tauri's
 /// managed state. Any failure here aborts startup — correct behaviour for
 /// "the database didn't open or migrate".
+///
+/// On mobile this function IS the app entry point: the macro generates the
+/// JNI symbols the Android wrapper loads from the cdylib (desktop keeps
+/// entering through main.rs).
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // Rust-side only (user_files.rs): resolves the content:// URIs the
+        // dialogs return on Android. No fs commands are exposed to the
+        // webview — the capabilities file deliberately grants none.
+        .plugin(tauri_plugin_fs::init())
         // The single seam between the webview and map data: MapLibre loads
         // tiles/styles/glyphs from geo:// URLs served cache-first by Rust.
         // Asynchronous registration so handlers never block the webview.
         .register_asynchronous_uri_scheme_protocol("geo", geo_protocol::handle)
         .setup(|app| {
             // app_data_dir is fixed by the `identifier` in tauri.conf.json:
-            // ~/.local/share/org.terrazgo.desktop on Linux (XDG).
+            // ~/.local/share/org.terrazgo.app on Linux (XDG).
             let data_dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&data_dir)?;
             let db_path = data_dir.join("terrazgo.db");
@@ -93,13 +103,24 @@ pub fn run() {
                     Err(err) => eprintln!("geo-cache cap enforcement failed: {err}"),
                 }
             });
+
+            // MUST stay the last statement: `app_ready` reports readiness by
+            // probing this marker, and the Android webview races setup (see
+            // state::SetupComplete). Managing it any earlier would let
+            // commands run against half-initialised state.
+            app.manage(state::SetupComplete);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::app_ready,
             commands::get_status,
             commands::get_settings,
             commands::update_settings,
             commands::clear_tile_cache,
+            commands::list_user_profiles,
+            commands::create_user_profile,
+            commands::update_user_profile,
+            commands::delete_user_profile,
             commands::export_backup,
             commands::import_backup,
             commands::list_alerts,

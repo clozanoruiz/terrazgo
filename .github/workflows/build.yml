@@ -109,12 +109,109 @@ jobs:
             target/release/bundle/nsis/*.exe
             terrazgo_*_portable.zip
 
+  # Android: a signed aarch64 APK is attached to the release for sideloading;
+  # the AAB (the format Google Play requires) is kept as a workflow artifact
+  # and uploaded to the Play internal-testing track by hand for now. Signing
+  # reads the release keystore from repository secrets (ANDROID_KEYSTORE_B64,
+  # ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS); the job fails fast when
+  # they are missing rather than producing an uninstallable unsigned build.
+  # Note: the Play-installed app and this APK carry different signatures
+  # (Play App Signing re-signs), so a device cannot update between the two
+  # without an uninstall.
+  android:
+    # After the desktop matrix so the draft release exists for `gh release
+    # upload`, and so a desktop build failure skips the Android spend.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # The runner image ships the Android SDK; only the NDK pin is missing.
+      # The version matches the local build recipe (docs/maintenance.md).
+      - name: Install the Android NDK
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;28.2.13676358"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Prebuilt cargo-tauri binary; compiling tauri-cli from source would add
+      # ~10 minutes for nothing.
+      - uses: cargo-bins/cargo-binstall@main
+
+      - name: Install the Tauri CLI
+        run: cargo binstall --no-confirm tauri-cli@^2
+
+      - name: Materialize the signing keystore from secrets
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_B64" ]; then
+            echo "::error::ANDROID_KEYSTORE_B64 secret is not set — refusing to build an unsigned release APK"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload-keystore.jks"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          password=$ANDROID_KEYSTORE_PASSWORD
+          keyAlias=$ANDROID_KEY_ALIAS
+          storeFile=$RUNNER_TEMP/upload-keystore.jks
+          EOF
+
+      - name: Build the signed APK and AAB
+        run: cargo tauri android build --apk --aab --target aarch64
+
+      - name: Attach the APK to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          apk="terrazgo_${version}_aarch64.apk"
+          cp src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk "$apk"
+          # --clobber keeps a re-tagged run idempotent.
+          gh release upload "$GITHUB_REF_NAME" "$apk" --clobber
+
+      # Not a release asset: Play users never sideload AABs, and shipping one
+      # would only invite confusion. Fetched from the run page for the manual
+      # Play upload until that step is automated.
+      - name: Keep the AAB as a workflow artifact for the Play upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: terrazgo-${{ github.ref_name }}-aab
+          path: src-tauri/gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
+          if-no-files-found: error
+
+      - name: Attest build provenance (Android artifacts)
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            terrazgo_*_aarch64.apk
+            src-tauri/gen/android/app/build/outputs/bundle/universalRelease/*.aab
+
   # One SBOM per release, derived from the lockfiles (Cargo.lock +
   # package-lock.json — dev-dependencies included, that is the lockfile
   # granularity), attached as a release asset and attested against the
   # installers built above.
   sbom:
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

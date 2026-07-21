@@ -23,8 +23,9 @@ use tauri::State;
 use terrazgo_core::date::today_utc;
 use terrazgo_core::models::{
     Country, Crop, Farm, FarmDetail, GeoFeature, Lookup, Machinery, MachineryDetail, NewCrop,
-    NewFarm, NewGeoFeature, NewMachinery, NewOperator, NewPlot, NewSeason, Operator, Plot,
-    PlotDetail, Season, UpdateFarm, UpdateMachinery, UpdateOperator, UpdatePlot, ZoneFlag,
+    NewFarm, NewGeoFeature, NewMachinery, NewOperator, NewPlot, NewSeason, NewUserProfile,
+    Operator, Plot, PlotDetail, Season, UpdateFarm, UpdateMachinery, UpdateOperator, UpdatePlot,
+    UpdateUserProfile, UserProfile, ZoneFlag,
 };
 use terrazgo_core::repository as core_repo;
 
@@ -167,11 +168,34 @@ fn lock_geo<'a>(geo: &'a State<'_, state::GeoState>) -> CmdResult<MutexGuard<'a,
         .map_err(|_| CommandError(anyhow!("geo cache mutex is poisoned")))
 }
 
+/// The device's active profile id — the author stamp every write command
+/// passes to the repositories (`record_change.actor`). `None` = no active
+/// profile; the id is read fresh per command so a Settings change applies
+/// immediately. The settings lock is released before any other lock is
+/// taken, so the ordering can never deadlock.
+fn active_actor(settings: &State<'_, state::SettingsState>) -> CmdResult<Option<String>> {
+    Ok(settings
+        .settings
+        .lock()
+        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?
+        .active_user_id
+        .clone())
+}
+
 #[derive(Serialize)]
 pub struct AppStatus {
     pub db_path: String,
     pub schema_version: usize,
     pub app_version: &'static str,
+}
+
+/// Readiness probe for the startup race on Android (see
+/// `state::SetupComplete`). Deliberately takes `AppHandle`, never `State`:
+/// it must be callable before setup has managed anything.
+#[tauri::command]
+pub fn app_ready(app: tauri::AppHandle) -> bool {
+    use tauri::Manager;
+    app.try_state::<state::SetupComplete>().is_some()
 }
 
 #[tauri::command]
@@ -297,6 +321,77 @@ pub async fn clear_tile_cache(geo: State<'_, state::GeoState>) -> CmdResult<usiz
 }
 
 // ---------------------------------------------------------------------------
+// User profiles (managed from the Settings view)
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn list_user_profiles(state: State<'_, AppState>) -> CmdResult<Vec<UserProfile>> {
+    let conn = lock_conn(&state)?;
+    Ok(core_repo::list_user_profiles(&conn)?)
+}
+
+#[tauri::command]
+pub fn create_user_profile(
+    state: State<'_, AppState>,
+    profile: NewUserProfile,
+
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<UserProfile> {
+    let actor = active_actor(&settings_state)?;
+    let mut conn = lock_conn(&state)?;
+    Ok(core_repo::insert_user_profile(
+        &mut conn,
+        profile,
+        actor.as_deref(),
+    )?)
+}
+
+#[tauri::command]
+pub fn update_user_profile(
+    state: State<'_, AppState>,
+    profile_id: String,
+    update: UpdateUserProfile,
+
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<UserProfile> {
+    let actor = active_actor(&settings_state)?;
+    let mut conn = lock_conn(&state)?;
+    Ok(core_repo::update_user_profile(
+        &mut conn,
+        &profile_id,
+        update,
+        actor.as_deref(),
+    )?)
+}
+
+/// Soft-deletes the profile; if it was this device's active profile, the
+/// setting is cleared too (the repository doesn't know about settings.json).
+/// A failure to persist that clear is not fatal: the in-memory copy is
+/// already cleared and a dangling id on next launch degrades to "no active
+/// profile" by design.
+#[tauri::command]
+pub fn delete_user_profile(
+    state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
+    profile_id: String,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
+    let mut conn = lock_conn(&state)?;
+    core_repo::soft_delete_user_profile(&mut conn, &profile_id, actor.as_deref())?;
+    drop(conn);
+
+    let mut guard = settings_state
+        .settings
+        .lock()
+        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?;
+    if guard.active_user_id.as_deref() == Some(profile_id.as_str()) {
+        guard.active_user_id = None;
+        terrazgo_core::settings::save_settings(&settings_state.path, &guard)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Backup export / import
 // ---------------------------------------------------------------------------
 
@@ -309,14 +404,28 @@ pub async fn clear_tile_cache(geo: State<'_, state::GeoState>) -> CmdResult<usiz
 /// synchronous — it blocks a worker thread, never the UI.
 #[tauri::command]
 pub async fn export_backup(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     dest_path: String,
 ) -> CmdResult<terrazgo_core::backup::BackupSummary> {
     let conn = lock_conn(&state)?;
-    Ok(terrazgo_core::backup::export_backup(
-        &conn,
-        Path::new(&dest_path),
-    )?)
+    match crate::user_files::stage_dest(&app, &dest_path)? {
+        None => Ok(terrazgo_core::backup::export_backup(
+            &conn,
+            Path::new(&dest_path),
+        )?),
+        // Android content URI: `VACUUM INTO` needs a real filesystem path, so
+        // the verified snapshot lands in a private staging file and is then
+        // streamed to the user's chosen document.
+        Some(staging) => {
+            let summary = terrazgo_core::backup::export_backup(&conn, staging.path())?;
+            crate::user_files::copy_to_user_file(&app, staging.path(), &dest_path)?;
+            Ok(terrazgo_core::backup::BackupSummary {
+                path: dest_path,
+                ..summary
+            })
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -342,15 +451,19 @@ pub struct ImportSummary {
 /// main thread (no `.await` inside, so holding the mutex guard is safe).
 #[tauri::command]
 pub async fn import_backup(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     src_path: String,
 ) -> CmdResult<ImportSummary> {
+    // Android content URI: staged into a private copy so validation and the
+    // file swap below work on a real path. Plain paths pass through as-is.
+    let src = crate::user_files::stage_user_source(&app, &src_path)?;
     let mut guard = lock_conn(&state)?;
 
     // The live db is always at the latest composed version, so it IS the
     // ceiling of what this build supports.
     let live_version: i64 = guard.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    let info = terrazgo_core::backup::validate_backup(Path::new(&src_path), live_version)?;
+    let info = terrazgo_core::backup::validate_backup(src.path(), live_version)?;
 
     let backups_dir = state
         .db_path
@@ -373,7 +486,7 @@ pub async fn import_backup(
             std::fs::remove_file(&sidecar)?;
         }
     }
-    std::fs::copy(&src_path, &state.db_path)?;
+    std::fs::copy(src.path(), &state.db_path)?;
 
     let mut conn = crate::db::open_app_db(&state.db_path)?;
     repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
@@ -415,9 +528,14 @@ pub fn get_farm(state: State<'_, AppState>, farm_id: String) -> CmdResult<FarmDe
 /// `farm` arrives as a JSON object matching `NewFarm` (snake_case fields,
 /// optional `es` sub-object with the Spanish extension).
 #[tauri::command]
-pub fn create_farm(state: State<'_, AppState>, farm: NewFarm) -> CmdResult<Farm> {
+pub fn create_farm(
+    state: State<'_, AppState>,
+    farm: NewFarm,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<Farm> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::insert_farm(&mut conn, farm)?)
+    Ok(core_repo::insert_farm(&mut conn, farm, actor.as_deref())?)
 }
 
 #[tauri::command]
@@ -425,15 +543,32 @@ pub fn update_farm(
     state: State<'_, AppState>,
     farm_id: String,
     update: UpdateFarm,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<FarmDetail> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::update_farm(&mut conn, &farm_id, update)?)
+    Ok(core_repo::update_farm(
+        &mut conn,
+        &farm_id,
+        update,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
-pub fn delete_farm(state: State<'_, AppState>, farm_id: String) -> CmdResult<()> {
+pub fn delete_farm(
+    state: State<'_, AppState>,
+    farm_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::soft_delete_farm(&mut conn, &farm_id)?)
+    Ok(core_repo::soft_delete_farm(
+        &mut conn,
+        &farm_id,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -443,9 +578,14 @@ pub fn list_plots(state: State<'_, AppState>, farm_id: String) -> CmdResult<Vec<
 }
 
 #[tauri::command]
-pub fn create_plot(state: State<'_, AppState>, plot: NewPlot) -> CmdResult<Plot> {
+pub fn create_plot(
+    state: State<'_, AppState>,
+    plot: NewPlot,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<Plot> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::insert_plot(&mut conn, plot)?)
+    Ok(core_repo::insert_plot(&mut conn, plot, actor.as_deref())?)
 }
 
 #[tauri::command]
@@ -453,15 +593,32 @@ pub fn update_plot(
     state: State<'_, AppState>,
     plot_id: String,
     update: UpdatePlot,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<PlotDetail> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::update_plot(&mut conn, &plot_id, update)?)
+    Ok(core_repo::update_plot(
+        &mut conn,
+        &plot_id,
+        update,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
-pub fn delete_plot(state: State<'_, AppState>, plot_id: String) -> CmdResult<()> {
+pub fn delete_plot(
+    state: State<'_, AppState>,
+    plot_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::soft_delete_plot(&mut conn, &plot_id)?)
+    Ok(core_repo::soft_delete_plot(
+        &mut conn,
+        &plot_id,
+        actor.as_deref(),
+    )?)
 }
 
 // ---------------------------------------------------------------------------
@@ -475,9 +632,18 @@ pub fn list_seasons(state: State<'_, AppState>) -> CmdResult<Vec<Season>> {
 }
 
 #[tauri::command]
-pub fn create_season(state: State<'_, AppState>, season: NewSeason) -> CmdResult<Season> {
+pub fn create_season(
+    state: State<'_, AppState>,
+    season: NewSeason,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<Season> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::insert_season(&mut conn, season)?)
+    Ok(core_repo::insert_season(
+        &mut conn,
+        season,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -491,9 +657,14 @@ pub fn list_crops(
 }
 
 #[tauri::command]
-pub fn create_crop(state: State<'_, AppState>, crop: NewCrop) -> CmdResult<Crop> {
+pub fn create_crop(
+    state: State<'_, AppState>,
+    crop: NewCrop,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<Crop> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::insert_crop(&mut conn, crop)?)
+    Ok(core_repo::insert_crop(&mut conn, crop, actor.as_deref())?)
 }
 
 #[tauri::command]
@@ -582,9 +753,14 @@ pub fn list_licence_levels(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>>
 }
 
 #[tauri::command]
-pub fn create_operator(state: State<'_, AppState>, operator: NewOperator) -> CmdResult<Operator> {
+pub fn create_operator(
+    state: State<'_, AppState>,
+    operator: NewOperator,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<Operator> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    let operator = core_repo::insert_operator(&mut conn, operator)?;
+    let operator = core_repo::insert_operator(&mut conn, operator, actor.as_deref())?;
     reconcile_alerts(&mut conn)?;
     Ok(operator)
 }
@@ -594,17 +770,25 @@ pub fn update_operator(
     state: State<'_, AppState>,
     operator_id: String,
     update: UpdateOperator,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Operator> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    let operator = core_repo::update_operator(&mut conn, &operator_id, update)?;
+    let operator = core_repo::update_operator(&mut conn, &operator_id, update, actor.as_deref())?;
     reconcile_alerts(&mut conn)?;
     Ok(operator)
 }
 
 #[tauri::command]
-pub fn delete_operator(state: State<'_, AppState>, operator_id: String) -> CmdResult<()> {
+pub fn delete_operator(
+    state: State<'_, AppState>,
+    operator_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    core_repo::soft_delete_operator(&mut conn, &operator_id)?;
+    core_repo::soft_delete_operator(&mut conn, &operator_id, actor.as_deref())?;
     reconcile_alerts(&mut conn)?;
     Ok(())
 }
@@ -622,9 +806,12 @@ pub fn list_machinery_details(
 pub fn create_machinery(
     state: State<'_, AppState>,
     machinery: NewMachinery,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Machinery> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    let machinery = core_repo::insert_machinery(&mut conn, machinery)?;
+    let machinery = core_repo::insert_machinery(&mut conn, machinery, actor.as_deref())?;
     reconcile_alerts(&mut conn)?;
     Ok(machinery)
 }
@@ -634,17 +821,25 @@ pub fn update_machinery(
     state: State<'_, AppState>,
     machinery_id: String,
     update: UpdateMachinery,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<MachineryDetail> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    let detail = core_repo::update_machinery(&mut conn, &machinery_id, update)?;
+    let detail = core_repo::update_machinery(&mut conn, &machinery_id, update, actor.as_deref())?;
     reconcile_alerts(&mut conn)?;
     Ok(detail)
 }
 
 #[tauri::command]
-pub fn delete_machinery(state: State<'_, AppState>, machinery_id: String) -> CmdResult<()> {
+pub fn delete_machinery(
+    state: State<'_, AppState>,
+    machinery_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    core_repo::soft_delete_machinery(&mut conn, &machinery_id)?;
+    core_repo::soft_delete_machinery(&mut conn, &machinery_id, actor.as_deref())?;
     reconcile_alerts(&mut conn)?;
     Ok(())
 }
@@ -690,12 +885,16 @@ pub fn create_product(
     state: State<'_, AppState>,
     product: NewProduct,
     authorisation: ProductAuthorisationFields,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ProductDetail> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::insert_product_with_authorisation(
         &mut conn,
         product,
         authorisation,
+        actor.as_deref(),
     )?)
 }
 
@@ -704,15 +903,32 @@ pub fn update_product(
     state: State<'_, AppState>,
     product_id: String,
     update: UpdateProduct,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Product> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(repository::update_product(&mut conn, &product_id, update)?)
+    Ok(repository::update_product(
+        &mut conn,
+        &product_id,
+        update,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
-pub fn delete_product(state: State<'_, AppState>, product_id: String) -> CmdResult<()> {
+pub fn delete_product(
+    state: State<'_, AppState>,
+    product_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(repository::soft_delete_product(&mut conn, &product_id)?)
+    Ok(repository::soft_delete_product(
+        &mut conn,
+        &product_id,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -720,7 +936,10 @@ pub fn add_product_authorisation(
     state: State<'_, AppState>,
     product_id: String,
     authorisation: ProductAuthorisationFields,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ProductAuthorisation> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::add_product_authorisation(
         &mut conn,
@@ -734,6 +953,7 @@ pub fn add_product_authorisation(
             valid_from: authorisation.valid_from,
             valid_until: authorisation.valid_until,
         },
+        actor.as_deref(),
     )?)
 }
 
@@ -741,11 +961,15 @@ pub fn add_product_authorisation(
 pub fn remove_product_authorisation(
     state: State<'_, AppState>,
     authorisation_id: String,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::remove_product_authorisation(
         &mut conn,
         &authorisation_id,
+        actor.as_deref(),
     )?)
 }
 
@@ -760,12 +984,16 @@ pub fn create_active_substance(
     state: State<'_, AppState>,
     name: String,
     cas_number: Option<String>,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ActiveSubstance> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::insert_active_substance(
         &mut conn,
         &name,
         cas_number.as_deref(),
+        actor.as_deref(),
     )?)
 }
 
@@ -776,7 +1004,10 @@ pub fn add_product_substance(
     active_substance_id: String,
     concentration_value: Option<f64>,
     concentration_unit_code: Option<String>,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ProductActiveSubstance> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::add_product_active_substance(
         &mut conn,
@@ -784,14 +1015,22 @@ pub fn add_product_substance(
         &active_substance_id,
         concentration_value,
         concentration_unit_code.as_deref(),
+        actor.as_deref(),
     )?)
 }
 
 #[tauri::command]
-pub fn remove_product_substance(state: State<'_, AppState>, link_id: String) -> CmdResult<()> {
+pub fn remove_product_substance(
+    state: State<'_, AppState>,
+    link_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::remove_product_active_substance(
-        &mut conn, &link_id,
+        &mut conn,
+        &link_id,
+        actor.as_deref(),
     )?)
 }
 
@@ -802,9 +1041,12 @@ pub fn create_treatment_record(
     state: State<'_, AppState>,
     record: NewTreatmentRecord,
     plots: Vec<NewTreatmentPlot>,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<TreatmentRecord> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    let record = repository::insert_treatment_record(&mut conn, record, plots)?;
+    let record = repository::insert_treatment_record(&mut conn, record, plots, actor.as_deref())?;
     repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
     Ok(record)
 }
@@ -828,21 +1070,30 @@ pub fn set_treatment_efficacy(
     state: State<'_, AppState>,
     treatment_id: String,
     efficacy_code: Option<String>,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<TreatmentRecord> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(repository::set_treatment_efficacy(
         &mut conn,
         &treatment_id,
         efficacy_code,
+        actor.as_deref(),
     )?)
 }
 
 /// Soft delete (regulatory records are never hard-deleted), then reconcile
 /// alerts so the record's PHI alert lapses with it.
 #[tauri::command]
-pub fn delete_treatment_record(state: State<'_, AppState>, treatment_id: String) -> CmdResult<()> {
+pub fn delete_treatment_record(
+    state: State<'_, AppState>,
+    treatment_id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    repository::soft_delete_treatment_record(&mut conn, &treatment_id)?;
+    repository::soft_delete_treatment_record(&mut conn, &treatment_id, actor.as_deref())?;
     repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
     Ok(())
 }
@@ -883,15 +1134,20 @@ pub struct CuadernoExportSummary {
 /// connection guard is safe).
 #[tauri::command]
 pub async fn export_cuaderno(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     season_id: String,
     farm_id: String,
     dest_path: String,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<CuadernoExportSummary> {
+    let actor = active_actor(&settings_state)?;
     let mut guard = lock_conn(&state)?;
-    let cuaderno = module_cue::export::build_cuaderno(&mut guard, &season_id, &farm_id)?;
+    let cuaderno =
+        module_cue::export::build_cuaderno(&mut guard, &season_id, &farm_id, actor.as_deref())?;
     let json = serde_json::to_string_pretty(&cuaderno)?;
-    std::fs::write(Path::new(&dest_path), &json)?;
+    crate::user_files::write_user_file(&app, &dest_path, json.as_bytes())?;
     let entries = cuaderno
         .cuaderno
         .iter()
@@ -918,6 +1174,7 @@ pub struct CuadernoPdfSummary {
 /// like the other export: rendering scales with record count.
 #[tauri::command]
 pub async fn export_cuaderno_pdf(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     season_id: String,
     farm_id: String,
@@ -927,7 +1184,7 @@ pub async fn export_cuaderno_pdf(
     let today = terrazgo_core::date::now_utc_iso();
     let generated_on = today.split('T').next().unwrap_or(&today);
     let pdf = module_cue::report::render_cuaderno(&guard, &season_id, &farm_id, generated_on)?;
-    std::fs::write(Path::new(&dest_path), &pdf.bytes)?;
+    crate::user_files::write_user_file(&app, &dest_path, &pdf.bytes)?;
     Ok(CuadernoPdfSummary {
         path: dest_path,
         size_bytes: pdf.bytes.len() as u64,
@@ -959,7 +1216,10 @@ pub fn save_plot_boundary(
     plot_id: String,
     geometry: String,
     source: String,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<GeoFeature> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
     Ok(core_repo::save_geo_feature(
         &mut conn,
@@ -974,13 +1234,23 @@ pub fn save_plot_boundary(
             properties: None,
             fetched_at: None,
         },
+        actor.as_deref(),
     )?)
 }
 
 #[tauri::command]
-pub fn delete_geo_feature(state: State<'_, AppState>, id: String) -> CmdResult<()> {
+pub fn delete_geo_feature(
+    state: State<'_, AppState>,
+    id: String,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    Ok(core_repo::soft_delete_geo_feature(&mut conn, &id)?)
+    Ok(core_repo::soft_delete_geo_feature(
+        &mut conn,
+        &id,
+        actor.as_deref(),
+    )?)
 }
 
 /// A MapLibre style JSON with every reference rewritten onto the geo://
@@ -1003,19 +1273,27 @@ pub async fn get_map_style(
 }
 
 /// List the selectable boundary candidates of a file the user picked (path
-/// from the native open dialog). `async`: work scales with file size.
+/// or, on Android, content URI from the native open dialog). `async`: work
+/// scales with file size.
 #[tauri::command]
 pub async fn list_boundary_file(
+    app: tauri::AppHandle,
     path: String,
 ) -> CmdResult<Vec<terrazgo_geo::import::BoundaryEntry>> {
-    Ok(terrazgo_geo::import::list_boundary_file(Path::new(&path))?)
+    let src = crate::user_files::stage_user_source(&app, &path)?;
+    Ok(terrazgo_geo::import::list_boundary_file(src.path())?)
 }
 
 /// Load one candidate's geometry (validated GeoJSON) for preview/save.
 #[tauri::command]
-pub async fn read_boundary_feature(path: String, entry_id: String) -> CmdResult<String> {
+pub async fn read_boundary_feature(
+    app: tauri::AppHandle,
+    path: String,
+    entry_id: String,
+) -> CmdResult<String> {
+    let src = crate::user_files::stage_user_source(&app, &path)?;
     Ok(terrazgo_geo::import::read_boundary_geometry(
-        Path::new(&path),
+        src.path(),
         &entry_id,
     )?)
 }
@@ -1068,10 +1346,18 @@ pub async fn sigpac_verify_plot(
     geo: State<'_, state::GeoState>,
     plot_id: String,
     refresh: bool,
+
+    settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Option<module_sigpac::service::PlotVerification>> {
+    let actor = active_actor(&settings_state)?;
     let mut conn = lock_conn(&state)?;
-    let verification =
-        module_sigpac::service::verify_plot(&mut conn, &geo.conn, &plot_id, refresh)?;
+    let verification = module_sigpac::service::verify_plot(
+        &mut conn,
+        &geo.conn,
+        &plot_id,
+        refresh,
+        actor.as_deref(),
+    )?;
     if verification
         .as_ref()
         .is_some_and(|v| v.zone_flags.is_some())

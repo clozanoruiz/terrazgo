@@ -38,6 +38,7 @@ fn base_fixture(conn: &mut Connection) -> Fixture {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -50,6 +51,7 @@ fn base_fixture(conn: &mut Connection) -> Fixture {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -62,6 +64,7 @@ fn base_fixture(conn: &mut Connection) -> Fixture {
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2027-03-01".into()),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -74,14 +77,22 @@ fn base_fixture(conn: &mut Connection) -> Fixture {
             formulation_type_code: Some("sc".into()),
             default_phi_days: Some(21), // PHI per product label
         },
+        None,
     )
     .unwrap()
     .id;
 
     let substance =
-        repo::insert_active_substance(conn, "azoxistrobin", Some("131860-33-8")).unwrap();
-    repo::add_product_active_substance(conn, &product_id, &substance.id, Some(250.0), Some("g_l"))
-        .unwrap();
+        repo::insert_active_substance(conn, "azoxistrobin", Some("131860-33-8"), None).unwrap();
+    repo::add_product_active_substance(
+        conn,
+        &product_id,
+        &substance.id,
+        Some(250.0),
+        Some("g_l"),
+        None,
+    )
+    .unwrap();
 
     Fixture {
         season_id: season.id,
@@ -104,6 +115,7 @@ fn add_es_authorisation(conn: &mut Connection, product_id: &str) {
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 }
@@ -151,6 +163,7 @@ fn country_defaults_from_the_farm() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -164,6 +177,7 @@ fn country_defaults_from_the_farm() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -188,6 +202,7 @@ fn explicit_country_mismatching_the_farm_is_rejected() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -201,6 +216,7 @@ fn explicit_country_mismatching_the_farm_is_rejected() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap_err();
 
@@ -226,6 +242,7 @@ fn explicit_country_matching_the_farm_is_accepted() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -238,6 +255,7 @@ fn explicit_country_matching_the_farm_is_accepted() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -257,6 +275,7 @@ fn country_with_no_authorisation_is_still_rejected() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -269,6 +288,7 @@ fn country_with_no_authorisation_is_still_rejected() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap_err();
 
@@ -294,6 +314,7 @@ fn plot_on_a_different_farm_is_rejected() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -305,6 +326,7 @@ fn plot_on_a_different_farm_is_rejected() {
             area_ha: Some(1.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -317,6 +339,7 @@ fn plot_on_a_different_farm_is_rejected() {
             crop_id: None,
             surface_treated_ha: 1.0,
         }],
+        None,
     )
     .unwrap_err();
 
@@ -340,6 +363,7 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
             area_ha: Some(4.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -351,6 +375,7 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
             area_ha: Some(6.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -365,6 +390,7 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
             production_system_code: Some("conventional".into()),
             sown_on: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -378,6 +404,7 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
             production_system_code: Some("conventional".into()),
             sown_on: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -402,6 +429,7 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
                 surface_treated_ha: 5.0,
             }, // partial
         ],
+        None,
     )
     .unwrap();
 
@@ -453,6 +481,7 @@ fn product_authorisation_number_is_per_country() {
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
     repo::add_product_authorisation(
@@ -467,6 +496,7 @@ fn product_authorisation_number_is_per_country() {
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -480,6 +510,7 @@ fn product_authorisation_number_is_per_country() {
             country_code: "fr".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -492,6 +523,7 @@ fn product_authorisation_number_is_per_country() {
             country_code: "it".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -504,6 +536,7 @@ fn product_authorisation_number_is_per_country() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -515,6 +548,7 @@ fn product_authorisation_number_is_per_country() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -526,6 +560,7 @@ fn product_authorisation_number_is_per_country() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -541,6 +576,7 @@ fn product_authorisation_number_is_per_country() {
                 crop_id: None,
                 surface_treated_ha: 3.0,
             }],
+            None,
         )
     };
 
@@ -581,6 +617,7 @@ fn snapshots_are_immutable_when_referenced_rows_change() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -593,6 +630,7 @@ fn snapshots_are_immutable_when_referenced_rows_change() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -621,6 +659,7 @@ fn audit_payload_contains_the_full_row_image() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
 
@@ -700,7 +739,7 @@ fn product_substance_link_is_logged_under_its_own_uuid() {
 fn active_substance_is_synced_user_data_with_uuid_and_full_image() {
     let mut conn = open_in_memory().unwrap();
     let substance =
-        repo::insert_active_substance(&mut conn, "glifosato", Some("1071-83-6")).unwrap();
+        repo::insert_active_substance(&mut conn, "glifosato", Some("1071-83-6"), None).unwrap();
 
     // UUIDv7 TEXT id generated in Rust — insertion-order integer ids collide across
     // devices once substances sync (they are user-insertable, not a shipped lookup).
@@ -741,6 +780,7 @@ fn machinery_insert_logs_core_row_and_spanish_extension_separately() {
             roma_number: Some("VA-0042".into()),
             reganip_number: Some("REGANIP-0042".into()),
         },
+        None,
     )
     .unwrap();
 
@@ -779,6 +819,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -793,6 +834,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
             roma_number: Some("VA-1111".into()),
             reganip_number: Some("REGANIP-2222".into()),
         },
+        None,
     )
     .unwrap();
 
@@ -806,6 +848,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -829,6 +872,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
             roma_number: Some("VA-9999".into()),
             reganip_number: None,
         },
+        None,
     )
     .unwrap();
     let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
@@ -855,6 +899,7 @@ fn soft_delete_keeps_the_row_and_logs_the_change() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -867,10 +912,11 @@ fn soft_delete_keeps_the_row_and_logs_the_change() {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap();
 
-    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
 
     let deleted_at: Option<String> = conn
         .query_row(
@@ -908,6 +954,7 @@ fn list_products_authorised_is_per_country_and_ordered_by_name() {
             formulation_type_code: None,
             default_phi_days: Some(7),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -920,6 +967,7 @@ fn list_products_authorised_is_per_country_and_ordered_by_name() {
             formulation_type_code: None,
             default_phi_days: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -935,6 +983,7 @@ fn list_products_authorised_is_per_country_and_ordered_by_name() {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -964,6 +1013,7 @@ fn a_product_with_two_authorisations_in_a_country_is_listed_once() {
             valid_from: Some("2026-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -1014,6 +1064,7 @@ fn list_treatment_records_is_per_season_and_farm_with_plots() {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -1025,6 +1076,7 @@ fn list_treatment_records_is_per_season_and_farm_with_plots() {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -1038,16 +1090,17 @@ fn list_treatment_records_is_per_season_and_farm_with_plots() {
     // Two records in the fixture season (different dates), one in another season.
     let mut early = sample_treatment(&fx, None, Some(14));
     early.application_date = "2026-04-01".into();
-    let early = repo::insert_treatment_record(&mut conn, early, one_plot(&plot)).unwrap();
+    let early = repo::insert_treatment_record(&mut conn, early, one_plot(&plot), None).unwrap();
     let late = repo::insert_treatment_record(
         &mut conn,
         sample_treatment(&fx, None, Some(14)), // application_date 2026-05-01
         one_plot(&plot),
+        None,
     )
     .unwrap();
     let mut other = sample_treatment(&fx, None, Some(14));
     other.season_id = other_season.id.clone();
-    let other = repo::insert_treatment_record(&mut conn, other, one_plot(&plot)).unwrap();
+    let other = repo::insert_treatment_record(&mut conn, other, one_plot(&plot), None).unwrap();
 
     let listed = repo::list_treatment_records(&conn, &fx.season_id, &fx.farm_id).unwrap();
     let ids: Vec<&str> = listed.iter().map(|t| t.record.id.as_str()).collect();
@@ -1060,7 +1113,7 @@ fn list_treatment_records_is_per_season_and_farm_with_plots() {
     assert_eq!(listed[0].plots[0].plot_id, plot);
 
     // Soft-deleted records disappear from the list (but stay via get for audit).
-    repo::soft_delete_treatment_record(&mut conn, &late.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &late.id, None).unwrap();
     let after_delete = repo::list_treatment_records(&conn, &fx.season_id, &fx.farm_id).unwrap();
     assert_eq!(after_delete.len(), 1);
     assert_eq!(after_delete[0].record.id, early.id);
@@ -1124,6 +1177,7 @@ fn insert_product_with_authorisation_creates_both_rows_atomically() {
         &mut conn,
         sample_new_product("Herbistop"),
         es_authorisation_fields("ES-25.999"),
+        None,
     )
     .unwrap();
     assert_eq!(detail.product.commercial_name, "Herbistop");
@@ -1151,6 +1205,7 @@ fn insert_product_with_blank_authorisation_number_leaves_no_product_row() {
         &mut conn,
         sample_new_product("Herbistop"),
         es_authorisation_fields("   "),
+        None,
     );
     assert!(matches!(
         result,
@@ -1172,11 +1227,11 @@ fn insert_product_with_blank_authorisation_number_leaves_no_product_row() {
 fn product_validation_rejects_blank_name() {
     let mut conn = open_in_memory().unwrap();
     assert!(matches!(
-        repo::insert_product(&mut conn, sample_new_product("  ")),
+        repo::insert_product(&mut conn, sample_new_product("  "), None),
         Err(module_cue::CueError::Invalid("empty_name"))
     ));
     assert!(matches!(
-        repo::insert_active_substance(&mut conn, " ", None),
+        repo::insert_active_substance(&mut conn, " ", None, None),
         Err(module_cue::CueError::Invalid("empty_name"))
     ));
 }
@@ -1195,6 +1250,7 @@ fn update_product_replaces_fields_and_logs_complete_images() {
             formulation_type_code: Some("wg".into()),
             default_phi_days: Some(28),
         },
+        None,
     )
     .unwrap();
     assert_eq!(updated.commercial_name, "Fungitop Plus");
@@ -1218,6 +1274,7 @@ fn update_product_replaces_fields_and_logs_complete_images() {
                 formulation_type_code: None,
                 default_phi_days: None,
             },
+            None,
         ),
         Err(module_cue::CueError::Invalid("empty_name"))
     ));
@@ -1229,7 +1286,7 @@ fn soft_delete_product_hides_it_from_registry_and_treatment_dropdown() {
     let fx = base_fixture(&mut conn);
     add_es_authorisation(&mut conn, &fx.product_id);
 
-    repo::soft_delete_product(&mut conn, &fx.product_id).unwrap();
+    repo::soft_delete_product(&mut conn, &fx.product_id, None).unwrap();
 
     assert!(repo::list_product_details(&conn).unwrap().is_empty());
     assert!(
@@ -1255,7 +1312,7 @@ fn soft_delete_product_hides_it_from_registry_and_treatment_dropdown() {
 
     // Double delete is NotFound, like the other soft deletes.
     assert!(matches!(
-        repo::soft_delete_product(&mut conn, &fx.product_id),
+        repo::soft_delete_product(&mut conn, &fx.product_id, None),
         Err(module_cue::CueError::NotFound)
     ));
 }
@@ -1293,7 +1350,7 @@ fn remove_product_active_substance_hard_deletes_and_logs_null_after() {
     let link_id = repo::list_product_details(&conn).unwrap()[0].substances[0]
         .id
         .clone();
-    repo::remove_product_active_substance(&mut conn, &link_id).unwrap();
+    repo::remove_product_active_substance(&mut conn, &link_id, None).unwrap();
 
     assert!(
         repo::list_product_details(&conn).unwrap()[0]
@@ -1306,7 +1363,7 @@ fn remove_product_active_substance_hard_deletes_and_logs_null_after() {
     assert!(after.is_null(), "hard delete has a null after-image");
 
     assert!(matches!(
-        repo::remove_product_active_substance(&mut conn, &link_id),
+        repo::remove_product_active_substance(&mut conn, &link_id, None),
         Err(module_cue::CueError::NotFound)
     ));
 }
@@ -1320,7 +1377,7 @@ fn remove_product_authorisation_withdraws_the_product_from_that_country() {
     let auth_id = repo::list_product_details(&conn).unwrap()[0].authorisations[0]
         .id
         .clone();
-    repo::remove_product_authorisation(&mut conn, &auth_id).unwrap();
+    repo::remove_product_authorisation(&mut conn, &auth_id, None).unwrap();
 
     assert!(
         repo::list_products_authorised(&conn, "es")
@@ -1339,8 +1396,8 @@ fn remove_product_authorisation_withdraws_the_product_from_that_country() {
 #[test]
 fn list_active_substances_orders_by_name() {
     let mut conn = open_in_memory().unwrap();
-    repo::insert_active_substance(&mut conn, "glifosato", None).unwrap();
-    repo::insert_active_substance(&mut conn, "azoxistrobin", None).unwrap();
+    repo::insert_active_substance(&mut conn, "glifosato", None, None).unwrap();
+    repo::insert_active_substance(&mut conn, "azoxistrobin", None, None).unwrap();
 
     let names: Vec<String> = repo::list_active_substances(&conn)
         .unwrap()
@@ -1379,6 +1436,7 @@ fn add_status_plot(conn: &mut Connection, farm_id: &str, name: &str) -> String {
             area_ha: Some(2.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id
@@ -1402,7 +1460,7 @@ fn treat_on(
             surface_treated_ha: 1.0,
         })
         .collect();
-    repo::insert_treatment_record(conn, new, plots).unwrap()
+    repo::insert_treatment_record(conn, new, plots, None).unwrap()
 }
 
 fn status_of<'a>(rows: &'a [PlotPhiStatus], plot_id: &str) -> &'a PlotPhiStatus {
@@ -1515,6 +1573,7 @@ fn phi_status_excludes_deleted_records_untreated_plots_and_other_farms() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -1529,6 +1588,7 @@ fn phi_status_excludes_deleted_records_untreated_plots_and_other_farms() {
             crop_id: None,
             surface_treated_ha: 1.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -1542,7 +1602,7 @@ fn phi_status_excludes_deleted_records_untreated_plots_and_other_farms() {
 
     // Soft-deleting the only record removes the plot from the status list —
     // deleted records carry no PHI restriction.
-    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
     let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
     assert!(rows.is_empty());
 }
@@ -1563,6 +1623,7 @@ fn phi_status_spans_seasons() {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
     let mut new = sample_treatment(&fx, None, Some(21));
@@ -1576,6 +1637,7 @@ fn phi_status_spans_seasons() {
             crop_id: None,
             surface_treated_ha: 1.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -1591,7 +1653,7 @@ fn phi_status_excludes_deleted_plots() {
     let plot = add_status_plot(&mut conn, &fx.farm_id, "A");
     treat_on(&mut conn, &fx, &[&plot], "2026-05-01", 21);
 
-    terrazgo_core::repository::soft_delete_plot(&mut conn, &plot).unwrap();
+    terrazgo_core::repository::soft_delete_plot(&mut conn, &plot, None).unwrap();
     let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, "2026-05-10").unwrap();
     assert!(rows.is_empty(), "a deleted plot has no map presence");
 }
@@ -1611,6 +1673,7 @@ fn add_plot(conn: &mut Connection, farm_id: &str, name: &str) -> String {
             area_ha: Some(2.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id
@@ -1665,6 +1728,7 @@ fn treatment_captures_problems_justifications_and_efficacy() {
             crop_id: None,
             surface_treated_ha: 2.0,
         }],
+        None,
     )
     .unwrap();
     assert!(record.efficacy_code.is_none(), "not observed yet at entry");
@@ -1714,13 +1778,14 @@ fn treatment_requires_at_least_one_problem_and_justification() {
 
     let mut no_problems = sample_treatment(&fx, None, Some(14));
     no_problems.problems = vec![];
-    let err = repo::insert_treatment_record(&mut conn, no_problems, plots(&plot)).unwrap_err();
+    let err =
+        repo::insert_treatment_record(&mut conn, no_problems, plots(&plot), None).unwrap_err();
     assert!(matches!(err, module_cue::CueError::Invalid("no_problems")));
 
     let mut no_justifications = sample_treatment(&fx, None, Some(14));
     no_justifications.justifications = vec![];
-    let err =
-        repo::insert_treatment_record(&mut conn, no_justifications, plots(&plot)).unwrap_err();
+    let err = repo::insert_treatment_record(&mut conn, no_justifications, plots(&plot), None)
+        .unwrap_err();
     assert!(matches!(
         err,
         module_cue::CueError::Invalid("no_justifications")
@@ -1754,6 +1819,7 @@ fn duplicate_problems_and_justifications_are_folded() {
             crop_id: None,
             surface_treated_ha: 2.0,
         }],
+        None,
     )
     .unwrap();
 
@@ -1783,7 +1849,7 @@ fn problem_codes_are_validated_against_imported_catalogues() {
         reason_category_code: "disease".into(),
         problem_code: "999999".into(),
     }];
-    let err = repo::insert_treatment_record(&mut conn, bogus, plots(&plot)).unwrap_err();
+    let err = repo::insert_treatment_record(&mut conn, bogus, plots(&plot), None).unwrap_err();
     assert!(matches!(
         err,
         module_cue::CueError::Invalid("unknown_problem_code")
@@ -1795,7 +1861,7 @@ fn problem_codes_are_validated_against_imported_catalogues() {
         reason_category_code: "disease".into(),
         problem_code: "254".into(),
     }];
-    repo::insert_treatment_record(&mut conn, known, plots(&plot)).unwrap();
+    repo::insert_treatment_record(&mut conn, known, plots(&plot), None).unwrap();
 
     // …and so does a RETIRED code: providers baja-date codes rather than
     // delete them, and a late-entered record may reference one legitimately.
@@ -1805,7 +1871,7 @@ fn problem_codes_are_validated_against_imported_catalogues() {
         reason_category_code: "disease".into(),
         problem_code: "9".into(),
     }];
-    repo::insert_treatment_record(&mut conn, retired, plots(&plot)).unwrap();
+    repo::insert_treatment_record(&mut conn, retired, plots(&plot), None).unwrap();
 
     // A category whose catalogue is NOT imported cannot be checked — the code
     // is stored as given (the export's schema-validated tests are the second
@@ -1816,7 +1882,7 @@ fn problem_codes_are_validated_against_imported_catalogues() {
         reason_category_code: "weed".into(),
         problem_code: "12345".into(),
     }];
-    repo::insert_treatment_record(&mut conn, unchecked, plots(&plot)).unwrap();
+    repo::insert_treatment_record(&mut conn, unchecked, plots(&plot), None).unwrap();
 }
 
 #[test]
@@ -1834,12 +1900,14 @@ fn set_treatment_efficacy_updates_and_logs() {
             crop_id: None,
             surface_treated_ha: 2.0,
         }],
+        None,
     )
     .unwrap();
     assert!(record.efficacy_code.is_none());
 
     // Efficacy is observed after application — the one allowed edit.
-    let updated = repo::set_treatment_efficacy(&mut conn, &record.id, Some("fair".into())).unwrap();
+    let updated =
+        repo::set_treatment_efficacy(&mut conn, &record.id, Some("fair".into()), None).unwrap();
     assert_eq!(updated.efficacy_code.as_deref(), Some("fair"));
     let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
     assert_eq!(fetched.record.efficacy_code.as_deref(), Some("fair"));
@@ -1865,9 +1933,9 @@ fn set_treatment_efficacy_updates_and_logs() {
     assert_eq!(after, "\"fair\"");
 
     // Deleted records are not editable.
-    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
     assert!(matches!(
-        repo::set_treatment_efficacy(&mut conn, &record.id, Some("good".into())),
+        repo::set_treatment_efficacy(&mut conn, &record.id, Some("good".into()), None),
         Err(module_cue::CueError::NotFound)
     ));
 }
@@ -1892,6 +1960,7 @@ fn authorisation_kind_defaults_and_gates_the_exceptional_substance() {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(auth.kind_code, "registered");
@@ -1912,6 +1981,7 @@ fn authorisation_kind_defaults_and_gates_the_exceptional_substance() {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap_err();
     assert!(matches!(
@@ -1942,6 +2012,7 @@ fn authorisation_kind_defaults_and_gates_the_exceptional_substance() {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap_err();
     assert!(matches!(
@@ -1961,6 +2032,7 @@ fn authorisation_kind_defaults_and_gates_the_exceptional_substance() {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(auth.kind_code, "exceptional");
@@ -1980,8 +2052,80 @@ fn authorisation_kind_defaults_and_gates_the_exceptional_substance() {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap();
     assert_eq!(auth.kind_code, "parallel_import");
     assert!(auth.exceptional_substance_code.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Actor stamping (record_change.actor)
+// ---------------------------------------------------------------------------
+
+/// A treatment insert stamps the acting profile id on every row it logs —
+/// the record AND its junction rows — and the deletion write records its own
+/// author independently.
+#[test]
+fn treatment_writes_stamp_the_actor_on_every_logged_row() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = repo::insert_plot(
+        &mut conn,
+        NewPlot {
+            farm_id: fx.farm_id.clone(),
+            name: "P".into(),
+            area_ha: Some(3.0),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+        }],
+        Some("profile-ana"),
+    )
+    .unwrap();
+
+    let actors: Vec<Option<String>> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT actor FROM record_change
+                 WHERE entity_table IN
+                   ('treatment_record', 'treatment_plot', 'treatment_problem',
+                    'treatment_justification')
+                 ORDER BY id",
+            )
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap()
+    };
+    assert!(actors.len() >= 4, "record + plot + problem + justification");
+    assert!(
+        actors.iter().all(|a| a.as_deref() == Some("profile-ana")),
+        "every row logged in the insert carries the same author: {actors:?}"
+    );
+
+    // The delete write is attributed to whoever deleted, not the creator.
+    repo::soft_delete_treatment_record(&mut conn, &record.id, Some("profile-marta")).unwrap();
+    let delete_actor: Option<String> = conn
+        .query_row(
+            "SELECT actor FROM record_change
+             WHERE entity_table = 'treatment_record' AND operation = 'delete'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(delete_actor.as_deref(), Some("profile-marta"));
 }

@@ -27,6 +27,7 @@ pub fn insert_active_substance(
     conn: &mut Connection,
     name: &str,
     cas_number: Option<&str>,
+    actor: Option<&str>,
 ) -> Result<ActiveSubstance> {
     if name.trim().is_empty() {
         return Err(CueError::Invalid("empty_name"));
@@ -41,7 +42,14 @@ pub fn insert_active_substance(
         "INSERT INTO active_substance (id, name, cas_number) VALUES (?1, ?2, ?3)",
         params![substance.id, substance.name, substance.cas_number],
     )?;
-    log_insert(&tx, "active_substance", &substance.id, None, &substance)?;
+    log_insert(
+        &tx,
+        "active_substance",
+        &substance.id,
+        None,
+        actor,
+        &substance,
+    )?;
     tx.commit()?;
     Ok(substance)
 }
@@ -62,9 +70,13 @@ pub fn list_active_substances(conn: &Connection) -> Result<Vec<ActiveSubstance>>
     Ok(substances)
 }
 
-pub fn insert_product(conn: &mut Connection, new: NewProduct) -> Result<Product> {
+pub fn insert_product(
+    conn: &mut Connection,
+    new: NewProduct,
+    actor: Option<&str>,
+) -> Result<Product> {
     let tx = conn.transaction()?;
-    let product = insert_product_tx(&tx, new)?;
+    let product = insert_product_tx(&tx, new, actor)?;
     tx.commit()?;
     Ok(product)
 }
@@ -77,10 +89,11 @@ pub fn insert_product_with_authorisation(
     conn: &mut Connection,
     new: NewProduct,
     authorisation: ProductAuthorisationFields,
+    actor: Option<&str>,
 ) -> Result<ProductDetail> {
     let tx = conn.transaction()?;
-    let product = insert_product_tx(&tx, new)?;
-    let authorisation = insert_authorisation_tx(&tx, &product.id, authorisation)?;
+    let product = insert_product_tx(&tx, new, actor)?;
+    let authorisation = insert_authorisation_tx(&tx, &product.id, authorisation, actor)?;
     tx.commit()?;
     Ok(ProductDetail {
         product,
@@ -89,7 +102,7 @@ pub fn insert_product_with_authorisation(
     })
 }
 
-fn insert_product_tx(tx: &Transaction, new: NewProduct) -> Result<Product> {
+fn insert_product_tx(tx: &Transaction, new: NewProduct, actor: Option<&str>) -> Result<Product> {
     if new.commercial_name.trim().is_empty() {
         return Err(CueError::Invalid("empty_name"));
     }
@@ -113,13 +126,18 @@ fn insert_product_tx(tx: &Transaction, new: NewProduct) -> Result<Product> {
             product.default_phi_days, product.created_at, product.updated_at
         ],
     )?;
-    log_insert(tx, "product", &product.id, None, &product)?;
+    log_insert(tx, "product", &product.id, None, actor, &product)?;
     Ok(product)
 }
 
 /// Full-row update; the submitted state replaces the stored one. Past records
 /// are safe: they carry `phi_days_used` and the `*_snapshot` columns.
-pub fn update_product(conn: &mut Connection, id: &str, update: UpdateProduct) -> Result<Product> {
+pub fn update_product(
+    conn: &mut Connection,
+    id: &str,
+    update: UpdateProduct,
+    actor: Option<&str>,
+) -> Result<Product> {
     if update.commercial_name.trim().is_empty() {
         return Err(CueError::Invalid("empty_name"));
     }
@@ -153,7 +171,7 @@ pub fn update_product(conn: &mut Connection, id: &str, update: UpdateProduct) ->
             after.updated_at
         ],
     )?;
-    log_update(&tx, "product", id, None, &before, &after)?;
+    log_update(&tx, "product", id, None, actor, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
@@ -161,7 +179,7 @@ pub fn update_product(conn: &mut Connection, id: &str, update: UpdateProduct) ->
 /// Soft delete: the product leaves the registry and the treatment form's
 /// dropdown, but the row stays so treatment history keeps resolving. Its
 /// substance links and authorisations stay with it.
-pub fn soft_delete_product(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_product(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -179,7 +197,7 @@ pub fn soft_delete_product(conn: &mut Connection, id: &str) -> Result<()> {
         "UPDATE product SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "product", id, None, &before, Some(&after))?;
+    log_delete(&tx, "product", id, None, actor, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -193,6 +211,7 @@ pub fn add_product_active_substance(
     active_substance_id: &str,
     concentration_value: Option<f64>,
     concentration_unit_code: Option<&str>,
+    actor: Option<&str>,
 ) -> Result<ProductActiveSubstance> {
     let tx = conn.transaction()?;
     let link = ProductActiveSubstance {
@@ -214,7 +233,14 @@ pub fn add_product_active_substance(
             link.concentration_unit_code
         ],
     )?;
-    log_insert(&tx, "product_active_substance", &link.id, None, &link)?;
+    log_insert(
+        &tx,
+        "product_active_substance",
+        &link.id,
+        None,
+        actor,
+        &link,
+    )?;
     tx.commit()?;
     Ok(link)
 }
@@ -222,7 +248,11 @@ pub fn add_product_active_substance(
 /// Detach a substance from a product. Hard delete (catalogue detail row, like
 /// the regional extensions) logged with a null after-image; past treatment
 /// records keep their `active_substances_snapshot`.
-pub fn remove_product_active_substance(conn: &mut Connection, link_id: &str) -> Result<()> {
+pub fn remove_product_active_substance(
+    conn: &mut Connection,
+    link_id: &str,
+    actor: Option<&str>,
+) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -241,6 +271,7 @@ pub fn remove_product_active_substance(conn: &mut Connection, link_id: &str) -> 
         "product_active_substance",
         link_id,
         None,
+        actor,
         &before,
         None,
     )?;
@@ -327,6 +358,7 @@ fn product_authorisations(
 pub fn add_product_authorisation(
     conn: &mut Connection,
     new: NewProductAuthorisation,
+    actor: Option<&str>,
 ) -> Result<ProductAuthorisation> {
     let tx = conn.transaction()?;
     let auth = insert_authorisation_tx(
@@ -341,6 +373,7 @@ pub fn add_product_authorisation(
             valid_from: new.valid_from,
             valid_until: new.valid_until,
         },
+        actor,
     )?;
     tx.commit()?;
     Ok(auth)
@@ -349,7 +382,11 @@ pub fn add_product_authorisation(
 /// Remove a per-country authorisation. Hard delete logged with a null
 /// after-image; past records keep `authorisation_number_snapshot`. The product
 /// simply stops being offered in that country's treatment form.
-pub fn remove_product_authorisation(conn: &mut Connection, authorisation_id: &str) -> Result<()> {
+pub fn remove_product_authorisation(
+    conn: &mut Connection,
+    authorisation_id: &str,
+    actor: Option<&str>,
+) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -368,6 +405,7 @@ pub fn remove_product_authorisation(conn: &mut Connection, authorisation_id: &st
         "product_authorisation",
         authorisation_id,
         None,
+        actor,
         &before,
         None,
     )?;
@@ -379,6 +417,7 @@ fn insert_authorisation_tx(
     tx: &Transaction,
     product_id: &str,
     fields: ProductAuthorisationFields,
+    actor: Option<&str>,
 ) -> Result<ProductAuthorisation> {
     if fields.authorisation_number.trim().is_empty() {
         return Err(CueError::Invalid("empty_authorisation_number"));
@@ -431,7 +470,7 @@ fn insert_authorisation_tx(
             auth.valid_until
         ],
     )?;
-    log_insert(tx, "product_authorisation", &auth.id, None, &auth)?;
+    log_insert(tx, "product_authorisation", &auth.id, None, actor, &auth)?;
     Ok(auth)
 }
 

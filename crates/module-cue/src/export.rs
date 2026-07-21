@@ -168,6 +168,7 @@ pub fn build_cuaderno(
     conn: &mut Connection,
     season_id: &str,
     farm_id: &str,
+    actor: Option<&str>,
 ) -> Result<CuadernoExport> {
     if !export_precheck(conn, season_id, farm_id)?.is_clean() {
         return Err(CueError::Invalid("export_precheck_failed"));
@@ -191,7 +192,7 @@ pub fn build_cuaderno(
 
     let mut tratam_fito = Vec::new();
     for record in list_treatment_records_for_export(conn, season_id, farm_id)? {
-        append_record(conn, &mut tratam_fito, &record)?;
+        append_record(conn, &mut tratam_fito, &record, actor)?;
     }
 
     Ok(CuadernoExport {
@@ -214,6 +215,7 @@ fn append_record(
     conn: &mut Connection,
     out: &mut Vec<TratamFito>,
     rec: &TreatmentRecordWithPlots,
+    actor: Option<&str>,
 ) -> Result<()> {
     let record = &rec.record;
     let deleted = record.deleted_at.is_some();
@@ -267,12 +269,13 @@ fn append_record(
                 "treatment_record",
                 &record.id,
                 &split_key,
+                actor,
             )?
         };
 
         let dgcs = plots
             .iter()
-            .map(|plot| dgc(conn, plot, deleted))
+            .map(|plot| dgc(conn, plot, deleted, actor))
             .collect::<Result<Vec<_>>>()?;
 
         out.push(TratamFito {
@@ -318,10 +321,22 @@ pub(crate) fn crop_groups(plots: &[TreatmentPlot]) -> Vec<(String, Vec<&Treatmen
 
 /// One DGC reference: the crop row's frozen alias (a core `crop` IS the SIEX
 /// plot+crop+season unit) plus the surface actually treated on that plot.
-fn dgc(conn: &mut Connection, plot: &TreatmentPlot, deleted: bool) -> Result<Dgc> {
+fn dgc(
+    conn: &mut Connection,
+    plot: &TreatmentPlot,
+    deleted: bool,
+    actor: Option<&str>,
+) -> Result<Dgc> {
     let codigo_dgc_ajena = match &plot.crop_id {
         Some(crop_id) if deleted => find_export_alias(conn, SIEX_TARGET, "crop", crop_id, "")?,
-        Some(crop_id) => Some(ensure_export_alias(conn, SIEX_TARGET, "crop", crop_id, "")?),
+        Some(crop_id) => Some(ensure_export_alias(
+            conn,
+            SIEX_TARGET,
+            "crop",
+            crop_id,
+            "",
+            actor,
+        )?),
         // Active records are precheck-blocked; a deletion entry may lack the
         // crop and still identify the activity by its own alias.
         None => None,

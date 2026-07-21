@@ -170,6 +170,27 @@ CREATE TABLE operator (
     deleted_at          TEXT
 );
 
+-- App user profile: who is using the app, for accountability — the future
+-- author stamp on record_change.actor and the workflow rule that the
+-- applicator records their own treatment (docs/architecture.md → sync
+-- conflicts). Identification, not security: no credentials here — real
+-- authentication arrives with cloud sync, and a local password on a file
+-- the user owns would be theatre. USER DATA: synced, audit-logged,
+-- soft-deleted only (a departed worker's id must resolve in years-old
+-- audit rows). The ACTIVE profile is a per-device choice and lives in
+-- settings.json, not here (docs/architecture.md → Device-local settings).
+CREATE TABLE user_profile (
+    id           TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    -- Optional "this user is this applicator" link: lets the treatment form
+    -- prefill the active user as the operator. NULL for users who never
+    -- apply treatments (manager, advisor).
+    operator_id  TEXT REFERENCES operator(id),
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    deleted_at   TEXT
+);
+
 CREATE TABLE machinery (
     id                       TEXT PRIMARY KEY,
     farm_id                  TEXT NOT NULL REFERENCES farm(id),
@@ -278,7 +299,9 @@ CREATE TABLE record_change (
     season_id     TEXT,
     operation     TEXT NOT NULL,                  -- 'insert' | 'update' | 'delete'
     changed_at    TEXT NOT NULL,
-    actor         TEXT,                           -- device/user id, for future sync
+    actor         TEXT,                           -- user_profile.id of the author (the device's
+                                                  -- active profile at write time); NULL = recorded
+                                                  -- with no active profile
     payload       TEXT NOT NULL                   -- JSON {"before": ..., "after": ...}
 );
 

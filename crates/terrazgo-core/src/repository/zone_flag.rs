@@ -27,6 +27,7 @@ pub fn replace_zone_flags(
     campaign: i64,
     source: &str,
     flags: Vec<NewZoneFlag>,
+    actor: Option<&str>,
 ) -> Result<Vec<ZoneFlag>> {
     for flag in &flags {
         if flag.status != "inside" && flag.status != "outside" {
@@ -45,7 +46,7 @@ pub fn replace_zone_flags(
     let now = now_utc_iso();
     let mut stored = Vec::with_capacity(flags.len());
     for flag in flags {
-        replace_active(&tx, plot_id, &flag.zone_type_code, campaign, source)?;
+        replace_active(&tx, plot_id, &flag.zone_type_code, campaign, source, actor)?;
         let row = ZoneFlag {
             id: Uuid::now_v7().to_string(),
             plot_id: plot_id.to_string(),
@@ -79,7 +80,7 @@ pub fn replace_zone_flags(
                 row.updated_at
             ],
         )?;
-        log_insert(&tx, "plot_zone_flag", &row.id, None, &row)?;
+        log_insert(&tx, "plot_zone_flag", &row.id, None, actor, &row)?;
         stored.push(row);
     }
     tx.commit()?;
@@ -111,6 +112,7 @@ fn replace_active(
     zone_type_code: &str,
     campaign: i64,
     source: &str,
+    actor: Option<&str>,
 ) -> Result<()> {
     let current = tx
         .query_row(
@@ -135,6 +137,7 @@ fn replace_active(
             "plot_zone_flag",
             &before.id,
             None,
+            actor,
             &before,
             Some(&after),
         )?;

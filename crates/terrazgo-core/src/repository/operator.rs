@@ -13,7 +13,11 @@ use crate::models::{NewOperator, Operator, UpdateOperator};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
-pub fn insert_operator(conn: &mut Connection, new: NewOperator) -> Result<Operator> {
+pub fn insert_operator(
+    conn: &mut Connection,
+    new: NewOperator,
+    actor: Option<&str>,
+) -> Result<Operator> {
     validate_name(&new.full_name)?;
     let tx = conn.transaction()?;
     let now = now_utc_iso();
@@ -37,7 +41,7 @@ pub fn insert_operator(conn: &mut Connection, new: NewOperator) -> Result<Operat
             operator.created_at, operator.updated_at
         ],
     )?;
-    log_insert(&tx, "operator", &operator.id, None, &operator)?;
+    log_insert(&tx, "operator", &operator.id, None, actor, &operator)?;
     tx.commit()?;
     Ok(operator)
 }
@@ -58,6 +62,7 @@ pub fn update_operator(
     conn: &mut Connection,
     id: &str,
     update: UpdateOperator,
+    actor: Option<&str>,
 ) -> Result<Operator> {
     validate_name(&update.full_name)?;
     let tx = conn.transaction()?;
@@ -90,7 +95,7 @@ pub fn update_operator(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "operator", id, None, &before, &after)?;
+    log_update(&tx, "operator", id, None, actor, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
@@ -98,7 +103,7 @@ pub fn update_operator(
 /// Soft delete: the row stays (treatment history must keep resolving), it just
 /// leaves every list and picker. The operator's licence-expiry alert lapses on
 /// the next `refresh_alerts` — the reconciler skips soft-deleted subjects.
-pub fn soft_delete_operator(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_operator(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -116,7 +121,7 @@ pub fn soft_delete_operator(conn: &mut Connection, id: &str) -> Result<()> {
         "UPDATE operator SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "operator", id, None, &before, Some(&after))?;
+    log_delete(&tx, "operator", id, None, actor, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }

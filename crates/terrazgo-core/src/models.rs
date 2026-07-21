@@ -63,6 +63,19 @@ pub struct Operator {
     pub deleted_at: Option<String>,
 }
 
+/// App user profile — who is using the app. Identification, not security
+/// (no credentials); the active profile per device lives in settings.json.
+#[derive(Debug, Clone, Serialize)]
+pub struct UserProfile {
+    pub id: String,
+    pub display_name: String,
+    /// Optional "this user is this applicator" link to an operator row.
+    pub operator_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Machinery {
     pub id: String,
@@ -234,6 +247,12 @@ pub struct NewOperator {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct NewUserProfile {
+    pub display_name: String,
+    pub operator_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct NewMachinery {
     pub farm_id: String,
     pub name: String,
@@ -346,6 +365,14 @@ pub struct UpdateOperator {
     pub licence_number: Option<String>,
     pub licence_level_code: Option<String>,
     pub licence_expiry_date: Option<String>,
+}
+
+/// Full-row update for a user profile; the submitted state replaces the
+/// stored one (`operator_id: None` unlinks).
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserProfile {
+    pub display_name: String,
+    pub operator_id: Option<String>,
 }
 
 /// Full-row update for machinery. `farm_id` is deliberately absent, like

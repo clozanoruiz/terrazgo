@@ -24,7 +24,7 @@ use uuid::Uuid;
 // Farm
 // ---------------------------------------------------------------------------
 
-pub fn insert_farm(conn: &mut Connection, new: NewFarm) -> Result<Farm> {
+pub fn insert_farm(conn: &mut Connection, new: NewFarm, actor: Option<&str>) -> Result<Farm> {
     validate_name(&new.name)?;
     let tx = conn.transaction()?;
     let now = now_utc_iso();
@@ -50,9 +50,9 @@ pub fn insert_farm(conn: &mut Connection, new: NewFarm) -> Result<Farm> {
             farm.longitude, farm.country_code, farm.created_at, farm.updated_at
         ],
     )?;
-    log_insert(&tx, "farm", &farm.id, None, &farm)?;
+    log_insert(&tx, "farm", &farm.id, None, actor, &farm)?;
     if let Some(es) = new.es {
-        insert_farm_extension(&tx, &farm.id, &es)?;
+        insert_farm_extension(&tx, &farm.id, &es, actor)?;
     }
     tx.commit()?;
     Ok(farm)
@@ -83,7 +83,12 @@ pub fn get_farm(conn: &Connection, id: &str) -> Result<FarmDetail> {
 
 /// Full-row update; the submitted state replaces the stored one. Logs complete
 /// before/after images for the farm and for any extension transition.
-pub fn update_farm(conn: &mut Connection, id: &str, update: UpdateFarm) -> Result<FarmDetail> {
+pub fn update_farm(
+    conn: &mut Connection,
+    id: &str,
+    update: UpdateFarm,
+    actor: Option<&str>,
+) -> Result<FarmDetail> {
     validate_name(&update.name)?;
     let tx = conn.transaction()?;
     let before = tx
@@ -121,16 +126,16 @@ pub fn update_farm(conn: &mut Connection, id: &str, update: UpdateFarm) -> Resul
             after.updated_at
         ],
     )?;
-    log_update(&tx, "farm", id, None, &before, &after)?;
+    log_update(&tx, "farm", id, None, actor, &before, &after)?;
 
-    let es = reconcile_farm_extension(&tx, id, update.es)?;
+    let es = reconcile_farm_extension(&tx, id, update.es, actor)?;
     tx.commit()?;
     Ok(FarmDetail { farm: after, es })
 }
 
 /// Soft delete: the row stays (treatment history must keep resolving), it just
 /// leaves every list and picker. The extension row is kept with it.
-pub fn soft_delete_farm(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_farm(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -148,7 +153,7 @@ pub fn soft_delete_farm(conn: &mut Connection, id: &str) -> Result<()> {
         "UPDATE farm SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "farm", id, None, &before, Some(&after))?;
+    log_delete(&tx, "farm", id, None, actor, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -157,7 +162,7 @@ pub fn soft_delete_farm(conn: &mut Connection, id: &str) -> Result<()> {
 // Plot
 // ---------------------------------------------------------------------------
 
-pub fn insert_plot(conn: &mut Connection, new: NewPlot) -> Result<Plot> {
+pub fn insert_plot(conn: &mut Connection, new: NewPlot, actor: Option<&str>) -> Result<Plot> {
     validate_name(&new.name)?;
     validate_area(new.area_ha)?;
     let tx = conn.transaction()?;
@@ -183,9 +188,9 @@ pub fn insert_plot(conn: &mut Connection, new: NewPlot) -> Result<Plot> {
             plot.updated_at
         ],
     )?;
-    log_insert(&tx, "plot", &plot.id, None, &plot)?;
+    log_insert(&tx, "plot", &plot.id, None, actor, &plot)?;
     if let Some(es) = new.es {
-        insert_plot_extension(&tx, &plot.id, &es)?;
+        insert_plot_extension(&tx, &plot.id, &es, actor)?;
     }
     tx.commit()?;
     Ok(plot)
@@ -208,7 +213,12 @@ pub fn list_plots(conn: &Connection, farm_id: &str) -> Result<Vec<PlotDetail>> {
 }
 
 /// Full-row update. `farm_id` is immutable by design (see `UpdatePlot`).
-pub fn update_plot(conn: &mut Connection, id: &str, update: UpdatePlot) -> Result<PlotDetail> {
+pub fn update_plot(
+    conn: &mut Connection,
+    id: &str,
+    update: UpdatePlot,
+    actor: Option<&str>,
+) -> Result<PlotDetail> {
     validate_name(&update.name)?;
     validate_area(update.area_ha)?;
     let tx = conn.transaction()?;
@@ -230,14 +240,14 @@ pub fn update_plot(conn: &mut Connection, id: &str, update: UpdatePlot) -> Resul
         "UPDATE plot SET name = ?2, area_ha = ?3, updated_at = ?4 WHERE id = ?1",
         params![id, after.name, after.area_ha, after.updated_at],
     )?;
-    log_update(&tx, "plot", id, None, &before, &after)?;
+    log_update(&tx, "plot", id, None, actor, &before, &after)?;
 
-    let es = reconcile_plot_extension(&tx, id, update.es)?;
+    let es = reconcile_plot_extension(&tx, id, update.es, actor)?;
     tx.commit()?;
     Ok(PlotDetail { plot: after, es })
 }
 
-pub fn soft_delete_plot(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_plot(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -255,7 +265,7 @@ pub fn soft_delete_plot(conn: &mut Connection, id: &str) -> Result<()> {
         "UPDATE plot SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "plot", id, None, &before, Some(&after))?;
+    log_delete(&tx, "plot", id, None, actor, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -268,6 +278,7 @@ fn insert_farm_extension(
     tx: &Transaction,
     farm_id: &str,
     es: &FarmEsFields,
+    actor: Option<&str>,
 ) -> Result<FarmEsExtension> {
     let ext = FarmEsExtension {
         farm_id: farm_id.to_string(),
@@ -279,7 +290,7 @@ fn insert_farm_extension(
         "INSERT INTO farm_es_extension (farm_id, rega_code, rea_code, province_code) VALUES (?1, ?2, ?3, ?4)",
         params![ext.farm_id, ext.rega_code, ext.rea_code, ext.province_code],
     )?;
-    log_insert(tx, "farm_es_extension", farm_id, None, &ext)?;
+    log_insert(tx, "farm_es_extension", farm_id, None, actor, &ext)?;
     Ok(ext)
 }
 
@@ -299,6 +310,7 @@ fn reconcile_farm_extension(
     tx: &Transaction,
     farm_id: &str,
     desired: Option<FarmEsFields>,
+    actor: Option<&str>,
 ) -> Result<Option<FarmEsExtension>> {
     let current = {
         // Same query as get_farm_extension, but on the open transaction.
@@ -311,13 +323,13 @@ fn reconcile_farm_extension(
     };
     match (current, desired) {
         (None, None) => Ok(None),
-        (None, Some(es)) => Ok(Some(insert_farm_extension(tx, farm_id, &es)?)),
+        (None, Some(es)) => Ok(Some(insert_farm_extension(tx, farm_id, &es, actor)?)),
         (Some(before), None) => {
             tx.execute(
                 "DELETE FROM farm_es_extension WHERE farm_id = ?1",
                 [farm_id],
             )?;
-            log_delete(tx, "farm_es_extension", farm_id, None, &before, None)?;
+            log_delete(tx, "farm_es_extension", farm_id, None, actor, &before, None)?;
             Ok(None)
         }
         (Some(before), Some(es)) => {
@@ -331,7 +343,15 @@ fn reconcile_farm_extension(
                 "UPDATE farm_es_extension SET rega_code = ?2, rea_code = ?3, province_code = ?4 WHERE farm_id = ?1",
                 params![farm_id, after.rega_code, after.rea_code, after.province_code],
             )?;
-            log_update(tx, "farm_es_extension", farm_id, None, &before, &after)?;
+            log_update(
+                tx,
+                "farm_es_extension",
+                farm_id,
+                None,
+                actor,
+                &before,
+                &after,
+            )?;
             Ok(Some(after))
         }
     }
@@ -341,6 +361,7 @@ fn insert_plot_extension(
     tx: &Transaction,
     plot_id: &str,
     es: &PlotEsFields,
+    actor: Option<&str>,
 ) -> Result<PlotEsExtension> {
     let ext = PlotEsExtension {
         plot_id: plot_id.to_string(),
@@ -368,7 +389,7 @@ fn insert_plot_extension(
             ext.sigpac_enclosure
         ],
     )?;
-    log_insert(tx, "plot_es_extension", plot_id, None, &ext)?;
+    log_insert(tx, "plot_es_extension", plot_id, None, actor, &ext)?;
     Ok(ext)
 }
 
@@ -386,6 +407,7 @@ fn reconcile_plot_extension(
     tx: &Transaction,
     plot_id: &str,
     desired: Option<PlotEsFields>,
+    actor: Option<&str>,
 ) -> Result<Option<PlotEsExtension>> {
     let current = tx
         .query_row(
@@ -396,13 +418,13 @@ fn reconcile_plot_extension(
         .optional()?;
     match (current, desired) {
         (None, None) => Ok(None),
-        (None, Some(es)) => Ok(Some(insert_plot_extension(tx, plot_id, &es)?)),
+        (None, Some(es)) => Ok(Some(insert_plot_extension(tx, plot_id, &es, actor)?)),
         (Some(before), None) => {
             tx.execute(
                 "DELETE FROM plot_es_extension WHERE plot_id = ?1",
                 [plot_id],
             )?;
-            log_delete(tx, "plot_es_extension", plot_id, None, &before, None)?;
+            log_delete(tx, "plot_es_extension", plot_id, None, actor, &before, None)?;
             Ok(None)
         }
         (Some(before), Some(es)) => {
@@ -426,7 +448,15 @@ fn reconcile_plot_extension(
                     after.sigpac_zone, after.sigpac_polygon, after.sigpac_parcel, after.sigpac_enclosure
                 ],
             )?;
-            log_update(tx, "plot_es_extension", plot_id, None, &before, &after)?;
+            log_update(
+                tx,
+                "plot_es_extension",
+                plot_id,
+                None,
+                actor,
+                &before,
+                &after,
+            )?;
             Ok(Some(after))
         }
     }

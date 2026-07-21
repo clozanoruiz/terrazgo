@@ -51,6 +51,7 @@ fn seeded_db(path: &PathBuf) -> Connection {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
     conn

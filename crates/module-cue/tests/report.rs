@@ -42,6 +42,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
 
@@ -58,6 +59,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
                 province_code: Some("47".into()),
             }),
         },
+        None,
     )
     .unwrap();
 
@@ -69,6 +71,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2027-03-01".into()),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -81,6 +84,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             formulation_type_code: None,
             default_phi_days: Some(21),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -96,6 +100,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             valid_from: Some("2024-01-01".into()),
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -153,6 +158,7 @@ fn insert_plot(
             area_ha: Some(area_ha),
             es,
         },
+        None,
     )
     .unwrap()
     .id
@@ -176,6 +182,7 @@ fn insert_crop(
             production_system_code: production_system.map(Into::into),
             sown_on: None,
         },
+        None,
     )
     .unwrap()
     .id
@@ -246,6 +253,7 @@ fn a_farm_without_regional_data_prints_blank_not_missing() {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
     let farm = repo::insert_farm(
@@ -257,6 +265,7 @@ fn a_farm_without_regional_data_prints_blank_not_missing() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
 
@@ -316,6 +325,7 @@ fn register_rows_reference_operators_equipment_and_plots_by_order_number() {
             roma_number: Some("RM-47-0042".into()),
             reganip_number: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -325,6 +335,7 @@ fn register_rows_reference_operators_equipment_and_plots_by_order_number() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
     let mut second = treatment(&fx, "2026-05-20");
@@ -333,6 +344,7 @@ fn register_rows_reference_operators_equipment_and_plots_by_order_number() {
         &mut conn,
         second,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -373,6 +385,7 @@ fn register_rows_format_dose_phi_and_efficacy_in_spanish() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 2.5)],
+        None,
     )
     .unwrap();
 
@@ -402,6 +415,7 @@ fn multi_crop_treatments_print_one_register_row_per_crop_group() {
             on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0),
             on_plot(&fx.barley_plot_id, Some(&fx.barley_crop_id), 3.0),
         ],
+        None,
     )
     .unwrap();
 
@@ -446,6 +460,7 @@ fn problem_codes_resolve_to_catalogue_labels_or_print_verbatim() {
         &mut conn,
         record,
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
 
@@ -463,9 +478,10 @@ fn deleted_records_do_not_print() {
         &mut conn,
         treatment(&fx, "2026-05-01"),
         vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
     )
     .unwrap();
-    repo::soft_delete_treatment_record(&mut conn, &record.id).unwrap();
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
 
     let doc = inputs(&conn, &fx);
     assert_eq!(doc["treatments"].as_array().unwrap().len(), 0);
@@ -489,6 +505,7 @@ fn renders_a_pdf_with_zero_template_warnings() {
             on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0),
             on_plot(&fx.barley_plot_id, Some(&fx.barley_crop_id), 3.0),
         ],
+        None,
     )
     .unwrap();
 
@@ -510,6 +527,7 @@ fn renders_even_an_empty_farm() {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap();
     let farm = repo::insert_farm(
@@ -521,6 +539,7 @@ fn renders_even_an_empty_farm() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
 

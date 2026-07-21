@@ -50,6 +50,7 @@ pub fn ensure_export_alias(
     entity_table: &str,
     entity_id: &str,
     split_key: &str,
+    actor: Option<&str>,
 ) -> Result<i64> {
     let tx = conn.transaction()?;
     let existing: Option<i64> = tx
@@ -91,7 +92,7 @@ pub fn ensure_export_alias(
             row.created_at
         ],
     )?;
-    log_insert(&tx, "export_alias", &row.id, None, &row)?;
+    log_insert(&tx, "export_alias", &row.id, None, actor, &row)?;
     tx.commit()?;
     Ok(next)
 }

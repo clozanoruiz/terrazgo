@@ -38,6 +38,11 @@ pub struct AppSettings {
     /// by `terrazgo-geo` (`TILE_CACHE_MAX_BYTES`); the shell resolves it at
     /// startup and on change. Range-validated by the owner, not here.
     pub tile_cache_max_bytes: Option<i64>,
+    /// The device's active user profile (`user_profile.id`). Device-local by
+    /// design — "who is using THIS device" is not farm data. Tolerated when
+    /// dangling (profile deleted, backup from another install): the shell
+    /// degrades to "no active profile", never errors.
+    pub active_user_id: Option<String>,
 }
 
 /// Read settings from `path`, falling back to defaults on ANY failure —
@@ -97,6 +102,7 @@ mod tests {
         let path = dir.join("settings.json");
         let settings = AppSettings {
             tile_cache_max_bytes: Some(256 * 1024 * 1024),
+            active_user_id: Some("0198b7a0-0000-7000-8000-000000000000".into()),
         };
         save_settings(&path, &settings).unwrap();
         assert_eq!(load_settings(&path), settings);
@@ -133,6 +139,7 @@ mod tests {
             &path,
             &AppSettings {
                 tile_cache_max_bytes: Some(1024 * 1024 * 1024),
+                active_user_id: None,
             },
         )
         .unwrap();

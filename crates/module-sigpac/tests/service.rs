@@ -80,6 +80,7 @@ fn plot_with_reference(conn: &mut Connection, parts: [&str; 7]) -> String {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
     let plot = insert_plot(
@@ -98,6 +99,7 @@ fn plot_with_reference(conn: &mut Connection, parts: [&str; 7]) -> String {
                 sigpac_enclosure: Some(parts[6].into()),
             }),
         },
+        None,
     )
     .unwrap();
     plot.id
@@ -128,7 +130,7 @@ fn verify_plot_stores_the_official_boundary() {
     let cache = seeded_cache(&full_palencia_entries());
     let plot_id = plot_with_reference(&mut app, ["34", "10", "0", "0", "604", "5021", "13"]);
 
-    let verification = verify_plot(&mut app, &cache, &plot_id, false)
+    let verification = verify_plot(&mut app, &cache, &plot_id, false, None)
         .unwrap()
         .expect("recinto exists in SIGPAC");
 
@@ -195,7 +197,7 @@ fn zone_failure_keeps_the_stored_boundary() {
     ]);
     let plot_id = plot_with_reference(&mut app, ["34", "10", "0", "0", "604", "5021", "13"]);
 
-    let verification = verify_plot(&mut app, &cache, &plot_id, false)
+    let verification = verify_plot(&mut app, &cache, &plot_id, false, None)
         .unwrap()
         .expect("recinto exists");
     // Boundary stored; zones honestly reported unchecked.
@@ -215,10 +217,10 @@ fn re_verification_replaces_within_source_keeping_history() {
     let cache = seeded_cache(&full_palencia_entries());
     let plot_id = plot_with_reference(&mut app, ["34", "10", "0", "0", "604", "5021", "13"]);
 
-    let first = verify_plot(&mut app, &cache, &plot_id, false)
+    let first = verify_plot(&mut app, &cache, &plot_id, false, None)
         .unwrap()
         .unwrap();
-    let second = verify_plot(&mut app, &cache, &plot_id, false)
+    let second = verify_plot(&mut app, &cache, &plot_id, false, None)
         .unwrap()
         .unwrap();
     assert_ne!(first.feature.id, second.feature.id);
@@ -234,7 +236,7 @@ fn verify_plot_needs_an_existing_plot_with_a_complete_reference() {
     let cache = seeded_cache::<&str>(&[]);
 
     assert!(matches!(
-        verify_plot(&mut app, &cache, "no-such-plot", false),
+        verify_plot(&mut app, &cache, "no-such-plot", false, None),
         Err(GeoError::NotFound)
     ));
 
@@ -247,6 +249,7 @@ fn verify_plot_needs_an_existing_plot_with_a_complete_reference() {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap();
     let bare_plot = insert_plot(
@@ -257,10 +260,11 @@ fn verify_plot_needs_an_existing_plot_with_a_complete_reference() {
             area_ha: None,
             es: None,
         },
+        None,
     )
     .unwrap();
     assert!(matches!(
-        verify_plot(&mut app, &cache, &bare_plot.id, false),
+        verify_plot(&mut app, &cache, &bare_plot.id, false, None),
         Err(GeoError::Invalid("sigpac_ref_missing"))
     ));
 }
@@ -273,7 +277,7 @@ fn unknown_reference_stores_nothing() {
     let plot_id = plot_with_reference(&mut app, ["34", "999", "0", "0", "1", "1", "1"]);
 
     assert!(
-        verify_plot(&mut app, &cache, &plot_id, false)
+        verify_plot(&mut app, &cache, &plot_id, false, None)
             .unwrap()
             .is_none()
     );

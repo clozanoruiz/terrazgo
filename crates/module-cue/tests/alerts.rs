@@ -38,6 +38,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             starts_on: None,
             ends_on: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -51,6 +52,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -63,6 +65,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             area_ha: Some(3.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -75,6 +78,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2026-07-15".into()),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -90,6 +94,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             roma_number: None,
             reganip_number: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -102,6 +107,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             formulation_type_code: Some("sc".into()),
             default_phi_days: Some(21),
         },
+        None,
     )
     .unwrap()
     .id;
@@ -117,6 +123,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             valid_from: None,
             valid_until: None,
         },
+        None,
     )
     .unwrap();
 
@@ -147,6 +154,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             crop_id: None,
             surface_treated_ha: 3.0,
         }],
+        None,
     )
     .unwrap()
     .id;
@@ -226,6 +234,7 @@ fn operator_without_expiry_date_produces_no_alert() {
             licence_level_code: None,
             licence_expiry_date: None,
         },
+        None,
     )
     .unwrap();
 
@@ -254,6 +263,7 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
             area_ha: Some(2.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -265,6 +275,7 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
             area_ha: Some(2.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -310,6 +321,7 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
                 surface_treated_ha: 2.0,
             },
         ],
+        None,
     )
     .unwrap();
 
@@ -538,6 +550,7 @@ fn zoned_plot(conn: &mut Connection) -> String {
             country_code: "es".into(),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id;
@@ -549,6 +562,7 @@ fn zoned_plot(conn: &mut Connection) -> String {
             area_ha: Some(1.0),
             es: None,
         },
+        None,
     )
     .unwrap()
     .id
@@ -577,6 +591,7 @@ fn inside_flags_alert_per_zone_type_and_outside_ones_do_not() {
             flag("phytosanitary_restriction", "inside"),
             flag("natura_2000", "outside"),
         ],
+        None,
     )
     .unwrap();
 
@@ -604,6 +619,7 @@ fn only_the_latest_campaign_counts() {
         2026,
         "sigpac",
         vec![flag("nitrate_vulnerable", "inside")],
+        None,
     )
     .unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
@@ -615,6 +631,7 @@ fn only_the_latest_campaign_counts() {
         2027,
         "sigpac",
         vec![flag("nitrate_vulnerable", "outside")],
+        None,
     )
     .unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
@@ -627,6 +644,7 @@ fn only_the_latest_campaign_counts() {
         2028,
         "sigpac",
         vec![flag("nitrate_vulnerable", "inside")],
+        None,
     )
     .unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
@@ -647,6 +665,7 @@ fn dismissed_zone_alert_survives_rechecks_and_rollover() {
         2026,
         "sigpac",
         vec![flag("nitrate_vulnerable", "inside")],
+        None,
     )
     .unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
@@ -661,6 +680,7 @@ fn dismissed_zone_alert_survives_rechecks_and_rollover() {
         2027,
         "sigpac",
         vec![flag("nitrate_vulnerable", "inside")],
+        None,
     )
     .unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
@@ -682,12 +702,13 @@ fn zone_alerts_lapse_with_the_plot() {
         2026,
         "sigpac",
         vec![flag("nitrate_vulnerable", "inside")],
+        None,
     )
     .unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
     assert_eq!(repo::list_active_alerts(&conn).unwrap().len(), 1);
 
-    soft_delete_plot(&mut conn, &plot_id).unwrap();
+    soft_delete_plot(&mut conn, &plot_id, None).unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
     assert!(repo::list_active_alerts(&conn).unwrap().is_empty());
 }

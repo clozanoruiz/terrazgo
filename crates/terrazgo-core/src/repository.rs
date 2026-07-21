@@ -18,6 +18,7 @@ mod geo_feature;
 mod machinery;
 mod operator;
 mod season;
+mod user_profile;
 mod zone_flag;
 
 pub use country::{list_countries, list_licence_levels, list_production_systems};
@@ -33,6 +34,9 @@ pub use machinery::{
 };
 pub use operator::{insert_operator, list_operators, soft_delete_operator, update_operator};
 pub use season::{insert_season, list_seasons};
+pub use user_profile::{
+    insert_user_profile, list_user_profiles, soft_delete_user_profile, update_user_profile,
+};
 pub use zone_flag::{list_zone_flags_for_farm, replace_zone_flags};
 
 /// Names of user-entered rows (farm, plot, season label, crop species, …) must

@@ -387,6 +387,20 @@ export default {
   "message.settings_saved": "Settings saved.",
   "message.cache_cleared": "Stored maps cleared ({count}).",
 
+  "settings.profiles": "User profiles",
+  "profiles.hint":
+    "Profiles identify who uses the app. The active profile is a preference of this device.",
+  "profiles.active_label": "Active profile on this device",
+  "profiles.active_none": "No active profile",
+  "profiles.new": "New profile",
+  "profiles.empty": "No profiles yet.",
+  "profile.display_name": "Name",
+  "profile.operator_link": "Linked operator (applicator)",
+  "profile.operator_detail": "Applicator: {name}",
+  "profile.delete_confirm": 'Delete profile "{name}"? It will no longer appear in lists.',
+  "message.profile_saved": 'Profile "{name}" saved.',
+  "message.profile_deleted": "Profile deleted.",
+
   "backup.title": "Backup",
   "actions.export_backup": "Export backup",
   "actions.import_backup": "Import backup",
@@ -401,6 +415,7 @@ export default {
   "error.internal_intro": "An internal error occurred:",
   "error.not_found": "Record not found.",
   "error.invalid.empty_name": "The name must not be empty.",
+  "error.invalid.operator_not_found": "The selected operator no longer exists.",
   "error.invalid.empty_authorisation_number": "The registration number must not be empty.",
   "error.invalid.no_problems": "Add at least one problem treated (pest, disease…).",
   "error.invalid.no_justifications": "Add at least one justification for the treatment.",

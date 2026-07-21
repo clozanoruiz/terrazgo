@@ -79,6 +79,7 @@ pub fn save_recinto_boundary(
     conn: &mut Connection,
     plot_id: &str,
     recinto: &RecintoInfo,
+    actor: Option<&str>,
 ) -> Result<GeoFeature> {
     let properties = serde_json::to_string(&recinto.properties)?;
     Ok(save_geo_feature(
@@ -94,6 +95,7 @@ pub fn save_recinto_boundary(
             properties: Some(properties),
             fetched_at: Some(now_utc_iso()),
         },
+        actor,
     )?)
 }
 
@@ -105,6 +107,7 @@ pub fn save_zone_checks(
     plot_id: &str,
     campaign: i64,
     results: Vec<(&'static str, Option<ZoneIntersection>)>,
+    actor: Option<&str>,
 ) -> Result<Vec<ZoneFlag>> {
     let flags = results
         .into_iter()
@@ -123,7 +126,9 @@ pub fn save_zone_checks(
             },
         })
         .collect();
-    Ok(replace_zone_flags(conn, plot_id, campaign, SOURCE, flags)?)
+    Ok(replace_zone_flags(
+        conn, plot_id, campaign, SOURCE, flags, actor,
+    )?)
 }
 
 /// Every active plot whose stored reference equals `reference`. Comparison is

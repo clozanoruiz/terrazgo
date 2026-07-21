@@ -7,6 +7,7 @@
 
 import { mount } from "svelte";
 import App from "./App.svelte";
+import { invoke } from "./lib/backend.js";
 
 // A real route lets the nav highlighting match; replaceState fires no events.
 if (!location.hash) {
@@ -22,5 +23,26 @@ window.addEventListener("contextmenu", (event) => {
   if (el && el.closest("input, textarea, [contenteditable]")) return;
   event.preventDefault();
 });
+
+// On Android the webview loads in parallel with the Rust setup hook, so an
+// invoke fired at mount can land before managed state exists and fail with a
+// raw "state not managed" error (desktop never races: its window is created
+// after setup). Poll the stateless app_ready probe until setup has finished.
+// Fail-open on invoke errors and after the bound: mounting and surfacing real
+// command errors beats an unexplained blank screen — and in scripted checks
+// the stubbed invoke has no app_ready, which lands in the catch on try one.
+async function waitForBackend() {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    try {
+      if (await invoke("app_ready")) return;
+    } catch {
+      return;
+    }
+    if (Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+await waitForBackend();
 
 mount(App, { target: document.getElementById("app") });

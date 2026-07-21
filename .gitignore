@@ -4,8 +4,10 @@
 **/*.rs.bk
 *.pdb
 
-# Tauri generated schemas
-/src-tauri/gen/
+# Tauri generated schemas (the Android project under gen/android IS tracked:
+# manifest, icons and permission edits are source; its own .gitignore keeps
+# Gradle build output and keystores out)
+/src-tauri/gen/schemas/
 
 # Editor / OS noise
 .DS_Store

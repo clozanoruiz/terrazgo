@@ -45,3 +45,13 @@ pub struct SettingsState {
     pub settings: Mutex<terrazgo_core::settings::AppSettings>,
     pub path: PathBuf,
 }
+
+/// Marker managed as the LAST statement of the setup hook. Exists for the
+/// `app_ready` command: on Android the webview loads in parallel with setup,
+/// so the frontend can invoke commands before `.manage()` has run — any
+/// command taking `State<...>` then fails with Tauri's raw "state not
+/// managed" error. The frontend polls `app_ready` (which has no `State`
+/// parameter, so it works at any time) before mounting the app. Desktop
+/// never races — its window is created only after setup returns — so the
+/// first poll answers `true` there.
+pub struct SetupComplete;

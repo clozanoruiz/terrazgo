@@ -58,8 +58,11 @@
 - **Upstream:** public no-auth REST API `https://www11.fega.es/bdcsixwsp/` —
   `GET /catalogos/{idTabla}` (one CSV), `GET /catalogos/zip/` (all ~122,
   ≈1.4 MB), `GET /catalogos/{idTabla}/fecha` (last-update probe).
-- **Refresh:** a release-ritual step — fetch `/catalogos/zip/`, replace the
-  16 files byte-verbatim, run the tests.
+- **Refresh:** a release-ritual step — fetch and replace the 16 files
+  byte-verbatim, run the tests. Note (2026-07-21): the `/catalogos/zip/`
+  bundle ships *display-name* filenames ("Eficacia del tratamiento.csv"),
+  not idTabla names — for a mechanical refresh, fetch each file directly:
+  `GET /catalogos/{idTabla}` for the 16 vendored idTabla names.
 - **Pinned by:** `crates/terrazgo-core/tests/catalogue.rs` (snapshot facts:
   row counts, retired-code presence, ISO dates, the € labels), a
   control-character **encoding tripwire** (fails the suite if the provider
@@ -97,6 +100,24 @@
   parse with typst's own font parser, index under the family name
   `"Liberation Sans"` exactly (what every template's `#set text` matches
   against), and cover the Spanish glyph set (diacritics, `€`, `ª/º`, `¿¡`).
+
+### rustls-platform-verifier Kotlin component (Android TLS)
+
+- **Our copy:** none vendored — the compiled `.aar` ships *inside* the
+  `rustls-platform-verifier-android` crate as a bundled Maven repository, and
+  `src-tauri/gen/android/app/build.gradle.kts` locates it at build time via
+  `cargo metadata`, pinning the exact version Cargo resolved.
+- **Upstream:** <https://github.com/rustls/rustls-platform-verifier> (crate
+  `rustls-platform-verifier`, workspace-pinned; the Android artifact version
+  follows the `-android` sub-crate).
+- **Refresh:** automatic on `cargo update` — no manual step. If the crate
+  ever changes its bundled-Maven layout, the Gradle finder function is the
+  thing to fix.
+- **Pinned by:** the Android build itself (Gradle fails if the artifact
+  cannot be resolved) and the ProGuard keep rule in
+  `src-tauri/gen/android/app/proguard-rules.pro` (the class is only reached
+  over JNI, so release shrinking would otherwise strip it — that breakage
+  would only show in release APKs, as blank maps).
 
 ## 2. Live services (runtime network)
 
@@ -146,7 +167,52 @@ whether the document moved to a new version first.
 Contact for the regional submission side: **comercialcuecyl@jcyl.es**
 (commercial-notebook test-environment onboarding, Castilla y León).
 
-## 5. Release checklist (external-data part)
+## 5. Release credentials — Android signing & Google Play
+
+External artifacts a release depends on that deliberately live *outside* the
+repo. Added 2026-07-19.
+
+### Android release keystore (the upload key)
+
+- **What it is:** one RSA-2048 keystore signs every release APK/AAB. For
+  sideloaded (GitHub-release) APKs it is the app identity itself — Android
+  refuses updates signed with a different key. For Google Play it is the
+  *upload key* (Play App Signing re-signs with Google's app key, which is why
+  a Play install and a sideloaded APK cannot update over each other).
+- **Where it lives:** on the development machine, outside the repo, plus an
+  offline backup; the password in a password manager. Never committed —
+  `gen/android/.gitignore` already covers `keystore.properties`, and the
+  keystore file itself must stay out of the working tree.
+- **How builds find it:** `src-tauri/gen/android/keystore.properties`
+  (untracked: `password=` / `keyAlias=` / `storeFile=`) is read by the
+  signingConfig in `app/build.gradle.kts`. Without the file, release builds
+  come out unsigned (debug builds are unaffected). CI reconstructs the file
+  from the GitHub Actions secrets `ANDROID_KEYSTORE_B64` (base64 of the
+  keystore), `ANDROID_KEYSTORE_PASSWORD` and `ANDROID_KEY_ALIAS` in the
+  `build.yml` android job.
+- **If lost:** sideload users must uninstall/reinstall forever (no key, no
+  updates); the Play upload key can be reset through Play Console support
+  because Play App Signing holds the real app key. Back it up accordingly —
+  the keystore file plus its password are unrecoverable by anyone else.
+- **If leaked:** rotate immediately — request a Play upload-key reset, and
+  accept the sideload-update break (announce it in the release notes).
+
+### Google Play Console
+
+- **App:** `org.terrazgo.app`, distributed on the **internal-testing track**
+  while the project is pre-release; promotion to production is an explicit
+  decision, same as the release declaration itself.
+- **First upload is manual** (Play requires it): the AAB comes from the
+  `build.yml` android job's workflow artifact. Later releases can be pushed
+  automatically once a Google Cloud service account with Play release
+  permission exists — its JSON key becomes one more Actions secret and one
+  upload step in `build.yml`.
+- **Recurring Play chores:** target-API deadline (Google raises the required
+  `targetSdk` roughly yearly, mid-year — Gradle carries it at
+  `app/build.gradle.kts`), data-safety form and privacy policy updates when
+  the app starts collecting anything new (today: nothing leaves the device).
+
+## 6. Release checklist (external-data part)
 
 1. **Refresh the catalogue snapshot**: one GET of
    `https://www11.fega.es/bdcsixwsp/catalogos/zip/`, replace the 16 files in
@@ -157,4 +223,8 @@ Contact for the regional submission side: **comercialcuecyl@jcyl.es**
 2. **Check the CUE schema version** on the FEGA documentation page. If it
    moved past 3.11.4: vendor + re-diff before the next export-touching
    release (procedure in §1).
-3. Glance at this file: does every row still match reality?
+3. **Android**: the release APK/AAB must be signed (the CI job fails if the
+   keystore secrets are missing — never work around it by shipping unsigned
+   or debug-signed builds), and the AAB goes to the Play internal-testing
+   track (§5).
+4. Glance at this file: does every row still match reality?

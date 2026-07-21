@@ -21,7 +21,11 @@ use uuid::Uuid;
 /// Insert machinery, writing the ROMA/REGANIP numbers to the Spanish extension when
 /// either is present. The core row and the extension row are separate synced tables,
 /// so each gets its own `record_change` entry.
-pub fn insert_machinery(conn: &mut Connection, new: NewMachinery) -> Result<Machinery> {
+pub fn insert_machinery(
+    conn: &mut Connection,
+    new: NewMachinery,
+    actor: Option<&str>,
+) -> Result<Machinery> {
     validate_name(&new.name)?;
     let tx = conn.transaction()?;
     let now = now_utc_iso();
@@ -46,10 +50,16 @@ pub fn insert_machinery(conn: &mut Connection, new: NewMachinery) -> Result<Mach
             machinery.created_at, machinery.updated_at
         ],
     )?;
-    log_insert(&tx, "machinery", &machinery.id, None, &machinery)?;
+    log_insert(&tx, "machinery", &machinery.id, None, actor, &machinery)?;
 
     if new.roma_number.is_some() || new.reganip_number.is_some() {
-        insert_extension(&tx, &machinery.id, new.roma_number, new.reganip_number)?;
+        insert_extension(
+            &tx,
+            &machinery.id,
+            new.roma_number,
+            new.reganip_number,
+            actor,
+        )?;
     }
 
     tx.commit()?;
@@ -86,6 +96,7 @@ pub fn update_machinery(
     conn: &mut Connection,
     id: &str,
     update: UpdateMachinery,
+    actor: Option<&str>,
 ) -> Result<MachineryDetail> {
     validate_name(&update.name)?;
     let tx = conn.transaction()?;
@@ -118,9 +129,9 @@ pub fn update_machinery(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "machinery", id, None, &before, &after)?;
+    log_update(&tx, "machinery", id, None, actor, &before, &after)?;
 
-    let es = reconcile_extension(&tx, id, update.roma_number, update.reganip_number)?;
+    let es = reconcile_extension(&tx, id, update.roma_number, update.reganip_number, actor)?;
     tx.commit()?;
     Ok(MachineryDetail {
         machinery: after,
@@ -131,7 +142,7 @@ pub fn update_machinery(
 /// Soft delete: the row stays (treatment history must keep resolving), it just
 /// leaves every list and picker. The ITV alert lapses on the next
 /// `refresh_alerts` — the reconciler skips soft-deleted subjects.
-pub fn soft_delete_machinery(conn: &mut Connection, id: &str) -> Result<()> {
+pub fn soft_delete_machinery(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
     let tx = conn.transaction()?;
     let before = tx
         .query_row(
@@ -149,7 +160,7 @@ pub fn soft_delete_machinery(conn: &mut Connection, id: &str) -> Result<()> {
         "UPDATE machinery SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "machinery", id, None, &before, Some(&after))?;
+    log_delete(&tx, "machinery", id, None, actor, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -163,6 +174,7 @@ fn insert_extension(
     machinery_id: &str,
     roma_number: Option<String>,
     reganip_number: Option<String>,
+    actor: Option<&str>,
 ) -> Result<MachineryEsExtension> {
     let ext = MachineryEsExtension {
         machinery_id: machinery_id.to_string(),
@@ -174,7 +186,14 @@ fn insert_extension(
          VALUES (?1, ?2, ?3)",
         params![ext.machinery_id, ext.roma_number, ext.reganip_number],
     )?;
-    log_insert(tx, "machinery_es_extension", machinery_id, None, &ext)?;
+    log_insert(
+        tx,
+        "machinery_es_extension",
+        machinery_id,
+        None,
+        actor,
+        &ext,
+    )?;
     Ok(ext)
 }
 
@@ -197,6 +216,7 @@ fn reconcile_extension(
     machinery_id: &str,
     roma_number: Option<String>,
     reganip_number: Option<String>,
+    actor: Option<&str>,
 ) -> Result<Option<MachineryEsExtension>> {
     let current = tx
         .query_row(
@@ -214,6 +234,7 @@ fn reconcile_extension(
             machinery_id,
             roma_number,
             reganip_number,
+            actor,
         )?)),
         (Some(before), false) => {
             tx.execute(
@@ -225,6 +246,7 @@ fn reconcile_extension(
                 "machinery_es_extension",
                 machinery_id,
                 None,
+                actor,
                 &before,
                 None,
             )?;
@@ -246,6 +268,7 @@ fn reconcile_extension(
                 "machinery_es_extension",
                 machinery_id,
                 None,
+                actor,
                 &before,
                 &after,
             )?;
