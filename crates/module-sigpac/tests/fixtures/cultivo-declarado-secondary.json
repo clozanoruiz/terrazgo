@@ -1,0 +1,188 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "properties": {
+    "dn_pk": 165962984,
+    "dn_oid": 1885129059,
+    "provincia": 47,
+    "municipio": 219,
+    "agregado": 0,
+    "zona": 0,
+    "poligono": 11,
+    "parcela": 28,
+    "recinto": 2,
+    "exp_ca": 8,
+    "exp_provincia": 47,
+    "exp_num": "47042029",
+    "parc_producto": 4,
+    "parc_sistexp": "R",
+    "parc_supcult": 41700,
+    "parc_ayudasol": "18,19,5041",
+    "pdr_rec": null,
+    "cultsecun_producto": 6,
+    "cultsecun_ayudasol": null,
+    "parc_indcultapro": 0,
+    "tipo_aprovecha": null
+   },
+   "id": 165962984,
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -4.874793271242426,
+       41.51856458390889
+      ],
+      [
+       -4.876879357751719,
+       41.52037937250387
+      ],
+      [
+       -4.878016485360503,
+       41.52136861483342
+      ],
+      [
+       -4.87792732369839,
+       41.52141177577
+      ],
+      [
+       -4.8778036855900995,
+       41.52143365421496
+      ],
+      [
+       -4.877747021406711,
+       41.52145729285969
+      ],
+      [
+       -4.877669737740293,
+       41.521544887944
+      ],
+      [
+       -4.877634869021021,
+       41.52164078111296
+      ],
+      [
+       -4.877607878453009,
+       41.521724268226286
+      ],
+      [
+       -4.877512489036469,
+       41.521791076189494
+      ],
+      [
+       -4.877384828452606,
+       41.52189317280535
+      ],
+      [
+       -4.877250613220072,
+       41.52199314041767
+      ],
+      [
+       -4.875440456465063,
+       41.520657862929724
+      ],
+      [
+       -4.875430414106274,
+       41.52065046170878
+      ],
+      [
+       -4.874239232438906,
+       41.51964013050959
+      ],
+      [
+       -4.874237689330441,
+       41.51963881957986
+      ],
+      [
+       -4.874233096885419,
+       41.51963491696551
+      ],
+      [
+       -4.87413469417451,
+       41.519484240512355
+      ],
+      [
+       -4.874070595242566,
+       41.51938609261132
+      ],
+      [
+       -4.87453336098244,
+       41.5191676040429
+      ],
+      [
+       -4.874554013154895,
+       41.51915892625802
+      ],
+      [
+       -4.8745868811137605,
+       41.519145114557155
+      ],
+      [
+       -4.874588242334917,
+       41.51913284931751
+      ],
+      [
+       -4.874607709306193,
+       41.518957427808346
+      ],
+      [
+       -4.874650976692943,
+       41.51879964853001
+      ],
+      [
+       -4.874719471933363,
+       41.51868511233092
+      ],
+      [
+       -4.874719880132072,
+       41.51868442920577
+      ],
+      [
+       -4.874727345893672,
+       41.51867194436025
+      ],
+      [
+       -4.87476163709978,
+       41.51861041029083
+      ],
+      [
+       -4.874793271242426,
+       41.51856458390889
+      ]
+     ]
+    ]
+   }
+  }
+ ],
+ "numberMatched": 1,
+ "numberReturned": 1,
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado/items?f=json&provincia=47&municipio=219&agregado=0&zona=0&poligono=11&parcela=28&recinto=2&exp_ano=2025"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado/items?f=jsonld&provincia=47&municipio=219&agregado=0&zona=0&poligono=11&parcela=28&recinto=2&exp_ano=2025"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado/items?f=html&provincia=47&municipio=219&agregado=0&zona=0&poligono=11&parcela=28&recinto=2&exp_ano=2025"
+  },
+  {
+   "type": "application/json",
+   "title": "Cultivo Declarado",
+   "rel": "collection",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado"
+  }
+ ],
+ "timeStamp": "2026-08-03T18:33:38.673373Z"
+}

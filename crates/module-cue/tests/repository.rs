@@ -60,6 +60,7 @@ fn base_fixture(conn: &mut Connection) -> Fixture {
         conn,
         NewOperator {
             full_name: "Carlos Pérez".into(),
+            tax_id: None,
             licence_number: Some("CL-12345".into()),
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2027-03-01".into()),
@@ -130,10 +131,14 @@ fn sample_treatment(
         season_id: fx.season_id.clone(),
         farm_id: fx.farm_id.clone(),
         application_date: "2026-05-01".into(),
-        product_id: fx.product_id.clone(),
+        application_end_date: None,
+        application_time: None,
+        product_id: Some(fx.product_id.clone()),
         country_code: country_code.map(str::to_string),
-        dose_value: 1.0,
-        dose_unit_code: "l_ha".into(),
+        dose_value: Some(1.0),
+        dose_unit_code: Some("l_ha".into()),
+        total_quantity_value: None,
+        total_quantity_unit_code: None,
         problems: vec![NewTreatmentProblem {
             reason_category_code: "disease".into(),
             problem_code: "1".into(),
@@ -143,6 +148,11 @@ fn sample_treatment(
         target_organism: None,
         operator_id: fx.operator_id.clone(),
         machinery_id: None,
+        advisor_id: None,
+        measure_code: None,
+        measure_intensity_value: None,
+        measure_intensity_unit_code: None,
+        measure_registration_number: None,
         phi_days_used,
         notes: None,
     }
@@ -176,6 +186,7 @@ fn country_defaults_from_the_farm() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -215,6 +226,7 @@ fn explicit_country_mismatching_the_farm_is_rejected() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -254,6 +266,7 @@ fn explicit_country_matching_the_farm_is_accepted() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -287,6 +300,7 @@ fn country_with_no_authorisation_is_still_rejected() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -338,6 +352,7 @@ fn plot_on_a_different_farm_is_rejected() {
             plot_id: foreign_plot,
             crop_id: None,
             surface_treated_ha: 1.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -388,7 +403,15 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
             species_name: "wheat".into(),
             variety: Some("Marius".into()),
             production_system_code: Some("conventional".into()),
+            area_ha: None,
+            irrigation_code: None,
+            growing_environment_code: None,
+            gip_system_code: None,
             sown_on: None,
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )
@@ -402,7 +425,15 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
             species_name: "barley".into(),
             variety: None,
             production_system_code: Some("conventional".into()),
+            area_ha: None,
+            irrigation_code: None,
+            growing_environment_code: None,
+            gip_system_code: None,
             sown_on: None,
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )
@@ -422,11 +453,13 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
                 plot_id: plot_a.clone(),
                 crop_id: Some(crop_a),
                 surface_treated_ha: 4.0,
+                growth_stage_code: None,
             },
             NewTreatmentPlot {
                 plot_id: plot_b.clone(),
                 crop_id: Some(crop_b),
                 surface_treated_ha: 5.0,
+                growth_stage_code: None,
             }, // partial
         ],
         None,
@@ -434,8 +467,8 @@ fn treatment_applies_to_multiple_plots_in_one_entry() {
     .unwrap();
 
     // PHI: 2026-06-10 + 21 days = 2026-07-01 (PHI per product label).
-    assert_eq!(record.phi_days_used, 21);
-    assert_eq!(record.phi_end_date, "2026-07-01");
+    assert_eq!(record.phi_days_used, Some(21));
+    assert_eq!(record.phi_end_date.as_deref(), Some("2026-07-01"));
     assert_eq!(
         record.active_substances_snapshot.as_deref(),
         Some("azoxistrobin 250 g_l")
@@ -575,6 +608,7 @@ fn product_authorisation_number_is_per_country() {
                 plot_id: plot_id.to_string(),
                 crop_id: None,
                 surface_treated_ha: 3.0,
+                growth_stage_code: None,
             }],
             None,
         )
@@ -629,6 +663,7 @@ fn snapshots_are_immutable_when_referenced_rows_change() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -642,7 +677,10 @@ fn snapshots_are_immutable_when_referenced_rows_change() {
     .unwrap();
 
     let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
-    assert_eq!(fetched.record.product_name_snapshot, "Fungitop");
+    assert_eq!(
+        fetched.record.product_name_snapshot.as_deref(),
+        Some("Fungitop")
+    );
 }
 
 // --- audit log payload contract (sync delta source) --------------------------
@@ -775,6 +813,7 @@ fn machinery_insert_logs_core_row_and_spanish_extension_separately() {
             farm_id: fx.farm_id.clone(),
             name: "Atomizador".into(),
             kind: Some("sprayer".into()),
+            acquired_on: None,
             last_inspection_date: Some("2025-11-01".into()),
             next_inspection_due_date: Some("2028-11-01".into()),
             roma_number: Some("VA-0042".into()),
@@ -829,6 +868,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
             farm_id: fx.farm_id.clone(),
             name: "Atomizador".into(),
             kind: Some("sprayer".into()),
+            acquired_on: None,
             last_inspection_date: None,
             next_inspection_due_date: None,
             roma_number: Some("VA-1111".into()),
@@ -847,6 +887,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -867,6 +908,7 @@ fn treatment_snapshot_freezes_both_machinery_registry_numbers() {
         UpdateMachinery {
             name: "Atomizador".into(),
             kind: Some("sprayer".into()),
+            acquired_on: None,
             last_inspection_date: None,
             next_inspection_due_date: None,
             roma_number: Some("VA-9999".into()),
@@ -911,6 +953,7 @@ fn soft_delete_keeps_the_row_and_logs_the_change() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -940,7 +983,7 @@ fn soft_delete_keeps_the_row_and_logs_the_change() {
 // --- list functions backing the treatment entry UI (2026-07-02) --------------
 
 #[test]
-fn list_products_authorised_is_per_country_and_ordered_by_name() {
+fn list_products_authorised_is_per_country() {
     let mut conn = open_in_memory().unwrap();
     let fx = base_fixture(&mut conn); // fixture product has NO authorisation yet
     add_es_authorisation(&mut conn, &fx.product_id);
@@ -987,11 +1030,15 @@ fn list_products_authorised_is_per_country_and_ordered_by_name() {
     )
     .unwrap();
 
-    let names: Vec<String> = repo::list_products_authorised(&conn, "es")
+    // The country filter is what this pins; the order is insertion order, since
+    // names are collated by whoever displays them (see the active-substance
+    // test above), so the set is what matters.
+    let mut names: Vec<String> = repo::list_products_authorised(&conn, "es")
         .unwrap()
         .into_iter()
         .map(|p| p.commercial_name)
         .collect();
+    names.sort();
     assert_eq!(names, vec!["Aclarex", "Fungitop"]);
 }
 
@@ -1033,12 +1080,23 @@ fn lookup_lists_return_the_seeded_reference_data() {
         .map(|u| u.code)
         .collect();
     // dose_rate units first (the common case on Spanish labels), then concentration.
+    // Quantity units are NOT here: a dose is a rate, and "12 l" in that column
+    // would read as a different statement from "12 l/ha".
     assert_eq!(
         unit_codes,
         vec![
             "g_ha", "g_hl", "kg_ha", "l_ha", "ml_ha", "ml_hl", "g_l", "ml_l", "pct"
         ]
     );
+
+    // The amounts, on their own list: the total product used (Anexo III B.i)
+    // and the tonnes / cubic metres the non-field registers will measure in.
+    let quantity_codes: Vec<String> = repo::list_quantity_units(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|u| u.code)
+        .collect();
+    assert_eq!(quantity_codes, vec!["l", "kg", "t", "m3"]);
 
     let reason_codes: Vec<String> = repo::list_reason_categories(&conn)
         .unwrap()
@@ -1085,6 +1143,7 @@ fn list_treatment_records_is_per_season_and_farm_with_plots() {
             plot_id: plot_id.into(),
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }]
     };
     // Two records in the fixture season (different dates), one in another season.
@@ -1394,17 +1453,21 @@ fn remove_product_authorisation_withdraws_the_product_from_that_country() {
 }
 
 #[test]
-fn list_active_substances_orders_by_name() {
+fn list_active_substances_is_stable_in_insertion_order() {
     let mut conn = open_in_memory().unwrap();
     repo::insert_active_substance(&mut conn, "glifosato", None, None).unwrap();
     repo::insert_active_substance(&mut conn, "azoxistrobin", None, None).unwrap();
 
+    // Insertion order, not alphabetical: names are collated by whoever displays
+    // them, because SQLite would sort them with BINARY collation and file every
+    // accented name last. UUIDv7 ids make `ORDER BY id` insertion-ordered, so
+    // the result is deterministic without implying an alphabet.
     let names: Vec<String> = repo::list_active_substances(&conn)
         .unwrap()
         .into_iter()
         .map(|s| s.name)
         .collect();
-    assert_eq!(names, vec!["azoxistrobin", "glifosato"]);
+    assert_eq!(names, vec!["glifosato", "azoxistrobin"]);
 }
 
 #[test]
@@ -1458,6 +1521,7 @@ fn treat_on(
             plot_id: (*id).into(),
             crop_id: None,
             surface_treated_ha: 1.0,
+            growth_stage_code: None,
         })
         .collect();
     repo::insert_treatment_record(conn, new, plots, None).unwrap()
@@ -1587,6 +1651,7 @@ fn phi_status_excludes_deleted_records_untreated_plots_and_other_farms() {
             plot_id: other_plot.clone(),
             crop_id: None,
             surface_treated_ha: 1.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -1636,6 +1701,7 @@ fn phi_status_spans_seasons() {
             plot_id: plot.clone(),
             crop_id: None,
             surface_treated_ha: 1.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -1727,6 +1793,7 @@ fn treatment_captures_problems_justifications_and_efficacy() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 2.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -1773,6 +1840,7 @@ fn treatment_requires_at_least_one_problem_and_justification() {
             plot_id: p.into(),
             crop_id: None,
             surface_treated_ha: 2.0,
+            growth_stage_code: None,
         }]
     };
 
@@ -1818,6 +1886,7 @@ fn duplicate_problems_and_justifications_are_folded() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 2.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -1840,6 +1909,7 @@ fn problem_codes_are_validated_against_imported_catalogues() {
             plot_id: p.into(),
             crop_id: None,
             surface_treated_ha: 2.0,
+            growth_stage_code: None,
         }]
     };
 
@@ -1899,6 +1969,7 @@ fn set_treatment_efficacy_updates_and_logs() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 2.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -2091,6 +2162,7 @@ fn treatment_writes_stamp_the_actor_on_every_logged_row() {
             plot_id: plot,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         Some("profile-ana"),
     )
@@ -2128,4 +2200,1436 @@ fn treatment_writes_stamp_the_actor_on_every_logged_row() {
         )
         .unwrap();
     assert_eq!(delete_actor.as_deref(), Some("profile-marta"));
+}
+
+// --- season deletion guard (the module half) --------------------------------
+
+/// `season_has_treatments` is what the shell's `delete_season` chains before
+/// calling core's `soft_delete_season`: core owns the season row but may never
+/// reference `treatment_record`, so the module answers for its own table.
+/// Soft-deleted records still count — their audit history is only reachable
+/// through the season they belong to.
+#[test]
+fn season_has_treatments_sees_records_including_soft_deleted_ones() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+
+    let empty = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            campaign_year: 2027,
+            label: "2027".into(),
+            starts_on: None,
+            ends_on: None,
+        },
+        None,
+    )
+    .unwrap();
+
+    assert!(!repo::season_has_treatments(&conn, &fx.season_id).unwrap());
+    assert!(!repo::season_has_treatments(&conn, &empty.id).unwrap());
+
+    let plot = add_plot(&mut conn, &fx.farm_id, "Parcela 1");
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 2.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert!(repo::season_has_treatments(&conn, &fx.season_id).unwrap());
+    assert!(
+        !repo::season_has_treatments(&conn, &empty.id).unwrap(),
+        "the guard is per season, not global"
+    );
+
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
+    assert!(
+        repo::season_has_treatments(&conn, &fx.season_id).unwrap(),
+        "a soft-deleted record still pins its season"
+    );
+}
+
+/// `crop_ids_with_treatments` is the guard the shell hands to the SIGPAC
+/// declared-crops import: a crop this season's treatments point at may not be
+/// rewritten from a third party's declaration, because the record book would
+/// then state one crop in section 2.1 and another beside the treatment.
+#[test]
+fn crop_ids_with_treatments_reports_only_live_records_of_this_farm_and_season() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+
+    let plot = add_plot(&mut conn, &fx.farm_id, "Parcela 1");
+    let new_crop = |species: &str, season_id: &str| NewCrop {
+        plot_id: plot.clone(),
+        season_id: season_id.into(),
+        species_name: species.into(),
+        variety: None,
+        production_system_code: None,
+        area_ha: None,
+        irrigation_code: None,
+        growing_environment_code: None,
+        gip_system_code: None,
+        sown_on: None,
+        crop_code: None,
+        source: None,
+        source_campaign: None,
+        declared_area_ha: None,
+    };
+    let treated = repo::insert_crop(&mut conn, new_crop("cebada", &fx.season_id), None)
+        .unwrap()
+        .id;
+    let untouched = repo::insert_crop(&mut conn, new_crop("veza", &fx.season_id), None)
+        .unwrap()
+        .id;
+
+    assert!(
+        repo::crop_ids_with_treatments(&conn, &fx.season_id, &fx.farm_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: Some(treated.clone()),
+            surface_treated_ha: 2.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    let guarded = repo::crop_ids_with_treatments(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    assert!(guarded.contains(&treated));
+    assert!(
+        !guarded.contains(&untouched),
+        "an untreated crop stays freely replaceable"
+    );
+
+    let other_farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Otra finca".into(),
+            country_code: "es".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            es: None,
+        },
+        None,
+    )
+    .unwrap();
+    assert!(
+        repo::crop_ids_with_treatments(&conn, &fx.season_id, &other_farm.id)
+            .unwrap()
+            .is_empty(),
+        "the guard is per farm"
+    );
+
+    // A record that left the book releases its crop: nothing printed refers to
+    // it any more, so the import may propose over it again.
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
+    assert!(
+        repo::crop_ids_with_treatments(&conn, &fx.season_id, &fx.farm_id)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+// --- the actuation interval and the total used (Anexo III Parte I B) -------
+//
+// Compliance logic, written test-first. RD 1311/2012 Anexo III Parte I B lets
+// the date of a treatment be an INTERVAL rather than a single day, and B.i
+// requires the total quantity of product used. Two consequences are pinned
+// here: which end of the interval the plazo de seguridad counts from, and that
+// the total is captured rather than derived.
+
+/// The plazo de seguridad is the time that must pass between the LAST
+/// treatment and harvest (RD 1311/2012, art. 3 "plazo de seguridad"; the
+/// register's B.i–B.k block records the interval precisely so this can be
+/// computed). So an actuation running 1–3 May with a 21-day PHI clears on
+/// 24 May, not 22 May.
+#[test]
+fn phi_end_date_counts_from_the_last_day_of_an_interval() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Interval");
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.application_end_date = Some("2026-05-03".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(record.application_date, "2026-05-01");
+    assert_eq!(record.application_end_date.as_deref(), Some("2026-05-03"));
+    assert_eq!(
+        record.phi_end_date.as_deref(),
+        Some("2026-05-24"),
+        "the plazo runs from the last application, not the first"
+    );
+}
+
+/// Without an interval nothing moves: the single-day case is the ordinary one
+/// and must keep deriving from `application_date`.
+#[test]
+fn phi_end_date_is_unchanged_for_a_single_day_treatment() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Single day");
+
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(21)),
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(record.application_end_date, None);
+    assert_eq!(record.phi_end_date.as_deref(), Some("2026-05-22"));
+}
+
+/// An interval of one day is the same statement as no interval at all.
+#[test]
+fn an_interval_ending_on_its_start_day_behaves_like_a_single_day() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "One day interval");
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.application_end_date = Some("2026-05-01".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(record.phi_end_date.as_deref(), Some("2026-05-22"));
+}
+
+/// A leap day inside the interval must not shift the count — the date maths
+/// runs on `jiff`, and the interval end is just another calendar date.
+#[test]
+fn phi_from_an_interval_crossing_a_leap_day_is_calendar_correct() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Leap");
+
+    let mut new = sample_treatment(&fx, None, Some(7));
+    new.application_date = "2024-02-27".into();
+    new.application_end_date = Some("2024-02-29".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(record.phi_end_date.as_deref(), Some("2024-03-07"));
+}
+
+/// An interval that ends before it starts is not a correction to guess at.
+#[test]
+fn an_end_date_before_the_start_is_rejected() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Backwards");
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.application_end_date = Some("2026-04-30".into());
+    let err = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("end_date_before_start")
+    ));
+}
+
+/// The PHI window a plot is in starts at the FIRST application (re-entry and
+/// harvest restrictions apply from the moment product was put on the ground)
+/// and ends at the derived `phi_end_date`. An interval therefore only ever
+/// widens the window; it never moves its start.
+#[test]
+fn an_interval_widens_the_phi_window_without_moving_its_start() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_status_plot(&mut conn, &fx.farm_id, "Window");
+
+    let mut new = sample_treatment(&fx, None, Some(10));
+    new.application_end_date = Some("2026-05-05".into());
+    repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    // In the window on the first day, still in it on the day the single-date
+    // reading would have cleared, clear on the interval-derived end date.
+    let on = |today: &str| {
+        let rows = repo::phi_status_for_farm(&conn, &fx.farm_id, today).unwrap();
+        status_of(&rows, &plot).phi_until.clone()
+    };
+    assert_eq!(on("2026-05-01"), Some("2026-05-15".into()));
+    assert_eq!(on("2026-05-11"), Some("2026-05-15".into()));
+    assert_eq!(on("2026-05-15"), None, "clear on the end date itself");
+}
+
+/// B.i's total is stored as value + unit, both or neither. Half a quantity is
+/// not a measurement.
+#[test]
+fn a_total_quantity_needs_both_its_value_and_its_unit() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Halves");
+
+    let attempt = |conn: &mut Connection, value, unit: Option<&str>| {
+        let mut new = sample_treatment(&fx, None, Some(21));
+        new.total_quantity_value = value;
+        new.total_quantity_unit_code = unit.map(str::to_string);
+        repo::insert_treatment_record(
+            conn,
+            new,
+            vec![NewTreatmentPlot {
+                plot_id: plot.clone(),
+                crop_id: None,
+                surface_treated_ha: 1.0,
+                growth_stage_code: None,
+            }],
+            None,
+        )
+    };
+
+    assert!(matches!(
+        attempt(&mut conn, Some(12.0), None).unwrap_err(),
+        module_cue::CueError::Invalid("invalid_total_quantity")
+    ));
+    assert!(matches!(
+        attempt(&mut conn, None, Some("l")).unwrap_err(),
+        module_cue::CueError::Invalid("invalid_total_quantity")
+    ));
+    // Zero litres of product is not a treatment.
+    assert!(matches!(
+        attempt(&mut conn, Some(0.0), Some("l")).unwrap_err(),
+        module_cue::CueError::Invalid("invalid_total_quantity")
+    ));
+    assert!(matches!(
+        attempt(&mut conn, Some(-1.0), Some("l")).unwrap_err(),
+        module_cue::CueError::Invalid("invalid_total_quantity")
+    ));
+}
+
+/// The unit must measure an amount. A dose RATE in the total column would read
+/// as "12 l/ha of product used", which is a different (and false) statement.
+#[test]
+fn a_total_quantity_must_use_a_quantity_unit() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Rate as total");
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.total_quantity_value = Some(12.0);
+    new.total_quantity_unit_code = Some("l_ha".into());
+    let err = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("invalid_total_quantity")
+    ));
+}
+
+/// The happy path, and the reason the column exists at all: a concentration
+/// dose (g/l) says nothing about how much product left the shed, so the total
+/// is captured verbatim and travels into the full audit image.
+#[test]
+fn a_total_quantity_is_stored_and_logged_beside_a_concentration_dose() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = add_plot(&mut conn, &fx.farm_id, "Concentration");
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.dose_value = Some(150.0);
+    new.dose_unit_code = Some("g_l".into());
+    new.total_quantity_value = Some(4.5);
+    new.total_quantity_unit_code = Some("kg".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(record.total_quantity_value, Some(4.5));
+    assert_eq!(record.total_quantity_unit_code.as_deref(), Some("kg"));
+
+    let (_, _, after) = last_change(&conn, "treatment_record", &record.id);
+    assert_eq!(after["total_quantity_value"], 4.5);
+    assert_eq!(after["total_quantity_unit_code"], "kg");
+    assert_eq!(
+        after["application_end_date"],
+        serde_json::Value::Null,
+        "a full row image carries the absent interval too"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 3.1 bis: the advisor (Anexo III Parte I B.d) and the non-chemical measure
+// ---------------------------------------------------------------------------
+
+/// A plot on the fixture's farm, for tests that need one.
+fn a_plot(conn: &mut Connection, fx: &Fixture) -> String {
+    repo::insert_plot(
+        conn,
+        NewPlot {
+            farm_id: fx.farm_id.clone(),
+            name: "Parcela".into(),
+            area_ha: Some(3.0),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id
+}
+
+fn one_plot(plot_id: &str) -> Vec<NewTreatmentPlot> {
+    vec![NewTreatmentPlot {
+        plot_id: plot_id.into(),
+        crop_id: None,
+        surface_treated_ha: 1.0,
+        growth_stage_code: None,
+    }]
+}
+
+/// An actuation has to BE something. Anexo III Parte I B registers what was
+/// done; a record naming neither a product nor a measure records nothing.
+#[test]
+fn an_actuation_with_neither_product_nor_measure_is_refused() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.product_id = None;
+    new.dose_value = None;
+    new.dose_unit_code = None;
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("treatment_without_actuation")
+    ));
+}
+
+/// A dose belongs to a product. Half a chemical block is a form the farmer
+/// left mid-way, and silently dropping the stated half would lose data they
+/// did enter.
+#[test]
+fn a_dose_without_a_product_is_refused() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.product_id = None;
+    new.measure_code = Some("15".into());
+    // dose_value / dose_unit_code left as the sample's 1.0 l/ha
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("dose_without_product")
+    ));
+}
+
+/// The other half of the same rule.
+#[test]
+fn a_product_without_a_dose_is_refused() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.dose_value = None;
+    new.dose_unit_code = None;
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("product_without_dose")
+    ));
+}
+
+/// A purely non-chemical actuation is a complete record: the model's 3.1 bis
+/// asks for the measure and its intensity, and RD 1311/2012 art. 10.1 asks for
+/// the method to be preferred where possible.
+#[test]
+fn a_non_chemical_actuation_stores_its_measure_and_intensity() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, None);
+    new.product_id = None;
+    new.dose_value = None;
+    new.dose_unit_code = None;
+    new.measure_code = Some("15".into()); // feromonas y atrayentes
+    new.measure_intensity_value = Some(4.0);
+    new.measure_intensity_unit_code = Some("diffusers_ha".into());
+    new.measure_registration_number = Some("MDF-118".into());
+
+    let record = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap();
+    assert_eq!(record.measure_code.as_deref(), Some("15"));
+    assert_eq!(record.measure_intensity_value, Some(4.0));
+    assert_eq!(
+        record.measure_intensity_unit_code.as_deref(),
+        Some("diffusers_ha")
+    );
+    assert_eq!(
+        record.measure_registration_number.as_deref(),
+        Some("MDF-118")
+    );
+    // No product means no plazo, and `phi_days_used: None` did not fall back
+    // to a product default that is not there to consult.
+    assert_eq!(record.phi_days_used, None);
+    assert_eq!(record.phi_end_date, None);
+}
+
+/// `TIPO_MEDIDA_FITOSANITARIA` is a closed list of fourteen entries the
+/// authority publishes in full, so an unresolvable code is a mistake — the
+/// `MAT_FERTI` side of the two-tier rule.
+#[test]
+fn an_unknown_measure_code_is_refused_when_the_catalogue_is_imported() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.measure_code = Some("9999".into());
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("unknown_measure_code")
+    ));
+}
+
+/// An intensity is counted in traps or diffusers, never in litres per hectare:
+/// "4 l/ha of pheromone diffusers" is not a slip, it is a different claim.
+#[test]
+fn an_intensity_must_be_counted_in_an_intensity_unit() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.measure_code = Some("15".into());
+    new.measure_intensity_value = Some(4.0);
+    new.measure_intensity_unit_code = Some("l_ha".into());
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("invalid_intensity")
+    ));
+}
+
+/// Value and unit travel together, like every other amount in the book.
+#[test]
+fn a_half_stated_intensity_is_refused() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.measure_code = Some("15".into());
+    new.measure_intensity_value = Some(4.0);
+    new.measure_intensity_unit_code = None;
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("invalid_intensity")
+    ));
+}
+
+/// The advisor of Anexo III Parte I B.d is snapshotted like the applicator, so
+/// correcting the advisor's registry entry never rewrites what a past record
+/// printed. The ROPO number is what model 3.1 bis's validation boxes carry.
+#[test]
+fn the_advisor_is_frozen_onto_the_record() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let advisor = terrazgo_core::repository::insert_advisor(
+        &mut conn,
+        terrazgo_core::models::NewAdvisor {
+            name: "Ana Ruiz".into(),
+            tax_id: Some("12345678Z".into()),
+            registration_number: Some("ROPO-8891".into()),
+        },
+        None,
+    )
+    .unwrap();
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.advisor_id = Some(advisor.id.clone());
+    let record = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap();
+    assert_eq!(record.advisor_id.as_deref(), Some(advisor.id.as_str()));
+    assert_eq!(record.advisor_name_snapshot.as_deref(), Some("Ana Ruiz"));
+    assert_eq!(
+        record.advisor_registration_snapshot.as_deref(),
+        Some("ROPO-8891")
+    );
+
+    // Correcting the advisor afterwards must not touch the printed record.
+    terrazgo_core::repository::update_advisor(
+        &mut conn,
+        &advisor.id,
+        terrazgo_core::models::UpdateAdvisor {
+            name: "Ana Ruiz Gómez".into(),
+            tax_id: Some("12345678Z".into()),
+            registration_number: Some("ROPO-9999".into()),
+        },
+        None,
+    )
+    .unwrap();
+    let fetched = repo::get_treatment_record(&conn, &record.id).unwrap();
+    assert_eq!(
+        fetched.record.advisor_registration_snapshot.as_deref(),
+        Some("ROPO-8891"),
+        "the record keeps the number it was written with"
+    );
+}
+
+/// A deleted advisor cannot be attached to a new record: the snapshot would be
+/// unresolvable and the link would dangle.
+#[test]
+fn a_deleted_advisor_cannot_be_named_on_a_new_record() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let advisor = terrazgo_core::repository::insert_advisor(
+        &mut conn,
+        terrazgo_core::models::NewAdvisor {
+            name: "Ana Ruiz".into(),
+            tax_id: None,
+            registration_number: None,
+        },
+        None,
+    )
+    .unwrap();
+    terrazgo_core::repository::soft_delete_advisor(&mut conn, &advisor.id, None).unwrap();
+
+    let mut new = sample_treatment(&fx, None, Some(21));
+    new.advisor_id = Some(advisor.id);
+    let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+    assert!(matches!(err, module_cue::CueError::NotFound));
+}
+
+/// The audit log carries complete row images (the `record_change` contract), so
+/// the new columns must be in the payload a receiving device would rebuild from.
+#[test]
+fn the_audit_image_carries_the_advisor_and_the_measure() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, None);
+    new.product_id = None;
+    new.dose_value = None;
+    new.dose_unit_code = None;
+    new.measure_code = Some("12".into()); // captura masiva con trampas luminosas
+    new.measure_intensity_value = Some(6.0);
+    new.measure_intensity_unit_code = Some("traps".into());
+    let record = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap();
+
+    let payload: String = conn
+        .query_row(
+            "SELECT payload FROM record_change
+             WHERE entity_table = 'treatment_record' AND entity_id = ?1",
+            [&record.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let image = &serde_json::from_str::<serde_json::Value>(&payload).unwrap()["after"];
+    assert_eq!(image["measure_code"], "12");
+    assert_eq!(image["measure_intensity_value"], 6.0);
+    assert_eq!(image["measure_intensity_unit_code"], "traps");
+    // Blank stays blank in the image too — a receiving device must be able to
+    // tell "no product" from "product unknown".
+    assert!(image["product_id"].is_null());
+    assert!(image["phi_end_date"].is_null());
+}
+
+// --- correcting a stored record (slice D) -----------------------------------
+//
+// Nothing in the sources forbids it: RD 1311/2012 art. 16 has no provision on
+// modifying an entry, Reglamento (UE) 2023/564 none on integrity or change
+// logs, and SIEX 3.11.4 models a correction as re-sending the same
+// `IdAjenaTratamFito` with new values, reserving `Borrar` for withdrawal.
+
+/// The submitted state, built from a record so a test can change one thing.
+fn correction_of(record: &TreatmentRecord, plots: Vec<NewTreatmentPlot>) -> UpdateTreatmentRecord {
+    UpdateTreatmentRecord {
+        application_date: record.application_date.clone(),
+        application_end_date: record.application_end_date.clone(),
+        application_time: record.application_time.clone(),
+        product_id: record.product_id.clone(),
+        dose_value: record.dose_value,
+        dose_unit_code: record.dose_unit_code.clone(),
+        total_quantity_value: record.total_quantity_value,
+        total_quantity_unit_code: record.total_quantity_unit_code.clone(),
+        target_organism: record.target_organism.clone(),
+        problems: vec![NewTreatmentProblem {
+            reason_category_code: "disease".into(),
+            problem_code: "1".into(),
+        }],
+        justifications: vec!["monitoring".into()],
+        operator_id: record.operator_id.clone(),
+        machinery_id: record.machinery_id.clone(),
+        advisor_id: record.advisor_id.clone(),
+        measure_code: record.measure_code.clone(),
+        measure_intensity_value: record.measure_intensity_value,
+        measure_intensity_unit_code: record.measure_intensity_unit_code.clone(),
+        measure_registration_number: record.measure_registration_number.clone(),
+        phi_days_used: record.phi_days_used,
+        notes: record.notes.clone(),
+        plots,
+    }
+}
+
+/// One treated plot, one record, ready to correct.
+fn correctable_record(conn: &mut Connection, fx: &Fixture) -> (TreatmentRecord, String) {
+    add_es_authorisation(conn, &fx.product_id);
+    let plot = repo::insert_plot(
+        conn,
+        NewPlot {
+            farm_id: fx.farm_id.clone(),
+            name: "Parcela".into(),
+            area_ha: Some(3.0),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+    let record = repo::insert_treatment_record(
+        conn,
+        sample_treatment(fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap();
+    (record, plot)
+}
+
+#[test]
+fn correcting_the_date_re_derives_the_plazo_de_seguridad() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+    // 2026-05-01 + 14 days (RD 1311/2012: the plazo runs from the application).
+    assert_eq!(record.phi_end_date.as_deref(), Some("2026-05-15"));
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    update.application_date = "2026-05-10".into();
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+    assert_eq!(fixed.record.phi_end_date.as_deref(), Some("2026-05-24"));
+}
+
+#[test]
+fn a_corrected_interval_counts_the_plazo_from_its_end() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    // The actuation actually spanned three days. The plazo de seguridad is the
+    // time between the LAST application and harvest, so it runs from the end.
+    update.application_end_date = Some("2026-05-03".into());
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+    assert_eq!(fixed.record.phi_end_date.as_deref(), Some("2026-05-17"));
+}
+
+#[test]
+fn a_correction_keeps_snapshots_whose_row_it_did_not_change() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    // The registry entry is corrected after the record was written.
+    conn.execute(
+        "UPDATE product SET commercial_name = 'Fungitop Extra' WHERE id = ?1",
+        [&fx.product_id],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE operator SET full_name = 'Carlos Pérez Gómez' WHERE id = ?1",
+        [&fx.operator_id],
+    )
+    .unwrap();
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 2.5,
+            growth_stage_code: None,
+        }],
+    );
+    update.notes = Some("superficie corregida".into());
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+
+    // Correcting the surface must not rewrite what the record printed about
+    // rows it never named — that is what the snapshot columns are for.
+    assert_eq!(
+        fixed.record.product_name_snapshot.as_deref(),
+        Some("Fungitop")
+    );
+    assert_eq!(fixed.record.operator_name_snapshot, "Carlos Pérez");
+}
+
+#[test]
+fn changing_the_product_re_takes_its_snapshot() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    let other = repo::insert_product_with_authorisation(
+        &mut conn,
+        NewProduct {
+            commercial_name: "Insectop".into(),
+            holder: None,
+            formulation_type_code: None,
+            default_phi_days: Some(7),
+        },
+        ProductAuthorisationFields {
+            country_code: "es".into(),
+            authorisation_number: "ES-26.999".into(),
+            kind_code: None,
+            exceptional_substance_code: None,
+            status: Some("authorised".into()),
+            valid_from: Some("2025-01-01".into()),
+            valid_until: None,
+        },
+        None,
+    )
+    .unwrap()
+    .product;
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    update.product_id = Some(other.id.clone());
+    // A different product is a different application: its own printed values.
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+    assert_eq!(
+        fixed.record.product_name_snapshot.as_deref(),
+        Some("Insectop")
+    );
+    assert_eq!(
+        fixed.record.authorisation_number_snapshot.as_deref(),
+        Some("ES-26.999")
+    );
+}
+
+#[test]
+fn a_correction_can_withdraw_the_product_for_a_non_chemical_measure() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    // It was not a spray after all: pheromone diffusers were hung instead.
+    update.product_id = None;
+    update.dose_value = None;
+    update.dose_unit_code = None;
+    update.phi_days_used = None;
+    update.measure_code = Some("4".into());
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+
+    // The whole chemical block goes together (the table CHECK), and with no
+    // product there is no plazo de seguridad left to run.
+    assert!(fixed.record.product_id.is_none());
+    assert!(fixed.record.dose_value.is_none());
+    assert!(fixed.record.phi_days_used.is_none());
+    assert!(fixed.record.phi_end_date.is_none());
+    assert!(fixed.record.product_name_snapshot.is_none());
+    assert_eq!(fixed.record.measure_code.as_deref(), Some("4"));
+}
+
+#[test]
+fn a_correction_reconciles_the_treated_plots() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+    let second = repo::insert_plot(
+        &mut conn,
+        NewPlot {
+            farm_id: fx.farm_id.clone(),
+            name: "Segunda".into(),
+            area_ha: Some(1.0),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+
+    let before = repo::get_treatment_record(&conn, &record.id).unwrap();
+    let survivor_row_id = before.plots[0].id.clone();
+
+    let update = correction_of(
+        &record,
+        vec![
+            NewTreatmentPlot {
+                plot_id: plot.clone(),
+                crop_id: None,
+                surface_treated_ha: 2.0, // corrected
+                growth_stage_code: None,
+            },
+            NewTreatmentPlot {
+                plot_id: second.clone(),
+                crop_id: None,
+                surface_treated_ha: 1.0, // added
+                growth_stage_code: None,
+            },
+        ],
+    );
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+    assert_eq!(fixed.plots.len(), 2);
+    let survivor = fixed.plots.iter().find(|p| p.plot_id == plot).unwrap();
+    assert_eq!(survivor.surface_treated_ha, 2.0);
+    // The survivor keeps its row id, so its audit history stays one thread.
+    assert_eq!(survivor.id, survivor_row_id);
+
+    // And dropping one removes it rather than leaving a stale row behind.
+    let update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: second,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+    );
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+    assert_eq!(fixed.plots.len(), 1);
+}
+
+#[test]
+fn a_correction_reconciles_problems_and_justifications() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    update.problems = vec![NewTreatmentProblem {
+        reason_category_code: "disease".into(),
+        problem_code: "2".into(),
+    }];
+    update.justifications = vec!["advisor_recommendation".into(), "monitoring".into()];
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+
+    assert_eq!(fixed.problems.len(), 1);
+    assert_eq!(fixed.problems[0].problem_code, "2");
+    assert_eq!(fixed.justifications.len(), 2);
+}
+
+#[test]
+fn a_correction_refuses_a_plot_from_another_farm() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, _plot) = correctable_record(&mut conn, &fx);
+    let other_farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Otra finca".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            country_code: "es".into(),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+    let foreign_plot = repo::insert_plot(
+        &mut conn,
+        NewPlot {
+            farm_id: other_farm,
+            name: "Ajena".into(),
+            area_ha: Some(1.0),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+
+    let update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: foreign_plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: None,
+        }],
+    );
+    assert!(matches!(
+        repo::update_treatment_record(&mut conn, &record.id, update, None),
+        Err(module_cue::CueError::PlotNotOnFarm { .. })
+    ));
+}
+
+#[test]
+fn a_correction_logs_complete_before_and_after_images() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    update.application_date = "2026-05-02".into();
+    repo::update_treatment_record(&mut conn, &record.id, update, Some("user-1")).unwrap();
+
+    let (payload, actor): (String, Option<String>) = conn
+        .query_row(
+            "SELECT payload, actor FROM record_change
+             WHERE entity_table = 'treatment_record' AND operation = 'update'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&payload).unwrap();
+    assert_eq!(actor.as_deref(), Some("user-1"));
+    assert_eq!(payload["before"]["application_date"], "2026-05-01");
+    assert_eq!(payload["after"]["application_date"], "2026-05-02");
+    // Complete row images, both sides: a receiving device rebuilds from them.
+    assert!(payload["before"]["operator_name_snapshot"].is_string());
+    assert!(payload["after"]["operator_name_snapshot"].is_string());
+}
+
+#[test]
+fn a_deleted_record_cannot_be_corrected() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+    repo::soft_delete_treatment_record(&mut conn, &record.id, None).unwrap();
+
+    let update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    assert!(matches!(
+        repo::update_treatment_record(&mut conn, &record.id, update, None),
+        Err(module_cue::CueError::NotFound)
+    ));
+}
+
+// --- Reglamento (UE) 2023/564's two conditional annex fields ---------------
+// The annex asks for the application's start hour (surface treatments, "where
+// relevant") and the crop's BBCH growth stage (per treated crop). Neither is in
+// RD 1311/2012 Anexo III Parte I B, so the duty comes from the EU regulation
+// alone — which does not make it optional.
+
+#[test]
+fn the_annex_fields_round_trip_and_are_optional() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(14));
+    new.application_time = Some("20:30".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            // EST_FENOLOGICO 6 = BBCH 5, espigamiento.
+            growth_stage_code: Some("6".into()),
+        }],
+        None,
+    )
+    .unwrap();
+
+    let stored = repo::get_treatment_record(&conn, &record.id).unwrap();
+    assert_eq!(stored.record.application_time.as_deref(), Some("20:30"));
+    assert_eq!(stored.plots[0].growth_stage_code.as_deref(), Some("6"));
+
+    // And both absent is the ordinary case, not a rejected one: the annex asks
+    // for them only where the product's use is restricted.
+    let plain = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        one_plot(&plot),
+        None,
+    )
+    .unwrap();
+    assert_eq!(plain.application_time, None);
+}
+
+/// An hour is either well formed or unreadable — unlike efficacy or a total
+/// quantity, which are observations a farmer may legitimately not have yet.
+#[test]
+fn a_malformed_application_hour_is_refused() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    // "+7:30" is the one a bare `parse` would have let through.
+    for bad in [
+        "7pm", "25:00", "20:61", "8:30", "20:30:00", "2030", "", "+7:30", "2:5",
+    ] {
+        let mut new = sample_treatment(&fx, None, Some(14));
+        new.application_time = Some(bad.into());
+        let err = repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).unwrap_err();
+        assert!(
+            matches!(err, module_cue::CueError::Invalid("application_time")),
+            "{bad:?} should not be storable as an hour, got {err:?}"
+        );
+    }
+
+    // Midnight and the last minute of the day are both real hours.
+    for good in ["00:00", "23:59"] {
+        let mut new = sample_treatment(&fx, None, Some(14));
+        new.application_time = Some(good.into());
+        assert!(
+            repo::insert_treatment_record(&mut conn, new, one_plot(&plot), None).is_ok(),
+            "{good:?} is a valid hour"
+        );
+    }
+}
+
+/// The BBCH monograph's ten principal stages are a closed list, so an
+/// unresolvable code is a mistake and not a newer catalogue — the `MAT_FERTI`
+/// side of the two-tier rule, unlike `analysis_substance`.
+#[test]
+fn an_unknown_growth_stage_is_refused_when_the_catalogue_is_imported() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let err = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            // 11 would be BBCH 10, which the monograph does not have.
+            growth_stage_code: Some("11".into()),
+        }],
+        None,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        err,
+        module_cue::CueError::Invalid("growth_stage_unknown")
+    ));
+}
+
+/// Reference data must never be what stands between a farmer and a lawful
+/// record: a catalogue that was never imported has no opinion.
+#[test]
+fn a_growth_stage_is_accepted_when_no_catalogue_is_imported() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        sample_treatment(&fx, None, Some(14)),
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: Some("6".into()),
+        }],
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        repo::get_treatment_record(&conn, &record.id).unwrap().plots[0]
+            .growth_stage_code
+            .as_deref(),
+        Some("6")
+    );
+}
+
+/// `reconcile_plots` skips a survivor whose fields all match, so every
+/// correctable field has to be in that comparison. A field left out of it does
+/// not fail — it silently discards the correction and reports success.
+#[test]
+fn correcting_only_the_growth_stage_changes_the_stored_row() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+    assert_eq!(record.application_time, None);
+    let row_id_before = repo::get_treatment_record(&conn, &record.id).unwrap().plots[0]
+        .id
+        .clone();
+
+    // Nothing else moves: same plot, same surface, same crop.
+    let mut update = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: Some("4".into()),
+        }],
+    );
+    update.application_time = Some("07:15".into());
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, update, None).unwrap();
+
+    assert_eq!(fixed.record.application_time.as_deref(), Some("07:15"));
+    assert_eq!(fixed.plots[0].growth_stage_code.as_deref(), Some("4"));
+    // Re-read, because the returned value could be right while the row is not.
+    let stored = repo::get_treatment_record(&conn, &record.id).unwrap();
+    assert_eq!(stored.record.application_time.as_deref(), Some("07:15"));
+    assert_eq!(stored.plots[0].growth_stage_code.as_deref(), Some("4"));
+    // Corrected in place rather than replaced, so the junction row's audit
+    // history stays one thread (the reconcile rule: survivors keep their id).
+    assert_eq!(stored.plots[0].id, row_id_before);
+}
+
+/// A correction may also withdraw either field: the farmer who stated an hour
+/// that turned out to be irrelevant must be able to take it back.
+#[test]
+fn a_correction_can_withdraw_the_annex_fields() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = base_fixture(&mut conn);
+    let (record, plot) = correctable_record(&mut conn, &fx);
+
+    let mut set = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot.clone(),
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: Some("6".into()),
+        }],
+    );
+    set.application_time = Some("20:30".into());
+    repo::update_treatment_record(&mut conn, &record.id, set, None).unwrap();
+
+    let cleared = correction_of(
+        &record,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+    );
+    let fixed = repo::update_treatment_record(&mut conn, &record.id, cleared, None).unwrap();
+    assert_eq!(fixed.record.application_time, None);
+    assert_eq!(fixed.plots[0].growth_stage_code, None);
+}
+
+/// The log is the Stage-2/3 sync delta source, so `after` must be a complete
+/// row image — a receiving device rebuilds the row from it alone.
+#[test]
+fn the_annex_fields_reach_the_audit_log() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = base_fixture(&mut conn);
+    add_es_authorisation(&mut conn, &fx.product_id);
+    let plot = a_plot(&mut conn, &fx);
+
+    let mut new = sample_treatment(&fx, None, Some(14));
+    new.application_time = Some("20:30".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            plot_id: plot,
+            crop_id: None,
+            surface_treated_ha: 1.0,
+            growth_stage_code: Some("6".into()),
+        }],
+        None,
+    )
+    .unwrap();
+
+    let record_payload: String = conn
+        .query_row(
+            "SELECT payload FROM record_change
+             WHERE entity_table = 'treatment_record' AND entity_id = ?1",
+            [&record.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        record_payload.contains("\"application_time\":\"20:30\""),
+        "the after-image must carry the hour: {record_payload}"
+    );
+
+    let plot_payload: String = conn
+        .query_row(
+            "SELECT payload FROM record_change WHERE entity_table = 'treatment_plot'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        plot_payload.contains("\"growth_stage_code\":\"6\""),
+        "the after-image must carry the growth stage: {plot_payload}"
+    );
 }

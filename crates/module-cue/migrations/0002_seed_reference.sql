@@ -1,17 +1,47 @@
 -- Terrazgo CUE module — migration 0002: seed reference / lookup data.
 -- Only stable codes + i18n keys; display labels live in the app's translation files.
--- (country seed moved to the core's 0002_seed_countries.sql, 2026-06-12.)
+-- (country seed moved to the core's 0002_seed_countries.sql, 2026-06-12;
+--  the unit seed followed the table there on 2026-08-07.)
 
-INSERT INTO unit (code, dimension, i18n_key) VALUES
-    ('l_ha',  'dose_rate',     'unit.l_ha'),
-    ('kg_ha', 'dose_rate',     'unit.kg_ha'),
-    ('ml_ha', 'dose_rate',     'unit.ml_ha'),
-    ('g_ha',  'dose_rate',     'unit.g_ha'),
-    ('ml_hl', 'dose_rate',     'unit.ml_hl'),
-    ('g_hl',  'dose_rate',     'unit.g_hl'),
-    ('g_l',   'concentration', 'unit.g_l'),
-    ('ml_l',  'concentration', 'unit.ml_l'),
-    ('pct',   'concentration', 'unit.pct');
+-- The three subjects model sections 3.3, 3.4 and 3.5 register.
+INSERT INTO non_field_subject_kind (code, i18n_key) VALUES
+    ('postharvest',      'non_field_subject_kind.postharvest'),
+    ('storage_premises', 'non_field_subject_kind.storage_premises'),
+    ('transport',        'non_field_subject_kind.transport');
+
+-- The conditional registers whose "APLICA TRATAMIENTO: NO" is stored rather
+-- than derived. Seed treatment (3.2) joins the three above.
+INSERT INTO register_kind (code, i18n_key) VALUES
+    ('seed_treatment',   'register_kind.seed_treatment'),
+    ('postharvest',      'register_kind.postharvest'),
+    ('storage_premises', 'register_kind.storage_premises'),
+    ('transport',        'register_kind.transport');
+
+-- Where the treated seed was treated (FEGA TIPO_TRATAMIENTO, whose codes start
+-- at 2 — ours are named, and module_cue::siex holds the mapping).
+INSERT INTO seed_treatment_kind (code, i18n_key) VALUES
+    ('on_farm',           'seed_treatment_kind.on_farm'),
+    ('processing_centre', 'seed_treatment_kind.processing_centre'),
+    ('purchased_es',      'seed_treatment_kind.purchased_es'),
+    ('purchased_abroad',  'seed_treatment_kind.purchased_abroad');
+
+-- What model section 4 calls "Material analizado". Four values, not the model's
+-- three-word hint: FEGA separates the standing crop from the produce harvested
+-- off it, and a book that conflated them would export the wrong one.
+INSERT INTO analysis_material (code, i18n_key) VALUES
+    ('crop',              'analysis_material.crop'),
+    ('harvested_produce', 'analysis_material.harvested_produce'),
+    ('soil',              'analysis_material.soil'),
+    ('water',             'analysis_material.water');
+
+-- What the laboratory looked for (FEGA TIPO_ANALISIS).
+INSERT INTO analysis_type (code, i18n_key) VALUES
+    ('pesticide_residues', 'analysis_type.pesticide_residues'),
+    ('microbiological',    'analysis_type.microbiological'),
+    ('heavy_metals',       'analysis_type.heavy_metals'),
+    ('nutrients',          'analysis_type.nutrients'),
+    ('soil_parameters',    'analysis_type.soil_parameters'),
+    ('gmo_presence',       'analysis_type.gmo_presence');
 
 INSERT INTO reason_category (code, i18n_key) VALUES
     ('pest',             'reason_category.pest'),

@@ -1,0 +1,49 @@
+[package]
+name = "terrazgo-recordbook"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo record book — assembles the official farm record book from core and the domain modules, and renders it as PDF and spreadsheet"
+
+[lints]
+workspace = true
+
+# A top-layer CONSUMER, like the shell: it holds no state and writes nothing.
+# It reads the domain crates below it and projects ONE document, so it may
+# depend on several modules where a module never may — nothing depends on it
+# except src-tauri. See docs/architecture.md.
+#
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+terrazgo-core = { workspace = true }
+# The treatment domain: sections 1.2-1.3, 3.1-3.5 and 4 of the book.
+module-cue = { workspace = true }
+# The fertilisation domain: sections 6, 7.1 and 8. The second module to
+# contribute sections, and the reason this crate exists rather than the book
+# living inside one of them.
+module-fertilisation = { workspace = true }
+# The rendering engine (Typst + xlsx mechanics, no domain of its own).
+terrazgo-report = { workspace = true }
+# Ordering the names the book prints, in the book's own language — see the
+# workspace manifest for why this is ICU4X and why it is declared directly.
+icu_collator = { workspace = true }
+icu_locale_core = { workspace = true }
+rusqlite = { workspace = true }
+# Only for `db::migrations`: the book needs the composed schema of everything it
+# reads in order to be assembled at all. It owns no migrations of its own.
+rusqlite_migration = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# The book owns its diagnostics (2026-08-07): it reads several modules, so
+# returning any one of their error types would be a lie about where a failure
+# came from. thiserror keeps this library-style, per the crate convention.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# examples/render_demo.rs renders the demo campaign to disk — the eyeball check
+# that follows a section landing in the book. No new crate edge: module-cue is
+# already a dependency above, this only turns its additive `demo` feature on for
+# tests and examples, which never reach the shipped binary.
+module-cue = { workspace = true, features = ["demo"] }

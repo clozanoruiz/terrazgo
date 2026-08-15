@@ -127,6 +127,9 @@ fully functional offline (features degrade to "cached or manual data only").
   WebGL performance in the WebView, no licence fees; OpenLayers would only win if
   we needed exotic projections — SIGPAC MVT is standard EPSG:3857).
   First npm runtime dependency — **decision needed**.
+  *Re-examined 2026-08-12 against a raster/GeoTIFF case; verdict unchanged, and
+  the reasoning (including the one thing MapLibre genuinely cannot do) is in*
+  [stack-choices.md](stack-choices.md) *§1.*
 - Any module embeds it: CUE (treated plots), irrigation, crop planning, sensors.
   Layers as data, same philosophy as `nav.js`.
 - The webview never talks to the internet. MapLibre requests tiles from a custom
@@ -346,6 +349,10 @@ finalised when the module is scheduled.)
    `terrazgo_geo::fetch` (re-exported) because tile caching below the module
    tier needs it.
 
+   ~~**Declared-crops prefill**~~ **SHIPPED 2026-08-03**: the PAC graphical
+   declaration (`cultivo_declarado`) as a reviewed crop prefill — see the
+   section below.
+
 5. **GPS point query** (mobile milestone): recinto under the device's position.
 6. **Offline municipality packs** (ATOM/GPKG) — only if field usage shows the
    online cache isn't enough; the GPKG reader from step 2 already does the
@@ -355,6 +362,135 @@ Steps 1–3 are useful with zero EU generality; the trait can even be extracted
 *after* the SIGPAC implementation works (rule of three: abstract when France is
 real, not before — but keep the seams from day one: no `sigpac_` names in the
 shared crate or the map component).
+
+## Declared crops — "load my crops" (shipped 2026-08-03)
+
+The PAC graphical declaration says what each recinto was declared as growing.
+That is the crop list a farmer would otherwise retype, and it is public: FEGA
+publishes it as `cultivo_declarado` on the Nube de SIGPAC **OGC API Features**
+endpoint (`https://sigpac-hubcloud.es/ogcapi`, CC BY 4.0, no auth). With the
+plot fabric already coming from the verify flow, this closes the "the farmer's
+own data without a regional registry account" story.
+
+### Why OGC API and not the MVT twin
+
+The map rule is "MVT > WMTS > WMS", but that rule is about *display*. This is a
+**record-grade attribute lookup keyed by an identifier**, the same split the
+repo already makes for recintos: displayed through the MVT overlay, looked up
+through the consultas service by reference. The decisive argument is cache
+durability, not bandwidth — `cached_resource` writes to the `resource` table,
+which is **never evicted**, while tiles live under a 512 MiB LRU. Crop data
+read out of tiles could silently stop resolving offline after enough panning.
+Regulatory-adjacent data is cached by identity, not by viewport. (The consultas
+REST service has no declared-crops operation among its eleven, so the OGC API
+is also the only per-reference channel.)
+
+### Service facts (live-probed 2026-08-02, re-verified 2026-08-03)
+
+- Collection `cultivo_declarado`; the seven reference parts **and `exp_ano`**
+  are queryables accepted as plain query parameters, so one recinto costs one
+  ~3,7 kB request. No bbox mode, no paging concerns.
+- **`exp_ano` is filterable but omitted from item responses.** The campaign a
+  line belongs to is therefore the campaign that was asked for — it can never
+  be read back from the feature.
+- The service runs **one campaign behind**: with the campaigns listing already
+  naming 2026, only `exp_ano=2025` answers.
+- Nothing declared = **HTTP 200 with `numberMatched: 0`**, never a 404.
+- Attributes read: `parc_producto` (PRODUCTOS code), `cultsecun_producto`
+  (secondary crop), `parc_sistexp` (`"S"` secano / `"R"` regadío, both
+  observed live), `parc_supcult` (**square metres** — the same m² trap as the
+  MVT layer). Also present and unused: aid lines, expediente identity,
+  `parc_indcultapro`, `tipo_aprovecha`.
+- A recinto commonly carries **several declaration lines** (20 of 228 in a
+  live Valladolid bbox sample) — typically the same crop split by irrigation
+  system. Fixtures cover this case.
+
+### The campaign fallback, and why the two campaigns are trusted differently
+
+The current campaign is asked first and the previous one is the fallback, and
+the campaign that answered travels with the lines. Cache keys are
+`sigpac/cultivos/{campaign}/{ref}`, so a rollover writes new rows instead of
+overwriting old ones.
+
+For the **current** campaign a cached empty answer is trusted only for the rest
+of the UTC day it was fetched on. It may predate the day FEGA loaded that
+campaign, and a permanently cached "nothing declared" would hide the
+declaration for the rest of the year — but the staleness that matters is
+measured in *months*, so asking more often than daily buys nothing against it.
+Day granularity matches the tile cache's once-per-UTC-day `last_used_at` touch,
+and the unit is the right one: a campaign is loaded on some *day*. For the
+**previous** campaign the cache is authoritative, empties included — that
+dataset is closed. "SIGPAC has no declaration for this plot" is reported only
+when both campaigns actually answered; if neither could be reached, the network
+failure surfaces instead, because silence from an unreachable service is not
+evidence of an empty declaration.
+
+Three consequences of that asymmetry, all deliberate:
+
+- **The two buttons mean different things.** "Cargar cultivos declarados" is
+  cache-first and normally silent; "Actualizar desde SIGPAC" bypasses the day
+  and re-asks both campaigns. A UI offering both should not have them do the
+  same work, which is what an unconditional re-ask on every load made them do.
+- **The daily re-ask costs one request per plot on the first load of the day**,
+  for as long as the current campaign answers empty — that is the price of not
+  hiding a declaration that appears mid-campaign, bounded to once a day rather
+  than once a click.
+- **A plot that could not be asked about is reported, never fatal.** It lands
+  in `plots_unreachable` with the reason beside it, so the rest of the panel
+  still works — offline, a plot with no declaration in either campaign refuses
+  to answer by design, and a farm with one pasture outside the PAC declaration
+  is the ordinary case, not an edge one. Not knowing and knowing there is
+  nothing stay separate lines in the UI, the same distinction
+  `plot_zone_flag`'s stored negatives make.
+
+### What the import may and may not do
+
+Nothing is written without review. Proposals are built read-only, every row is
+opt-in and editable, and the writing happens through core's crop repository in
+a separate confirmed step. Rows come in five kinds:
+
+| Kind | When |
+| --- | --- |
+| `insert` | the plot records no crops (pre-selected — the everyday case) |
+| `insert_secondary` | the line declares a `cultsecun_producto` (never an update: it is a second crop, not a correction) |
+| `update` | the plot's **single** crop differs, has **no treatments this season**, and the declaration has **one** main line |
+| `already_recorded` | a recorded crop matches, by catalogue code or by name |
+| `blocked` | `multi_crop`, `has_treatments` or `multi_line` — shown so the discrepancy is visible, never applied |
+
+The treatment guard is not about protecting past records: `treatment_plot`
+froze the species and variety at write time, so those are safe from any crop
+edit. It is about section 2.1 and section 3.1 agreeing — rewriting a crop a
+treatment points at would make the book state one crop and print another beside
+the treatment. The guard input comes from module-cue via the shell; the two
+modules never call each other.
+
+Two mapping rules worth keeping:
+
+- `parc_sistexp` `"S"` prefills `rainfed`; `"R"` prefills **nothing**. SIGPAC
+  says the crop is irrigated but not by which system, and Anexo III A.2.e wants
+  the system (SEC/ASP/LOC/GRA) — naming one would be inventing a fact.
+- An unresolvable `parc_producto` keeps the code and blanks the name. The code
+  is the payload, the catalogue label is display metadata.
+
+Every proposal row and the confirm button state the **answering campaign**
+("declaración PAC campaña 2025 → temporada 2025/2026"). Recording last year's
+declaration as this year's crop without saying so is the one way this feature
+could do harm.
+
+### Provenance, and the species picker
+
+An imported crop carries `source = 'sigpac'`, `source_campaign` and
+`declared_area_ha` (beside `area_ha`, never instead of it). `UpdateCrop` treats
+those three as set-if-present, so an unrelated manual correction cannot erase
+where a row came from.
+
+`crop.crop_code` also lets manual entry speak the catalogue's language: the
+crop form's species field is a type-ahead over PRODUCTOS, narrowed by the
+plot's verified `uso_sigpac` through the vendored `CULTIVO_USO_SIGPAC`
+catalogue. The narrowing degrades to the full list whenever it cannot be
+trusted — no plot, no verified boundary, or a land use nothing matches — since
+a filter that hides everything is worse than no filter. Free text stays valid;
+it simply carries no code.
 
 ## Attribution & terms checklist
 

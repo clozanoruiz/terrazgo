@@ -38,6 +38,45 @@ pub fn problem_catalogue(country_code: &str, reason_category_code: &str) -> Opti
     }
 }
 
+/// Catalogue that `analysis_substance.substance_code` resolves against — the
+/// active substances a residue analysis reports, whose rows carry the CAS
+/// number a future non-Spanish export would match on.
+pub fn substance_catalogue(country_code: &str) -> Option<&'static str> {
+    (country_code == "es").then_some("SUST_ACTIVAS")
+}
+
+/// Catalogue that `treatment_record.measure_code` resolves against — the
+/// non-chemical measures of model 3.1 bis's "Alternativas no químicas de
+/// intervención" (the twin's `OtrasActuacionesFito.TipoMedida`).
+///
+/// Deliberately NOT `MEDIDA_PREVENTIVA_CULTURAL`, which backs a different
+/// question: that one hangs off `DatosExplotacion` and declares which IPM
+/// practices the HOLDING follows ("rotación de cultivos", "asesoramiento por
+/// un asesor en GIP") — no date, no plot, no intensity, and no column anywhere
+/// in the printed model.
+pub fn measure_catalogue(country_code: &str) -> Option<&'static str> {
+    (country_code == "es").then_some("TIPO_MEDIDA_FITOSANITARIA")
+}
+
+/// Catalogue that `treatment_plot.growth_stage_code` resolves against — the
+/// BBCH principal growth stages (the twin's `DGCs[].EstadoFenologico`), asked
+/// for by Reglamento (UE) 2023/564's annex.
+///
+/// Its code is NOT the BBCH stage: FEGA numbers the rows 1-10 and publishes the
+/// monograph's own 0-9 in a column beside them, so a picker or a printed cell
+/// resolves through [`crate::catalogue::growth_stage_label`].
+pub fn growth_stage_catalogue(country_code: &str) -> Option<&'static str> {
+    (country_code == "es").then_some("EST_FENOLOGICO")
+}
+
+/// Catalogue that `harvest_record.plant_product_code` and
+/// `non_field_treatment.subject_product_code` resolve against — the HARVESTED
+/// PRODUCE, which is a different list from the crop catalogue `PRODUCTOS` that
+/// `crop.crop_code` and `seed_treatment.crop_code` speak in.
+pub fn plant_product_catalogue(country_code: &str) -> Option<&'static str> {
+    (country_code == "es").then_some("PROD_VEGETAL")
+}
+
 /// Catalogue that `product_authorisation.exceptional_substance_code` resolves
 /// against — the granted exceptional (Art. 53) authorisations, whose code is
 /// what SIEX's `MateriaActiva` field carries for TipoProducto 4.
@@ -75,6 +114,78 @@ pub fn authorisation_kind_to_siex(code: &str) -> Option<i64> {
         "common_name" => Some(2),
         "parallel_import" => Some(3),
         "exceptional" => Some(4),
+        _ => None,
+    }
+}
+
+/// SIEX `Analitica.MaterialAnalizado` code (catalogue MATERIAL_ANALIZADO).
+///
+/// Four values, because FEGA separates the standing crop from the produce taken
+/// off it — a distinction the printed model's parenthetical "(vegetal / tierra /
+/// agua)" cannot express, and the reason the book prints FEGA's wording.
+pub fn analysis_material_to_siex(code: &str) -> Option<i64> {
+    match code {
+        "crop" => Some(1),
+        "harvested_produce" => Some(2),
+        "soil" => Some(3),
+        "water" => Some(4),
+        _ => None,
+    }
+}
+
+/// SIEX `Analitica.TiposAnalisis[]` code (catalogue TIPO_ANALISIS).
+pub fn analysis_type_to_siex(code: &str) -> Option<i64> {
+    match code {
+        "pesticide_residues" => Some(1),
+        "microbiological" => Some(2),
+        "heavy_metals" => Some(3),
+        "nutrients" => Some(4),
+        "soil_parameters" => Some(5),
+        "gmo_presence" => Some(6),
+        _ => None,
+    }
+}
+
+/// SIEX `UsoSemillaTratada.Tratamiento` code (catalogue TIPO_TRATAMIENTO),
+/// whose codes start at 2 — there is no code 1.
+pub fn seed_treatment_kind_to_siex(code: &str) -> Option<i64> {
+    match code {
+        "on_farm" => Some(2),
+        "processing_centre" => Some(3),
+        "purchased_es" => Some(4),
+        "purchased_abroad" => Some(5),
+        _ => None,
+    }
+}
+
+/// SIEX `SistemaExplotacion` code (catalogue SIST_EXPLOTACION): is the crop
+/// irrigated at all, R or S.
+///
+/// Total but not injective, and deliberately NOT a map onto `SIST_RIEGO`: our
+/// `sprinkler` sits between the catalogue's "Aspersión fija" and "Aspersión
+/// móvil" with nothing in the record to choose between them, and `rainfed` has
+/// no SIST_RIEGO code at all. Guessing either would bake a statement the farmer
+/// never made into a regulatory export; the finer system is the Irrigation
+/// module's to capture.
+pub fn irrigation_to_siex_exploitation(code: &str) -> Option<&'static str> {
+    match code {
+        "rainfed" => Some("S"),
+        "sprinkler" | "drip" | "gravity" => Some("R"),
+        _ => None,
+    }
+}
+
+/// SIEX `SistemaCultivo` code (catalogue SIST_CULTIVO).
+///
+/// One-directional: the catalogue publishes 33 systems (bodegas de setas,
+/// sustratos, entutorados…) that the model's four-value "aire libre / protegido"
+/// column does not offer, so the reverse map is not ours to write.
+pub fn growing_environment_to_siex(code: &str) -> Option<i64> {
+    match code {
+        "open_air" => Some(1),
+        "mesh" => Some(2),
+        "plastic_cover" => Some(3), // "Cubierta no accesible"
+        "greenhouse" => Some(4),    // "Invernadero (cubierta accesible)"
         _ => None,
     }
 }
@@ -174,7 +285,16 @@ mod tests {
         assert_eq!(province_to_ccaa("41"), Some("01"));
         assert_eq!(province_to_ccaa("01"), Some("16"));
         assert_eq!(province_to_ccaa("35"), Some("05"));
+        // The two ciudades autónomas take INE's own 18 and 19. FEGA's
+        // COMUNIDAD_AUTONOMA publishes the seventeen comunidades and so cannot
+        // resolve either to a label — which is a missing label, not a missing
+        // code, and must never be "fixed" by sending "00 Comunidad
+        // Desconocida" or a neighbour's code for a holding whose location is
+        // perfectly known (docs/siex-export.md → Recorded gaps).
+        assert_eq!(province_to_ccaa("51"), Some("18"));
         assert_eq!(province_to_ccaa("52"), Some("19"));
+        assert!(!matches!(province_to_ccaa("51"), Some("00")));
+        assert!(!matches!(province_to_ccaa("52"), Some("00")));
         // Leading zero optional — the form stores free text.
         assert_eq!(province_to_ccaa("1"), Some("16"));
         assert_eq!(province_to_ccaa("5"), Some("07"));

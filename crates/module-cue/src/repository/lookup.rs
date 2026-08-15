@@ -1,22 +1,17 @@
 // SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! CUE lookup lists (reference data, seeded by the CUE migrations): dose units
-//! and treatment reason categories, for the treatment form's selectors.
+//! CUE lookup lists (reference data, seeded by the CUE migrations): treatment
+//! reason categories, formulation types and the coded capture lists, for the
+//! treatment form's selectors.
+//!
+//! Unit lists moved to `terrazgo_core::repository` with the `unit` table
+//! (2026-08-07); they are re-exported from this crate's `repository` so
+//! existing callers are unaffected.
 
 use crate::error::Result;
 use crate::models::Lookup;
 use rusqlite::Connection;
-
-/// Every dose unit. Dose-rate units (l/ha, kg/ha, …) come before concentration
-/// units (g/l, %): sorting on `dimension` DESC puts 'dose_rate' first, and that
-/// is also the more common way Spanish labels state doses.
-pub fn list_units(conn: &Connection) -> Result<Vec<Lookup>> {
-    list(
-        conn,
-        "SELECT code, i18n_key FROM unit ORDER BY dimension DESC, code",
-    )
-}
 
 /// Treatment reason categories (pest/disease/weed/…), RD 1311/2012's "reason
 /// for treatment".
@@ -51,6 +46,80 @@ pub fn list_justifications(conn: &Connection) -> Result<Vec<Lookup>> {
     list(
         conn,
         "SELECT code, i18n_key FROM justification ORDER BY code",
+    )
+}
+
+/// The three subjects the non-field registers cover (model 3.3/3.4/3.5), in
+/// the order the model prints them.
+pub fn list_non_field_subject_kinds(conn: &Connection) -> Result<Vec<Lookup>> {
+    list(
+        conn,
+        "SELECT code, i18n_key FROM non_field_subject_kind
+         ORDER BY CASE code
+             WHEN 'postharvest' THEN 1
+             WHEN 'storage_premises' THEN 2
+             ELSE 3
+         END",
+    )
+}
+
+/// What model section 4 calls "Material analizado", in the order FEGA's own
+/// catalogue lists it: cultivo, producto cosechado, suelo, agua de riego.
+pub fn list_analysis_materials(conn: &Connection) -> Result<Vec<Lookup>> {
+    list(
+        conn,
+        "SELECT code, i18n_key FROM analysis_material
+         ORDER BY CASE code
+             WHEN 'crop' THEN 1
+             WHEN 'harvested_produce' THEN 2
+             WHEN 'soil' THEN 3
+             ELSE 4
+         END",
+    )
+}
+
+/// What the laboratory looked for, in FEGA catalogue order.
+pub fn list_analysis_types(conn: &Connection) -> Result<Vec<Lookup>> {
+    list(
+        conn,
+        "SELECT code, i18n_key FROM analysis_type
+         ORDER BY CASE code
+             WHEN 'pesticide_residues' THEN 1
+             WHEN 'microbiological' THEN 2
+             WHEN 'heavy_metals' THEN 3
+             WHEN 'nutrients' THEN 4
+             WHEN 'soil_parameters' THEN 5
+             ELSE 6
+         END",
+    )
+}
+
+/// Where the treated seed was treated (model 3.2), in FEGA catalogue order.
+pub fn list_seed_treatment_kinds(conn: &Connection) -> Result<Vec<Lookup>> {
+    list(
+        conn,
+        "SELECT code, i18n_key FROM seed_treatment_kind
+         ORDER BY CASE code
+             WHEN 'on_farm' THEN 1
+             WHEN 'processing_centre' THEN 2
+             WHEN 'purchased_es' THEN 3
+             ELSE 4
+         END",
+    )
+}
+
+/// The conditional registers whose "APLICA TRATAMIENTO: NO" is stored rather
+/// than derived, in model order (3.2 seed treatment first).
+pub fn list_register_kinds(conn: &Connection) -> Result<Vec<Lookup>> {
+    list(
+        conn,
+        "SELECT code, i18n_key FROM register_kind
+         ORDER BY CASE code
+             WHEN 'seed_treatment' THEN 1
+             WHEN 'postharvest' THEN 2
+             WHEN 'storage_premises' THEN 3
+             ELSE 4
+         END",
     )
 }
 

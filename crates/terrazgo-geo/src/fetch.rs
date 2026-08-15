@@ -16,16 +16,15 @@
 use crate::error::{GeoError, Result};
 use crate::sources::{self, TileSource};
 use rusqlite::{Connection, OptionalExtension, params};
-use std::sync::{Mutex, MutexGuard, OnceLock};
-use std::time::Duration;
+use std::sync::{Mutex, MutexGuard};
 use terrazgo_core::date::now_utc_iso;
-use ureq::tls::{RootCerts, TlsConfig};
 
 /// A fetched (or cached) payload plus the content type to serve it with.
-pub struct Fetched {
-    pub data: Vec<u8>,
-    pub content_type: String,
-}
+///
+/// Defined by [`terrazgo_net`] and re-exported here: a cache hit and a network
+/// response must be the same shape, since this module's whole job is that
+/// callers cannot tell which one they got.
+pub use terrazgo_net::Fetched;
 
 /// Serve one tile: cache first, upstream on miss. For TileJSON-resolved
 /// sources (OpenFreeMap publishes rotating dated snapshot paths) a 404 from a
@@ -201,6 +200,44 @@ pub fn cached_resource(
     Ok(fetched)
 }
 
+/// A stored resource together with when it was stored.
+///
+/// Separate from [`Fetched`] because the timestamp only means something for
+/// something already in the cache — a response fresh off the network has not
+/// been stored yet.
+#[derive(Debug, Clone)]
+pub struct CachedEntry {
+    pub data: Vec<u8>,
+    pub content_type: String,
+    /// ISO 8601 UTC, as written by [`cached_resource`].
+    pub fetched_at: String,
+}
+
+/// What the cache already holds for `key`, without ever reaching the network.
+///
+/// `cached_resource` cannot answer "is this a stored empty answer or has it
+/// simply never been asked?" — both look like a cache miss to a caller that
+/// only sees the payload. The declared-crops campaign probe needs that
+/// difference, and it needs the age too: an empty answer for a campaign still
+/// being loaded is re-asked once a day, while the same emptiness for a closed
+/// campaign is final.
+pub fn cached(cache: &Mutex<Connection>, key: &str) -> Result<Option<CachedEntry>> {
+    let hit = lock(cache)?
+        .query_row(
+            "SELECT data, content_type, fetched_at FROM resource WHERE key = ?1",
+            [key],
+            |r| {
+                Ok(CachedEntry {
+                    data: r.get(0)?,
+                    content_type: r.get(1)?,
+                    fetched_at: r.get(2)?,
+                })
+            },
+        )
+        .optional()?;
+    Ok(hit)
+}
+
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
@@ -296,51 +333,11 @@ fn content_type_for(rest: &str, fallback: &'static str) -> &'static str {
     }
 }
 
-fn agent() -> &'static ureq::Agent {
-    static AGENT: OnceLock<ureq::Agent> = OnceLock::new();
-    AGENT.get_or_init(|| {
-        ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            // Trust what the platform trusts (the OS certificate store), like
-            // a browser does. ureq's default — pinned Mozilla roots — rejects
-            // the re-signed certificates of antivirus/proxy HTTPS
-            // interception, common on consumer Windows (field bug 2026-07-09:
-            // UnknownIssuer in the app while every browser on the machine
-            // connected fine).
-            .tls_config(
-                TlsConfig::builder()
-                    .root_certs(RootCerts::PlatformVerifier)
-                    .build(),
-            )
-            // Identify politely to the public services we cache from.
-            .user_agent("Terrazgo/0.1 (offline-first farm app)")
-            .build()
-            .into()
-    })
-}
-
+/// The one network call this crate makes, through the shared seam. The agent,
+/// its TLS trust policy and the Android bootstrap live in [`terrazgo_net`];
+/// what stays here is everything around them — caching, keys, eviction.
 fn http_get(url: &str, fallback_content_type: &str) -> Result<Fetched> {
-    // Android: the platform verifier PANICS inside the request if it never
-    // got its JNI handles (silent blank map, 2026-07-17 field test) — hand
-    // them over before ureq can need them. A failure surfaces through the
-    // normal offline diagnosis instead of a dead tokio worker.
-    #[cfg(target_os = "android")]
-    crate::android::ensure_platform_verifier().map_err(GeoError::Offline)?;
-    let mut response = agent().get(url).call().map_err(|err| match err {
-        ureq::Error::StatusCode(status) => GeoError::Http { status },
-        other => GeoError::Offline(other.to_string()),
-    })?;
-    let content_type = response
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(fallback_content_type)
-        .to_string();
-    let data = response
-        .body_mut()
-        .read_to_vec()
-        .map_err(|e| GeoError::Offline(e.to_string()))?;
-    Ok(Fetched { data, content_type })
+    Ok(terrazgo_net::http_get(url, fallback_content_type)?)
 }
 
 #[cfg(test)]

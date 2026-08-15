@@ -14,8 +14,8 @@ use crate::audit::{log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{
-    Farm, FarmDetail, FarmEsExtension, FarmEsFields, NewFarm, NewPlot, Plot, PlotDetail,
-    PlotEsExtension, PlotEsFields, UpdateFarm, UpdatePlot,
+    Farm, FarmDetail, FarmEsExtension, FarmEsFields, FarmRepresentative, FarmRepresentativeFields,
+    NewFarm, NewPlot, Plot, PlotDetail, PlotEsExtension, PlotEsFields, UpdateFarm, UpdatePlot,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
@@ -33,7 +33,15 @@ pub fn insert_farm(conn: &mut Connection, new: NewFarm, actor: Option<&str>) -> 
         name: new.name,
         owner_name: new.owner_name,
         owner_tax_id: new.owner_tax_id,
-        location_text: None, // not on the create form yet; editable via update_farm
+        // Not on the create form: 1.1's full block is set up once, in the edit
+        // form, not before a farm may exist.
+        location_text: None,
+        address: None,
+        postal_code: None,
+        phone_fixed: None,
+        phone_mobile: None,
+        email: None,
+        opened_on: None,
         latitude: None,
         longitude: None,
         country_code: new.country_code,
@@ -78,7 +86,12 @@ pub fn get_farm(conn: &Connection, id: &str) -> Result<FarmDetail> {
         .optional()?
         .ok_or(CoreError::NotFound)?;
     let es = get_farm_extension(conn, id)?;
-    Ok(FarmDetail { farm, es })
+    let representative = get_farm_representative(conn, id)?;
+    Ok(FarmDetail {
+        farm,
+        es,
+        representative,
+    })
 }
 
 /// Full-row update; the submitted state replaces the stored one. Logs complete
@@ -105,6 +118,12 @@ pub fn update_farm(
     after.owner_name = update.owner_name;
     after.owner_tax_id = update.owner_tax_id;
     after.location_text = update.location_text;
+    after.address = update.address;
+    after.postal_code = update.postal_code;
+    after.phone_fixed = update.phone_fixed;
+    after.phone_mobile = update.phone_mobile;
+    after.email = update.email;
+    after.opened_on = update.opened_on;
     after.latitude = update.latitude;
     after.longitude = update.longitude;
     after.country_code = update.country_code;
@@ -112,7 +131,9 @@ pub fn update_farm(
 
     tx.execute(
         "UPDATE farm SET name = ?2, owner_name = ?3, owner_tax_id = ?4, location_text = ?5,
-                         latitude = ?6, longitude = ?7, country_code = ?8, updated_at = ?9
+                         address = ?6, postal_code = ?7, phone_fixed = ?8, phone_mobile = ?9,
+                         email = ?10, opened_on = ?11, latitude = ?12, longitude = ?13,
+                         country_code = ?14, updated_at = ?15
          WHERE id = ?1",
         params![
             id,
@@ -120,6 +141,12 @@ pub fn update_farm(
             after.owner_name,
             after.owner_tax_id,
             after.location_text,
+            after.address,
+            after.postal_code,
+            after.phone_fixed,
+            after.phone_mobile,
+            after.email,
+            after.opened_on,
             after.latitude,
             after.longitude,
             after.country_code,
@@ -129,8 +156,13 @@ pub fn update_farm(
     log_update(&tx, "farm", id, None, actor, &before, &after)?;
 
     let es = reconcile_farm_extension(&tx, id, update.es, actor)?;
+    let representative = reconcile_farm_representative(&tx, id, update.representative, actor)?;
     tx.commit()?;
-    Ok(FarmDetail { farm: after, es })
+    Ok(FarmDetail {
+        farm: after,
+        es,
+        representative,
+    })
 }
 
 /// Soft delete: the row stays (treatment history must keep resolving), it just
@@ -284,11 +316,19 @@ fn insert_farm_extension(
         farm_id: farm_id.to_string(),
         rega_code: es.rega_code.clone(),
         rea_code: es.rea_code.clone(),
+        siex_code: es.siex_code.clone(),
         province_code: es.province_code.clone(),
     };
     tx.execute(
-        "INSERT INTO farm_es_extension (farm_id, rega_code, rea_code, province_code) VALUES (?1, ?2, ?3, ?4)",
-        params![ext.farm_id, ext.rega_code, ext.rea_code, ext.province_code],
+        "INSERT INTO farm_es_extension (farm_id, rega_code, rea_code, siex_code, province_code)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            ext.farm_id,
+            ext.rega_code,
+            ext.rea_code,
+            ext.siex_code,
+            ext.province_code
+        ],
     )?;
     log_insert(tx, "farm_es_extension", farm_id, None, actor, &ext)?;
     Ok(ext)
@@ -337,11 +377,20 @@ fn reconcile_farm_extension(
                 farm_id: farm_id.to_string(),
                 rega_code: es.rega_code,
                 rea_code: es.rea_code,
+                siex_code: es.siex_code,
                 province_code: es.province_code,
             };
             tx.execute(
-                "UPDATE farm_es_extension SET rega_code = ?2, rea_code = ?3, province_code = ?4 WHERE farm_id = ?1",
-                params![farm_id, after.rega_code, after.rea_code, after.province_code],
+                "UPDATE farm_es_extension
+                 SET rega_code = ?2, rea_code = ?3, siex_code = ?4, province_code = ?5
+                 WHERE farm_id = ?1",
+                params![
+                    farm_id,
+                    after.rega_code,
+                    after.rea_code,
+                    after.siex_code,
+                    after.province_code
+                ],
             )?;
             log_update(
                 tx,
@@ -353,6 +402,117 @@ fn reconcile_farm_extension(
                 &after,
             )?;
             Ok(Some(after))
+        }
+    }
+}
+
+// --- representative (model 1.1 "titular o representante") -------------------
+// Same reconcile-from-submitted contract as the ES extension: absent block
+// means no representative and removes any stored row, logged with a null
+// after-image like the other hard-deleted extension rows.
+
+fn get_farm_representative(conn: &Connection, farm_id: &str) -> Result<Option<FarmRepresentative>> {
+    Ok(conn
+        .query_row(
+            "SELECT * FROM farm_representative WHERE farm_id = ?1",
+            [farm_id],
+            map_farm_representative,
+        )
+        .optional()?)
+}
+
+fn reconcile_farm_representative(
+    tx: &Transaction,
+    farm_id: &str,
+    desired: Option<FarmRepresentativeFields>,
+    actor: Option<&str>,
+) -> Result<Option<FarmRepresentative>> {
+    let current = tx
+        .query_row(
+            "SELECT * FROM farm_representative WHERE farm_id = ?1",
+            [farm_id],
+            map_farm_representative,
+        )
+        .optional()?;
+    let desired = match desired {
+        Some(fields) => {
+            validate_name(&fields.full_name)?;
+            Some(fields)
+        }
+        None => None,
+    };
+    match (current, desired) {
+        (None, None) => Ok(None),
+        (current, Some(fields)) => {
+            let after = FarmRepresentative {
+                farm_id: farm_id.to_string(),
+                full_name: fields.full_name,
+                tax_id: fields.tax_id,
+                representation_kind: fields.representation_kind,
+                address: fields.address,
+                locality: fields.locality,
+                province: fields.province,
+                postal_code: fields.postal_code,
+                phone: fields.phone,
+                email: fields.email,
+            };
+            tx.execute(
+                "INSERT INTO farm_representative
+                   (farm_id, full_name, tax_id, representation_kind, address, locality,
+                    province, postal_code, phone, email)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 ON CONFLICT(farm_id) DO UPDATE SET
+                   full_name = excluded.full_name,
+                   tax_id = excluded.tax_id,
+                   representation_kind = excluded.representation_kind,
+                   address = excluded.address,
+                   locality = excluded.locality,
+                   province = excluded.province,
+                   postal_code = excluded.postal_code,
+                   phone = excluded.phone,
+                   email = excluded.email",
+                params![
+                    after.farm_id,
+                    after.full_name,
+                    after.tax_id,
+                    after.representation_kind,
+                    after.address,
+                    after.locality,
+                    after.province,
+                    after.postal_code,
+                    after.phone,
+                    after.email
+                ],
+            )?;
+            match current {
+                Some(before) => log_update(
+                    tx,
+                    "farm_representative",
+                    farm_id,
+                    None,
+                    actor,
+                    &before,
+                    &after,
+                )?,
+                None => log_insert(tx, "farm_representative", farm_id, None, actor, &after)?,
+            }
+            Ok(Some(after))
+        }
+        (Some(before), None) => {
+            tx.execute(
+                "DELETE FROM farm_representative WHERE farm_id = ?1",
+                [farm_id],
+            )?;
+            log_delete(
+                tx,
+                "farm_representative",
+                farm_id,
+                None,
+                actor,
+                &before,
+                None,
+            )?;
+            Ok(None)
         }
     }
 }
@@ -482,6 +642,12 @@ fn map_farm(row: &Row) -> rusqlite::Result<Farm> {
         owner_name: row.get("owner_name")?,
         owner_tax_id: row.get("owner_tax_id")?,
         location_text: row.get("location_text")?,
+        address: row.get("address")?,
+        postal_code: row.get("postal_code")?,
+        phone_fixed: row.get("phone_fixed")?,
+        phone_mobile: row.get("phone_mobile")?,
+        email: row.get("email")?,
+        opened_on: row.get("opened_on")?,
         latitude: row.get("latitude")?,
         longitude: row.get("longitude")?,
         country_code: row.get("country_code")?,
@@ -508,7 +674,23 @@ fn map_farm_extension(row: &Row) -> rusqlite::Result<FarmEsExtension> {
         farm_id: row.get("farm_id")?,
         rega_code: row.get("rega_code")?,
         rea_code: row.get("rea_code")?,
+        siex_code: row.get("siex_code")?,
         province_code: row.get("province_code")?,
+    })
+}
+
+fn map_farm_representative(row: &Row) -> rusqlite::Result<FarmRepresentative> {
+    Ok(FarmRepresentative {
+        farm_id: row.get("farm_id")?,
+        full_name: row.get("full_name")?,
+        tax_id: row.get("tax_id")?,
+        representation_kind: row.get("representation_kind")?,
+        address: row.get("address")?,
+        locality: row.get("locality")?,
+        province: row.get("province")?,
+        postal_code: row.get("postal_code")?,
+        phone: row.get("phone")?,
+        email: row.get("email")?,
     })
 }
 

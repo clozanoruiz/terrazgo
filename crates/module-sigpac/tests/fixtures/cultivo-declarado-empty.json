@@ -1,0 +1,33 @@
+{
+ "type": "FeatureCollection",
+ "features": [],
+ "numberMatched": 0,
+ "numberReturned": 0,
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado/items?f=json&provincia=47&municipio=163&agregado=0&zona=0&poligono=11&parcela=40&recinto=1&exp_ano=2026"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado/items?f=jsonld&provincia=47&municipio=163&agregado=0&zona=0&poligono=11&parcela=40&recinto=1&exp_ano=2026"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado/items?f=html&provincia=47&municipio=163&agregado=0&zona=0&poligono=11&parcela=40&recinto=1&exp_ano=2026"
+  },
+  {
+   "type": "application/json",
+   "title": "Cultivo Declarado",
+   "rel": "collection",
+   "href": "https://sigpac-hubcloud.es/ogcapi/collections/cultivo_declarado"
+  }
+ ],
+ "timeStamp": "2026-08-03T18:33:09.920524Z"
+}

@@ -48,3 +48,39 @@ pub enum CoreError {
     #[error("catalogue data error: {0}")]
     Catalogue(String),
 }
+
+/// How a boundary error names itself to the frontend: a stable code, and the
+/// params its localized message interpolates.
+///
+/// Implemented by every error type that can reach a Tauri command, **in the
+/// crate that owns the error** rather than in the shell. Two reasons: the code
+/// and its params are the error's own knowledge, and the exhaustive match then
+/// sits beside the enum, so adding a variant is a compile error in the crate
+/// where it was added instead of a silent fall-through to `internal` in a shell
+/// file the module author never opens.
+///
+/// `internal` is the deliberate catch-all for anything a user cannot act on. It
+/// has NO dictionary entry — the frontend prefixes a localized intro line to
+/// the raw message so nothing is swallowed — and the i18n contract test
+/// enforces that absence.
+pub trait Classify {
+    /// The stable code (`not_found`, `invalid.empty_name`, `geo_offline`) and
+    /// its params as a JSON object.
+    fn classify(&self) -> (String, serde_json::Value);
+}
+
+impl Classify for CoreError {
+    fn classify(&self) -> (String, serde_json::Value) {
+        use serde_json::json;
+        match self {
+            CoreError::NotFound => ("not_found".into(), json!({})),
+            CoreError::InvalidDate(date) => ("invalid_date".into(), json!({ "date": date })),
+            CoreError::Invalid(code) => (format!("invalid.{code}"), json!({})),
+            CoreError::Sqlite(_)
+            | CoreError::Migration(_)
+            | CoreError::Json(_)
+            | CoreError::Io(_)
+            | CoreError::Catalogue(_) => ("internal".into(), json!({})),
+        }
+    }
+}

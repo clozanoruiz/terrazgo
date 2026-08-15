@@ -9,15 +9,29 @@
   // are immune to edits here — they snapshot name, number and substances.
   import { t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { lookups, loadLookups } from "./lookups.svelte.js";
   import { notify, run } from "./notifications.svelte.js";
   import Skeleton from "./Skeleton.svelte";
+  import { sortedBy } from "./collate.js";
+  import TzSelect from "./TzSelect.svelte";
+  import { codeItems, nameItems } from "./selectItems.js";
 
   let loading = $state(true);
   let products = $state([]);
-  let countries = $state([]);
-  let formulationTypes = $state([]);
-  let authorisationKinds = $state([]);
-  let units = $state([]);
+  // Display order is the client's business: SQL orders by BINARY collation,
+  // which puts "Ángel" after "Zubiri". (The substance picker below is
+  // ordered by the select helper instead.)
+  const sortedProducts = $derived(sortedBy(products, (d) => d.product.commercial_name));
+
+  // The repository returns a product's substances in SQL's BINARY order, which
+  // files accented names last. Collated here so the card's joined line and the
+  // management panel's list agree with every other name list on screen.
+  const substancesOf = (detail) => sortedBy(detail.substances, substanceLabel);
+  // Session-wide reference data (lib/lookups.svelte.js).
+  const countries = $derived(lookups.countries);
+  const formulationTypes = $derived(lookups.formulationTypes);
+  const authorisationKinds = $derived(lookups.authorisationKinds);
+  const units = $derived(lookups.units);
   let substances = $state([]);
 
   // Exceptional-authorisation substance catalogue per country, fetched when a
@@ -64,15 +78,11 @@
   let addAuthExcSubstance = $state("");
 
   run(async () => {
-    [products, countries, formulationTypes, authorisationKinds, units, substances] =
-      await Promise.all([
-        invoke("list_product_details"),
-        invoke("list_countries"),
-        invoke("list_formulation_types"),
-        invoke("list_authorisation_kinds"),
-        invoke("list_units"),
-        invoke("list_active_substances"),
-      ]);
+    [products, substances] = await Promise.all([
+      invoke("list_product_details"),
+      invoke("list_active_substances"),
+      loadLookups(),
+    ]);
     authCountry ||= countries[0]?.code ?? "";
     addAuthCountry ||= countries[0]?.code ?? "";
   }).finally(() => (loading = false));
@@ -286,15 +296,12 @@
     <div class="form-grid">
       <label><span>{t("product.name")}</span><input required bind:value={name} /></label>
       <label><span>{t("product.holder")}</span><input bind:value={holder} /></label>
-      <label>
-        <span>{t("product.formulation")}</span>
-        <select bind:value={formulationCode}>
-          <option value="">—</option>
-          {#each formulationTypes as type (type.code)}
-            <option value={type.code}>{tCode("formulation_type", type.code)}</option>
-          {/each}
-        </select>
-      </label>
+      <TzSelect
+        label={t("product.formulation")}
+        items={codeItems(formulationTypes, "formulation_type")}
+        nullable
+        bind:value={formulationCode}
+      />
       <label>
         <span>{t("product.phi_days")}</span>
         <input type="number" min="0" step="1" bind:value={phiDays} />
@@ -303,39 +310,31 @@
     <fieldset class="es-only">
       <legend>{t("product.auth_section")}</legend>
       <div class="form-grid">
-        <label>
-          <span>{t("product.auth_country")}</span>
-          <select bind:value={authCountry}>
-            {#each countries as country (country.code)}
-              <option value={country.code}>{tCode("country", country.code)}</option>
-            {/each}
-          </select>
-        </label>
+        <TzSelect
+          label={t("product.auth_country")}
+          items={codeItems(countries, "country")}
+          bind:value={authCountry}
+        />
         <label>
           <span>{t("product.auth_number")}</span>
           <input required bind:value={authNumber} />
         </label>
-        <label>
-          <span>{t("product.auth_kind")}</span>
-          <select
-            bind:value={authKind}
-            onchange={() => authKind === "exceptional" && ensureExcSubstances(authCountry)}
-          >
-            {#each authorisationKinds as kind (kind.code)}
-              <option value={kind.code}>{tCode("authorisation_kind", kind.code)}</option>
-            {/each}
-          </select>
-        </label>
+        <TzSelect
+          label={t("product.auth_kind")}
+          items={codeItems(authorisationKinds, "authorisation_kind")}
+          bind:value={authKind}
+          onchange={() => authKind === "exceptional" && ensureExcSubstances(authCountry)}
+        />
         {#if authKind === "exceptional"}
-          <label>
-            <span>{t("product.exceptional_substance")}</span>
-            <select required bind:value={authExcSubstance}>
-              <option value="" disabled hidden></option>
-              {#each excSubstances[authCountry] ?? [] as code (code.id)}
-                <option value={code.code}>{code.label}</option>
-              {/each}
-            </select>
-          </label>
+          <TzSelect
+            label={t("product.exceptional_substance")}
+            items={(excSubstances[authCountry] ?? []).map((code) => ({
+              value: code.code,
+              label: code.label,
+            }))}
+            required
+            bind:value={authExcSubstance}
+          />
         {/if}
       </div>
     </fieldset>
@@ -352,7 +351,7 @@
   <Skeleton />
 {:else}
   <ul class="card-list">
-    {#each products as detail (detail.product.id)}
+    {#each sortedProducts as detail (detail.product.id)}
       <li class="card">
         <div class="stack">
           <strong>{detail.product.commercial_name}</strong>
@@ -363,7 +362,7 @@
             <span class="detail">{t("product.no_authorisations")}</span>
           {/if}
           {#if detail.substances.length > 0}
-            <span class="detail">{detail.substances.map(substanceLabel).join(" · ")}</span>
+            <span class="detail">{substancesOf(detail).map(substanceLabel).join(" · ")}</span>
           {/if}
         </div>
         <button type="button" onclick={() => togglePanel(detail)}>
@@ -379,15 +378,12 @@
               <label><span>{t("product.name")}</span><input required bind:value={editName} /></label
               >
               <label><span>{t("product.holder")}</span><input bind:value={editHolder} /></label>
-              <label>
-                <span>{t("product.formulation")}</span>
-                <select bind:value={editFormulationCode}>
-                  <option value="">—</option>
-                  {#each formulationTypes as type (type.code)}
-                    <option value={type.code}>{tCode("formulation_type", type.code)}</option>
-                  {/each}
-                </select>
-              </label>
+              <TzSelect
+                label={t("product.formulation")}
+                items={codeItems(formulationTypes, "formulation_type")}
+                nullable
+                bind:value={editFormulationCode}
+              />
               <label>
                 <span>{t("product.phi_days")}</span>
                 <input type="number" min="0" step="1" bind:value={editPhiDays} />
@@ -400,7 +396,7 @@
 
           <h4>{t("product.substances")}</h4>
           <ul class="card-list">
-            {#each detail.substances as link (link.id)}
+            {#each substancesOf(detail) as link (link.id)}
               <li class="card">
                 <span class="detail">{substanceLabel(link)}</span>
                 <button type="button" class="btn-danger" onclick={() => removeSubstance(link)}>
@@ -410,15 +406,12 @@
             {/each}
           </ul>
           <div class="form-grid">
-            <label>
-              <span>{t("substance.existing")}</span>
-              <select bind:value={subSubstanceId}>
-                <option value="">—</option>
-                {#each substances as substance (substance.id)}
-                  <option value={substance.id}>{substance.name}</option>
-                {/each}
-              </select>
-            </label>
+            <TzSelect
+              label={t("substance.existing")}
+              items={nameItems(substances)}
+              nullable
+              bind:value={subSubstanceId}
+            />
             {#if !subSubstanceId}
               <label><span>{t("substance.new_name")}</span><input bind:value={subNewName} /></label>
               <label><span>{t("substance.cas")}</span><input bind:value={subNewCas} /></label>
@@ -427,15 +420,12 @@
               <span>{t("substance.concentration")}</span>
               <input type="number" step="any" min="0" bind:value={subConcentration} />
             </label>
-            <label>
-              <span>{t("substance.unit")}</span>
-              <select bind:value={subUnitCode}>
-                <option value="">—</option>
-                {#each units as unit (unit.code)}
-                  <option value={unit.code}>{tCode("unit", unit.code)}</option>
-                {/each}
-              </select>
-            </label>
+            <TzSelect
+              label={t("substance.unit")}
+              items={codeItems(units, "unit")}
+              nullable
+              bind:value={subUnitCode}
+            />
             <label class="selector-action">
               <span>&nbsp;</span>
               <button
@@ -462,40 +452,30 @@
             {/each}
           </ul>
           <div class="form-grid">
-            <label>
-              <span>{t("product.auth_country")}</span>
-              <select bind:value={addAuthCountry}>
-                {#each countries as country (country.code)}
-                  <option value={country.code}>{tCode("country", country.code)}</option>
-                {/each}
-              </select>
-            </label>
+            <TzSelect
+              label={t("product.auth_country")}
+              items={codeItems(countries, "country")}
+              bind:value={addAuthCountry}
+            />
             <label>
               <span>{t("product.auth_number")}</span>
               <input bind:value={addAuthNumber} />
             </label>
-            <label>
-              <span>{t("product.auth_kind")}</span>
-              <select
-                bind:value={addAuthKind}
-                onchange={() =>
-                  addAuthKind === "exceptional" && ensureExcSubstances(addAuthCountry)}
-              >
-                {#each authorisationKinds as kind (kind.code)}
-                  <option value={kind.code}>{tCode("authorisation_kind", kind.code)}</option>
-                {/each}
-              </select>
-            </label>
+            <TzSelect
+              label={t("product.auth_kind")}
+              items={codeItems(authorisationKinds, "authorisation_kind")}
+              bind:value={addAuthKind}
+              onchange={() => addAuthKind === "exceptional" && ensureExcSubstances(addAuthCountry)}
+            />
             {#if addAuthKind === "exceptional"}
-              <label>
-                <span>{t("product.exceptional_substance")}</span>
-                <select bind:value={addAuthExcSubstance}>
-                  <option value="" disabled hidden></option>
-                  {#each excSubstances[addAuthCountry] ?? [] as code (code.id)}
-                    <option value={code.code}>{code.label}</option>
-                  {/each}
-                </select>
-              </label>
+              <TzSelect
+                label={t("product.exceptional_substance")}
+                items={(excSubstances[addAuthCountry] ?? []).map((code) => ({
+                  value: code.code,
+                  label: code.label,
+                }))}
+                bind:value={addAuthExcSubstance}
+              />
             {/if}
             <label class="selector-action">
               <span>&nbsp;</span>

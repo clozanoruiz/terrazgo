@@ -56,8 +56,7 @@ pub fn insert_active_substance(
 
 /// Every registered substance, for the product form's substance picker.
 pub fn list_active_substances(conn: &Connection) -> Result<Vec<ActiveSubstance>> {
-    let mut stmt =
-        conn.prepare("SELECT id, name, cas_number FROM active_substance ORDER BY name, id")?;
+    let mut stmt = conn.prepare("SELECT id, name, cas_number FROM active_substance ORDER BY id")?;
     let substances = stmt
         .query_map([], |r| {
             Ok(ActiveSubstance {
@@ -287,7 +286,7 @@ pub fn list_products_authorised(conn: &Connection, country_code: &str) -> Result
         "SELECT DISTINCT product.* FROM product
          JOIN product_authorisation ON product_authorisation.product_id = product.id
          WHERE product_authorisation.country_code = ?1 AND product.deleted_at IS NULL
-         ORDER BY product.commercial_name, product.id",
+         ORDER BY product.id",
     )?;
     let products = stmt
         .query_map([country_code], map_product)?
@@ -298,8 +297,7 @@ pub fn list_products_authorised(conn: &Connection, country_code: &str) -> Result
 /// Every active product with its substances and authorisations — the registry
 /// list (country-agnostic, unlike `list_products_authorised`).
 pub fn list_product_details(conn: &Connection) -> Result<Vec<ProductDetail>> {
-    let mut stmt = conn
-        .prepare("SELECT * FROM product WHERE deleted_at IS NULL ORDER BY commercial_name, id")?;
+    let mut stmt = conn.prepare("SELECT * FROM product WHERE deleted_at IS NULL ORDER BY id")?;
     let products = stmt
         .query_map([], map_product)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -324,7 +322,7 @@ fn product_substances(conn: &Connection, product_id: &str) -> Result<Vec<Product
          FROM product_active_substance AS link
          JOIN active_substance AS substance ON substance.id = link.active_substance_id
          WHERE link.product_id = ?1
-         ORDER BY substance.name, link.id",
+         ORDER BY link.id",
     )?;
     let substances = stmt
         .query_map([product_id], |r| {

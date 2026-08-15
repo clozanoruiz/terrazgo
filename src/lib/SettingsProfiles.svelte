@@ -12,6 +12,8 @@
   import { confirmDialog, invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
   import Skeleton from "./Skeleton.svelte";
+  import TzSelect from "./TzSelect.svelte";
+  import { nameItems } from "./selectItems.js";
 
   let { info = $bindable() } = $props();
 
@@ -75,8 +77,7 @@
     });
   }
 
-  function changeActive(event) {
-    const value = event.target.value;
+  function changeActive(value) {
     run(async () => {
       const settings = { ...info.settings, active_user_id: value || null };
       info = await invoke("update_settings", { settings });
@@ -103,15 +104,12 @@
         <span>{t("profile.display_name")}</span>
         <input required bind:value={displayName} />
       </label>
-      <label>
-        <span>{t("profile.operator_link")}</span>
-        <select bind:value={operatorId}>
-          <option value="">—</option>
-          {#each operators as operator (operator.id)}
-            <option value={operator.id}>{operator.full_name}</option>
-          {/each}
-        </select>
-      </label>
+      <TzSelect
+        label={t("profile.operator_link")}
+        items={nameItems(operators, (o) => o.full_name)}
+        nullable
+        bind:value={operatorId}
+      />
     </div>
     <div class="form-actions">
       <button type="submit">{t("form.save")}</button>
@@ -124,19 +122,14 @@
   <Skeleton />
 {:else}
   {#if info}
-    <label>
-      <span>{t("profiles.active_label")}</span>
-      <select onchange={changeActive}>
-        <option value="" selected={info.settings.active_user_id == null}>
-          {t("profiles.active_none")}
-        </option>
-        {#each profiles as profile (profile.id)}
-          <option value={profile.id} selected={info.settings.active_user_id === profile.id}>
-            {profile.display_name}
-          </option>
-        {/each}
-      </select>
-    </label>
+    <TzSelect
+      label={t("profiles.active_label")}
+      items={nameItems(profiles, (p) => p.display_name)}
+      nullable
+      nullLabel={t("profiles.active_none")}
+      value={info.settings.active_user_id ?? ""}
+      onchange={changeActive}
+    />
   {/if}
 
   <ul class="card-list">

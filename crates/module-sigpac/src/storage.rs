@@ -181,6 +181,75 @@ pub fn find_plots_with_reference(
         .collect())
 }
 
+/// A farm's active plot with the SIGPAC reference it carries, if any.
+/// `reference: None` covers both "no extension row" and "incomplete or
+/// unparseable parts" — a plot the declared-crops import cannot ask about, and
+/// which it reports as skipped rather than dropping quietly.
+#[derive(Debug, Serialize)]
+pub struct FarmPlotRef {
+    pub plot_id: String,
+    pub plot_name: String,
+    #[serde(skip)]
+    pub reference: Option<SigpacRef>,
+}
+
+/// Every active plot of one farm, in display order, with its stored reference.
+pub fn farm_plot_references(conn: &Connection, farm_id: &str) -> Result<Vec<FarmPlotRef>> {
+    let mut stmt = conn.prepare(
+        "SELECT p.id, p.name,
+                e.sigpac_province, e.sigpac_municipality, e.sigpac_aggregate, e.sigpac_zone,
+                e.sigpac_polygon, e.sigpac_parcel, e.sigpac_enclosure
+         FROM plot p
+         LEFT JOIN plot_es_extension e ON e.plot_id = p.id
+         WHERE p.farm_id = ?1 AND p.deleted_at IS NULL
+         ORDER BY p.id",
+    )?;
+    let rows = stmt
+        .query_map([farm_id], |row| {
+            let parts: [Option<String>; 7] = [
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+                row.get(8)?,
+            ];
+            Ok(FarmPlotRef {
+                plot_id: row.get(0)?,
+                plot_name: row.get(1)?,
+                reference: reference_from_columns(&parts).and_then(std::result::Result::ok),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// The SIGPAC land use (`uso_sigpac`, e.g. `TA` tierra arable) recorded on the
+/// plot's stored provider boundary. `None` means the plot has never been
+/// verified, or the provider did not state one — either way the species picker
+/// simply offers every crop instead of a filtered list.
+pub fn plot_land_use(conn: &Connection, plot_id: &str) -> Result<Option<String>> {
+    let properties: Option<String> = conn
+        .query_row(
+            "SELECT properties FROM geo_feature
+             WHERE plot_id = ?1 AND role = 'boundary' AND source = ?2 AND deleted_at IS NULL
+             ORDER BY created_at DESC LIMIT 1",
+            rusqlite::params![plot_id, SOURCE],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    let Some(properties) = properties else {
+        return Ok(None);
+    };
+    let parsed: serde_json::Value = serde_json::from_str(&properties)?;
+    Ok(parsed
+        .get("uso_sigpac")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string))
+}
+
 /// The seven extension columns as a `SigpacRef`: `None` when any part is
 /// missing/blank, `Some(Err(_))` when present but not parseable.
 fn reference_from_columns(parts: &[Option<String>; 7]) -> Option<Result<SigpacRef>> {

@@ -34,6 +34,7 @@ pub fn insert_machinery(
         farm_id: new.farm_id,
         name: new.name,
         kind: new.kind,
+        acquired_on: new.acquired_on,
         last_inspection_date: new.last_inspection_date,
         next_inspection_due_date: new.next_inspection_due_date,
         created_at: now.clone(),
@@ -42,12 +43,19 @@ pub fn insert_machinery(
     };
     tx.execute(
         "INSERT INTO machinery
-           (id, farm_id, name, type, last_inspection_date, next_inspection_due_date, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+           (id, farm_id, name, type, acquired_on, last_inspection_date,
+            next_inspection_due_date, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
-            machinery.id, machinery.farm_id, machinery.name, machinery.kind,
-            machinery.last_inspection_date, machinery.next_inspection_due_date,
-            machinery.created_at, machinery.updated_at
+            machinery.id,
+            machinery.farm_id,
+            machinery.name,
+            machinery.kind,
+            machinery.acquired_on,
+            machinery.last_inspection_date,
+            machinery.next_inspection_due_date,
+            machinery.created_at,
+            machinery.updated_at
         ],
     )?;
     log_insert(&tx, "machinery", &machinery.id, None, actor, &machinery)?;
@@ -68,9 +76,8 @@ pub fn insert_machinery(
 
 /// Active machinery on one farm, for the treatment form's machinery selector.
 pub fn list_machinery(conn: &Connection, farm_id: &str) -> Result<Vec<Machinery>> {
-    let mut stmt = conn.prepare(
-        "SELECT * FROM machinery WHERE farm_id = ?1 AND deleted_at IS NULL ORDER BY name, id",
-    )?;
+    let mut stmt = conn
+        .prepare("SELECT * FROM machinery WHERE farm_id = ?1 AND deleted_at IS NULL ORDER BY id")?;
     let machinery = stmt
         .query_map([farm_id], map_machinery)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -112,18 +119,21 @@ pub fn update_machinery(
     let mut after = before.clone();
     after.name = update.name;
     after.kind = update.kind;
+    after.acquired_on = update.acquired_on;
     after.last_inspection_date = update.last_inspection_date;
     after.next_inspection_due_date = update.next_inspection_due_date;
     after.updated_at = now_utc_iso();
 
     tx.execute(
-        "UPDATE machinery SET name = ?2, type = ?3, last_inspection_date = ?4,
-                              next_inspection_due_date = ?5, updated_at = ?6
+        "UPDATE machinery SET name = ?2, type = ?3, acquired_on = ?4,
+                              last_inspection_date = ?5, next_inspection_due_date = ?6,
+                              updated_at = ?7
          WHERE id = ?1",
         params![
             id,
             after.name,
             after.kind,
+            after.acquired_on,
             after.last_inspection_date,
             after.next_inspection_due_date,
             after.updated_at
@@ -291,6 +301,7 @@ fn map_machinery(row: &Row) -> rusqlite::Result<Machinery> {
         farm_id: row.get("farm_id")?,
         name: row.get("name")?,
         kind: row.get("type")?,
+        acquired_on: row.get("acquired_on")?,
         last_inspection_date: row.get("last_inspection_date")?,
         next_inspection_due_date: row.get("next_inspection_due_date")?,
         created_at: row.get("created_at")?,

@@ -48,7 +48,10 @@ pub const SIEX_TARGET: &str = "siex";
 pub struct RecordRef {
     pub treatment_record_id: String,
     pub application_date: String,
-    pub product_name: String,
+    /// `None` for a purely non-chemical actuation, which has no product to
+    /// name. The caller supplies its own wording for that case — this layer
+    /// resolves no catalogue labels.
+    pub product_name: Option<String>,
 }
 
 /// A treated plot without a crop — the export cannot name the DGC unit.
@@ -73,6 +76,21 @@ pub struct ExportPrecheck {
     /// `AplicadorEmpresa.NumROPO` comes from the operator licence snapshot.
     pub records_missing_operator_licence: Vec<RecordRef>,
     pub plots_missing_crop: Vec<PlotRef>,
+    /// Actuations carrying a non-chemical measure, which this serializer cannot
+    /// yet represent: the twin carries them in `OtrasActuacionesFito` and
+    /// nothing writes that block (see the dormant-export inventory in
+    /// docs/siex-export.md).
+    ///
+    /// Both shapes are refused, and for the same reason. A PURELY non-chemical
+    /// actuation would emit a `TratamFito` with an empty `ProductosFito` — a
+    /// record asserting that a treatment happened while naming nothing that was
+    /// done. A MIXED one (a spray and a measure on the same record) would
+    /// export cleanly while silently losing the measure, which is the worse of
+    /// the two: nothing in the output would say anything was left behind.
+    /// Refusing with a nameable list is the call the builder already makes
+    /// elsewhere — an export that silently drops data is worse than one that
+    /// says what it cannot carry.
+    pub records_with_non_chemical_measure: Vec<RecordRef>,
 }
 
 impl ExportPrecheck {
@@ -81,6 +99,7 @@ impl ExportPrecheck {
             && self.records_missing_efficacy.is_empty()
             && self.records_missing_operator_licence.is_empty()
             && self.plots_missing_crop.is_empty()
+            && self.records_with_non_chemical_measure.is_empty()
     }
 }
 
@@ -116,12 +135,22 @@ pub fn export_precheck(
     let mut records_missing_efficacy = Vec::new();
     let mut records_missing_operator_licence = Vec::new();
     let mut plots_missing_crop = Vec::new();
+    let mut records_with_non_chemical_measure = Vec::new();
     for rec in list_treatment_records(conn, season_id, farm_id)? {
         let record_ref = || RecordRef {
             treatment_record_id: rec.record.id.clone(),
             application_date: rec.record.application_date.clone(),
             product_name: rec.record.product_name_snapshot.clone(),
         };
+        // The schema CHECK `(product_id IS NOT NULL OR measure_code IS NOT
+        // NULL)` makes the first clause imply the second, so this is exactly
+        // "every record carrying a measure". Both are written anyway: a
+        // regulatory export must not depend silently on a schema invariant
+        // holding, and if that CHECK is ever relaxed a productless record has
+        // to keep being refused.
+        if rec.record.product_id.is_none() || rec.record.measure_code.is_some() {
+            records_with_non_chemical_measure.push(record_ref());
+        }
         if rec.record.efficacy_code.is_none() {
             records_missing_efficacy.push(record_ref());
         }
@@ -150,6 +179,7 @@ pub fn export_precheck(
         records_missing_efficacy,
         records_missing_operator_licence,
         plots_missing_crop,
+        records_with_non_chemical_measure,
     })
 }
 
@@ -185,25 +215,27 @@ pub fn build_cuaderno(
         .trim()
         .to_string();
     let es = farm.es.ok_or_else(missing)?;
-    let ca_explotacion = siex::province_to_ccaa(es.province_code.as_deref().unwrap_or(""))
+    let autonomous_community = siex::province_to_ccaa(es.province_code.as_deref().unwrap_or(""))
         .ok_or_else(missing)?
         .to_string();
-    let codigo_rea = es.rea_code.ok_or_else(missing)?.trim().to_string();
+    let rea_code = es.rea_code.ok_or_else(missing)?.trim().to_string();
 
-    let mut tratam_fito = Vec::new();
+    let mut activities = Vec::new();
     for record in list_treatment_records_for_export(conn, season_id, farm_id)? {
-        append_record(conn, &mut tratam_fito, &record, actor)?;
+        append_record(conn, &mut activities, &record, actor)?;
     }
 
     Ok(CuadernoExport {
         cuaderno: vec![CuadernoEntry {
-            ca_explotacion,
+            ca_explotacion: autonomous_community,
             id_titular: owner_tax_id.clone(),
-            codigo_rea,
+            codigo_rea: rea_code,
             // Titular-driven notebook: the managing entity is the titular
             // (docs/siex-export.md → open question 7).
             unidad_gestora: owner_tax_id,
-            actividades_explotacion: ActividadesExplotacion { tratam_fito },
+            actividades_explotacion: ActividadesExplotacion {
+                tratam_fito: activities,
+            },
         }],
     })
 }
@@ -220,21 +252,28 @@ fn append_record(
     let record = &rec.record;
     let deleted = record.deleted_at.is_some();
 
-    let fecha = siex::date_to_siex(&record.application_date)
+    let application_date = siex::date_to_siex(&record.application_date)
         .ok_or(CueError::Invalid("export_code_unmappable"))?;
-    let problematica_fito = problem_buckets(&rec.problems)?;
-    let justificaciones = rec
+    // The format demands both ends of the actuation. A treatment that ran over
+    // several days states its last one; a single-day one repeats its start,
+    // which is the same statement.
+    let application_end_date = match &record.application_end_date {
+        Some(end) => siex::date_to_siex(end).ok_or(CueError::Invalid("export_code_unmappable"))?,
+        None => application_date.clone(),
+    };
+    let problems = problem_buckets(&rec.problems)?;
+    let justifications = rec
         .justifications
         .iter()
         .map(|j| {
             siex::justification_to_siex(&j.justification_code)
-                .map(|just_act| Justificacion { just_act })
+                .map(|code| Justificacion { just_act: code })
                 .ok_or(CueError::Invalid("export_code_unmappable"))
         })
         .collect::<Result<Vec<_>>>()?;
-    let productos_fito = productos(conn, rec)?;
-    let identificador_aplicador = vec![aplicador(rec)];
-    let eficacia = match &record.efficacy_code {
+    let products = product_blocks(conn, rec)?;
+    let applicator = vec![applicator_block(rec)];
+    let efficacy = match &record.efficacy_code {
         Some(code) => {
             siex::efficacy_to_siex(code).ok_or(CueError::Invalid("export_code_unmappable"))?
         }
@@ -281,14 +320,21 @@ fn append_record(
         out.push(TratamFito {
             id_ajena_tratam_fito: alias,
             borrar: deleted.then_some(true),
-            fecha_inicio: fecha.clone(),
-            fecha_fin: fecha.clone(),
+            fecha_inicio: application_date.clone(),
+            fecha_fin: application_end_date.clone(),
+            // Anexo VI wants HH:MM:SS; the record holds the HH:MM a farmer
+            // actually writes down, so the seconds are padded here rather than
+            // stored — the same shaping the dates get.
+            hora_tratamiento: record
+                .application_time
+                .as_deref()
+                .map(|time| format!("{time}:00")),
             dgcs,
-            problematica_fito: problematica_fito.clone(),
-            justificaciones: justificaciones.clone(),
-            productos_fito: productos_fito.clone(),
-            identificador_aplicador: identificador_aplicador.clone(),
-            eficacia,
+            problematica_fito: problems.clone(),
+            justificaciones: justifications.clone(),
+            productos_fito: products.clone(),
+            identificador_aplicador: applicator.clone(),
+            eficacia: efficacy,
             observaciones: record.notes.clone(),
         });
     }
@@ -300,7 +346,7 @@ fn append_record(
 /// into one entry per group. Sorted by key so output order is deterministic.
 /// `pub(crate)`: the printable cuaderno (src/report.rs) prints one register
 /// row per group, so both outputs split identically.
-pub(crate) fn crop_groups(plots: &[TreatmentPlot]) -> Vec<(String, Vec<&TreatmentPlot>)> {
+pub fn crop_groups(plots: &[TreatmentPlot]) -> Vec<(String, Vec<&TreatmentPlot>)> {
     let mut groups: Vec<(String, Vec<&TreatmentPlot>)> = Vec::new();
     for plot in plots {
         // \u{1F} (unit separator) never appears in species/variety text, so
@@ -327,7 +373,7 @@ fn dgc(
     deleted: bool,
     actor: Option<&str>,
 ) -> Result<Dgc> {
-    let codigo_dgc_ajena = match &plot.crop_id {
+    let crop_alias = match &plot.crop_id {
         Some(crop_id) if deleted => find_export_alias(conn, SIEX_TARGET, "crop", crop_id, "")?,
         Some(crop_id) => Some(ensure_export_alias(
             conn,
@@ -342,18 +388,26 @@ fn dgc(
         None => None,
     };
     Ok(Dgc {
-        codigo_dgc_ajena,
+        codigo_dgc_ajena: crop_alias,
         superficie: plot.surface_treated_ha,
+        // The catalogue's own code, which the schema types as an integer. An
+        // unparseable one is dropped rather than refused: the field is optional
+        // in the format, and a code the vendored snapshot cannot type is not a
+        // reason to fail an export of everything else.
+        estado_fenologico: plot
+            .growth_stage_code
+            .as_deref()
+            .and_then(|code| code.parse::<i64>().ok()),
     })
 }
 
 /// Sort the coded problems into the four export buckets, deduplicating within
 /// each (growth_regulator and other share ReguladoresOtros).
 fn problem_buckets(problems: &[TreatmentProblem]) -> Result<ProblematicaFito> {
-    let mut enfermedades: Vec<i64> = Vec::new();
-    let mut plagas: Vec<i64> = Vec::new();
-    let mut malas_hierbas: Vec<i64> = Vec::new();
-    let mut reguladores: Vec<i64> = Vec::new();
+    let mut diseases: Vec<i64> = Vec::new();
+    let mut pests: Vec<i64> = Vec::new();
+    let mut weeds: Vec<i64> = Vec::new();
+    let mut regulators: Vec<i64> = Vec::new();
     for problem in problems {
         let code: i64 = problem
             .problem_code
@@ -361,10 +415,10 @@ fn problem_buckets(problems: &[TreatmentProblem]) -> Result<ProblematicaFito> {
             .parse()
             .map_err(|_| CueError::Invalid("export_code_unmappable"))?;
         let bucket = match problem.reason_category_code.as_str() {
-            "disease" => &mut enfermedades,
-            "pest" => &mut plagas,
-            "weed" => &mut malas_hierbas,
-            "growth_regulator" | "other" => &mut reguladores,
+            "disease" => &mut diseases,
+            "pest" => &mut pests,
+            "weed" => &mut weeds,
+            "growth_regulator" | "other" => &mut regulators,
             _ => return Err(CueError::Invalid("export_code_unmappable")),
         };
         if !bucket.contains(&code) {
@@ -372,16 +426,16 @@ fn problem_buckets(problems: &[TreatmentProblem]) -> Result<ProblematicaFito> {
         }
     }
     Ok(ProblematicaFito {
-        enfermedades: (!enfermedades.is_empty()).then_some(Enfermedades {
-            tipo_enfermedad: enfermedades,
+        enfermedades: (!diseases.is_empty()).then_some(Enfermedades {
+            tipo_enfermedad: diseases,
         }),
-        artropodos_gasteropodos: (!plagas.is_empty())
-            .then_some(ArtropodosGasteropodos { tipo_plaga: plagas }),
-        malas_hierbas: (!malas_hierbas.is_empty()).then_some(MalasHierbas {
-            tipo_mala_hierba: malas_hierbas,
+        artropodos_gasteropodos: (!pests.is_empty())
+            .then_some(ArtropodosGasteropodos { tipo_plaga: pests }),
+        malas_hierbas: (!weeds.is_empty()).then_some(MalasHierbas {
+            tipo_mala_hierba: weeds,
         }),
-        reguladores_otros: (!reguladores.is_empty()).then_some(ReguladoresOtros {
-            tipo_regulador: reguladores,
+        reguladores_otros: (!regulators.is_empty()).then_some(ReguladoresOtros {
+            tipo_regulador: regulators,
         }),
     })
 }
@@ -391,10 +445,17 @@ fn problem_buckets(problems: &[TreatmentProblem]) -> Result<ProblematicaFito> {
 /// number — the number is what the record legally cites; when the
 /// authorisation row no longer matches it, the default kind (registered)
 /// applies, which is also what the pre-kind_code rows were.
-fn productos(conn: &Connection, rec: &TreatmentRecordWithPlots) -> Result<Vec<ProductoFito>> {
+fn product_blocks(conn: &Connection, rec: &TreatmentRecordWithPlots) -> Result<Vec<ProductoFito>> {
     let record = &rec.record;
-    let (unidad, factor) = siex::unit_to_siex(&record.dose_unit_code)
-        .ok_or(CueError::Invalid("export_code_unmappable"))?;
+    // The chemical block is all-or-nothing in the schema, and `export_precheck`
+    // refuses a build whose records carry any non-chemical measure — so by the
+    // time a descriptor is being written, a dose is present.
+    let (Some(dose_value), Some(dose_unit_code)) = (record.dose_value, &record.dose_unit_code)
+    else {
+        return Err(CueError::Invalid("export_code_unmappable"));
+    };
+    let (unit, factor) =
+        siex::unit_to_siex(dose_unit_code).ok_or(CueError::Invalid("export_code_unmappable"))?;
 
     let kind: Option<(String, Option<String>)> = conn
         .query_row(
@@ -409,9 +470,9 @@ fn productos(conn: &Connection, rec: &TreatmentRecordWithPlots) -> Result<Vec<Pr
         )
         .optional()?;
     let (kind_code, exceptional_substance) = kind.unwrap_or(("registered".to_string(), None));
-    let tipo_producto = siex::authorisation_kind_to_siex(&kind_code)
+    let authorisation_type = siex::authorisation_kind_to_siex(&kind_code)
         .ok_or(CueError::Invalid("export_code_unmappable"))?;
-    let materia_activa = if kind_code == "exceptional" {
+    let active_substance = if kind_code == "exceptional" {
         // Mandatory exactly for TipoProducto 4 (3.11.4 re-diff): the
         // AUTORIZACION_EXCP catalogue code, required at authorisation entry.
         let code = exceptional_substance.ok_or(CueError::Invalid("export_code_unmappable"))?;
@@ -425,11 +486,11 @@ fn productos(conn: &Connection, rec: &TreatmentRecordWithPlots) -> Result<Vec<Pr
     };
 
     Ok(vec![ProductoFito {
-        tipo_producto,
+        tipo_producto: authorisation_type,
         num_registro: record.authorisation_number_snapshot.clone(),
-        materia_activa,
-        dosis: record.dose_value * factor,
-        unidad,
+        materia_activa: active_substance,
+        dosis: dose_value * factor,
+        unidad: unit,
     }])
 }
 
@@ -438,15 +499,15 @@ fn productos(conn: &Connection, rec: &TreatmentRecordWithPlots) -> Result<Vec<Pr
 /// application, hence the fixed sentinel; machinery in neither ROMA nor
 /// REGANIP is named by its stable row id (`IdEquipoAplicador` is a free
 /// string(50), and the UUID never drifts between exports).
-fn aplicador(rec: &TreatmentRecordWithPlots) -> IdentificadorAplicador {
+fn applicator_block(rec: &TreatmentRecordWithPlots) -> IdentificadorAplicador {
     let record = &rec.record;
-    let num_ropo = match &record.operator_licence_snapshot {
+    let licence_number = match &record.operator_licence_snapshot {
         Some(licence) if !licence.trim().is_empty() => licence.clone(),
         // Active records are precheck-blocked; a deletion entry only needs to
         // identify the activity, so the schema-valid empty string stands in.
         _ => String::new(),
     };
-    let (num_roma, num_reganip, id_equipo_aplicador) = if record.machinery_id.is_none() {
+    let (roma, reganip, equipment_id) = if record.machinery_id.is_none() {
         (None, None, Some("manual".to_string()))
     } else if record.machinery_roma_snapshot.is_some() {
         // ROMA preferred when a machine carries both numbers ("nunca ambos").
@@ -457,11 +518,13 @@ fn aplicador(rec: &TreatmentRecordWithPlots) -> IdentificadorAplicador {
         (None, None, record.machinery_id.clone())
     };
     IdentificadorAplicador {
-        aplicador_empresa: AplicadorEmpresa { num_ropo },
+        aplicador_empresa: AplicadorEmpresa {
+            num_ropo: licence_number,
+        },
         equipo_aplicador: EquipoAplicador {
-            num_roma,
-            num_reganip,
-            id_equipo_aplicador,
+            num_roma: roma,
+            num_reganip: reganip,
+            id_equipo_aplicador: equipment_id,
             aplicacion_manual: record.machinery_id.is_none(),
         },
     }

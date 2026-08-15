@@ -24,6 +24,7 @@ pub fn insert_operator(
     let operator = Operator {
         id: Uuid::now_v7().to_string(),
         full_name: new.full_name,
+        tax_id: new.tax_id,
         licence_number: new.licence_number,
         licence_level_code: new.licence_level_code,
         licence_expiry_date: new.licence_expiry_date,
@@ -33,10 +34,10 @@ pub fn insert_operator(
     };
     tx.execute(
         "INSERT INTO operator
-           (id, full_name, licence_number, licence_level_code, licence_expiry_date, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+           (id, full_name, tax_id, licence_number, licence_level_code, licence_expiry_date, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
-            operator.id, operator.full_name, operator.licence_number,
+            operator.id, operator.full_name, operator.tax_id, operator.licence_number,
             operator.licence_level_code, operator.licence_expiry_date,
             operator.created_at, operator.updated_at
         ],
@@ -49,8 +50,7 @@ pub fn insert_operator(
 /// Active operators, for the treatment form's operator selector. Operators are
 /// not farm-scoped: the same applicator may work several farms.
 pub fn list_operators(conn: &Connection) -> Result<Vec<Operator>> {
-    let mut stmt =
-        conn.prepare("SELECT * FROM operator WHERE deleted_at IS NULL ORDER BY full_name, id")?;
+    let mut stmt = conn.prepare("SELECT * FROM operator WHERE deleted_at IS NULL ORDER BY id")?;
     let operators = stmt
         .query_map([], map_operator)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -77,18 +77,20 @@ pub fn update_operator(
 
     let mut after = before.clone();
     after.full_name = update.full_name;
+    after.tax_id = update.tax_id;
     after.licence_number = update.licence_number;
     after.licence_level_code = update.licence_level_code;
     after.licence_expiry_date = update.licence_expiry_date;
     after.updated_at = now_utc_iso();
 
     tx.execute(
-        "UPDATE operator SET full_name = ?2, licence_number = ?3, licence_level_code = ?4,
-                             licence_expiry_date = ?5, updated_at = ?6
+        "UPDATE operator SET full_name = ?2, tax_id = ?3, licence_number = ?4,
+                             licence_level_code = ?5, licence_expiry_date = ?6, updated_at = ?7
          WHERE id = ?1",
         params![
             id,
             after.full_name,
+            after.tax_id,
             after.licence_number,
             after.licence_level_code,
             after.licence_expiry_date,
@@ -130,6 +132,7 @@ fn map_operator(row: &Row) -> rusqlite::Result<Operator> {
     Ok(Operator {
         id: row.get("id")?,
         full_name: row.get("full_name")?,
+        tax_id: row.get("tax_id")?,
         licence_number: row.get("licence_number")?,
         licence_level_code: row.get("licence_level_code")?,
         licence_expiry_date: row.get("licence_expiry_date")?,

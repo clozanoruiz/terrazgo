@@ -50,8 +50,8 @@ pub fn insert_user_profile(
 /// Active (non-deleted) profiles, for the Settings list and the
 /// active-profile picker.
 pub fn list_user_profiles(conn: &Connection) -> Result<Vec<UserProfile>> {
-    let mut stmt = conn
-        .prepare("SELECT * FROM user_profile WHERE deleted_at IS NULL ORDER BY display_name, id")?;
+    let mut stmt =
+        conn.prepare("SELECT * FROM user_profile WHERE deleted_at IS NULL ORDER BY id")?;
     let profiles = stmt
         .query_map([], map_user_profile)?
         .collect::<rusqlite::Result<Vec<_>>>()?;

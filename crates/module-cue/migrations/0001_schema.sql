@@ -20,11 +20,12 @@
 -- Reference / lookup tables (app-versioned, seeded in 0002, not synced)
 -- ============================================================================
 
-CREATE TABLE unit (
-    code      TEXT PRIMARY KEY,  -- 'l_ha', 'kg_ha', 'g_l', 'pct'
-    dimension TEXT NOT NULL,     -- 'dose_rate' | 'concentration'
-    i18n_key  TEXT NOT NULL
-);
+-- `unit` moved to the core's 0001 on 2026-08-07 (a free pre-release squash
+-- edit), because a second module needs it: module-fertilisation records doses
+-- and irrigation volumes, and a module may never depend on another module.
+-- Core steps run EARLIER in the composed sequence, so the references below
+-- remain valid. A measurement vocabulary is universal, not a treatment
+-- concept — the same argument that moved the farm registry there.
 
 CREATE TABLE reason_category (
     code     TEXT PRIMARY KEY,   -- 'pest', 'disease', 'weed', 'growth_regulator', 'other'
@@ -135,10 +136,44 @@ CREATE TABLE treatment_record (
     -- source for country derivation and every treated plot must be on it.
     farm_id                       TEXT NOT NULL REFERENCES farm(id),
     application_date              TEXT NOT NULL,                 -- 'YYYY-MM-DD'
-    product_id                    TEXT NOT NULL REFERENCES product(id),
+    -- Last day of the actuation when it spanned several. RD 1311/2012 Anexo III
+    -- Parte I B lets the date be an INTERVAL, and the SIEX exchange format wants
+    -- FechaInicio + FechaFin; NULL means the treatment was a single day, which is
+    -- the ordinary case. The plazo de seguridad runs from the LAST application,
+    -- so phi_end_date is derived from this column when it is set.
+    application_end_date          TEXT,                          -- 'YYYY-MM-DD'
+    -- Start hour of the application. Reglamento (UE) 2023/564's annex asks for
+    -- "date and where relevant start time (hour)" in the treatment-of-surfaces
+    -- row only, footnote 4 defining relevance as a product whose use is
+    -- restricted to particular times of day, or a use where the hour matters.
+    -- No Spanish form has a column for it and RD 1311/2012 Anexo III Parte I B
+    -- does not ask for it, so the duty arrives from the EU regulation alone.
+    -- Stored as LOCAL WALL-CLOCK 'HH:MM', deliberately not UTC: this is a time
+    -- of day, not an instant. What makes an hour relevant is the hour on the
+    -- ground (label restrictions, wind, bees, heat), no timezone is stored
+    -- anywhere, and a UTC round-trip would print a different hour than the one
+    -- the farmer recorded. When the date is an interval this is the start hour
+    -- of the first application. NULL means not stated and prints blank.
+    application_time              TEXT,                          -- 'HH:MM', local
+    -- The chemical half of an actuation, nullable as a BLOCK (see the CHECK at
+    -- the foot of the table). RD 1311/2012 art. 10.1 requires priority for
+    -- non-chemical methods, and the SIEX twin follows it: TratamFito requires
+    -- an applicator, a problem, justifications and an efficacy, but NOT
+    -- ProductosFito — so hanging pheromone diffusers against a pest is a
+    -- treatment in its own right, with no product, no dose and no plazo de
+    -- seguridad to run. Recording it as a product application with invented
+    -- zeros would be a false statement in a legal document.
+    product_id                    TEXT REFERENCES product(id),
     country_code                  TEXT NOT NULL REFERENCES country(code),  -- which authorisation context applies
-    dose_value                    REAL NOT NULL,
-    dose_unit_code                TEXT NOT NULL REFERENCES unit(code),
+    dose_value                    REAL,
+    dose_unit_code                TEXT REFERENCES unit(code),
+    -- Total product actually used across the whole actuation, in kg or l
+    -- (Anexo III Parte I B.i). Kept as its own pair rather than derived: a dose
+    -- expressed as a concentration (g/l, ml/l, %) carries no information about
+    -- how much spray was mixed, so the total is NOT recoverable from dose ×
+    -- surface. NULL means the farmer did not state it and prints blank.
+    total_quantity_value          REAL,
+    total_quantity_unit_code      TEXT REFERENCES unit(code),    -- dimension 'quantity'
     -- The reason for treatment lives in treatment_problem since 2026-07-15
     -- (each coded problem carries its own category — one record can target a
     -- disease AND a pest); target_organism stays as optional free-text nuance
@@ -150,10 +185,35 @@ CREATE TABLE treatment_record (
     efficacy_code                 TEXT REFERENCES efficacy(code),
     operator_id                   TEXT NOT NULL REFERENCES operator(id),
     machinery_id                  TEXT REFERENCES machinery(id),
-    phi_days_used                 INTEGER NOT NULL,              -- input
-    phi_end_date                  TEXT NOT NULL,                 -- derived = application_date + phi_days_used
+    -- Anexo III Parte I B.d asks for "identificación del aplicador y, EN SU
+    -- CASO, del asesor" — the advisor is one more identification on the same
+    -- record, exactly like the applicator, and the SIEX twin agrees by hanging
+    -- AsesorValidacion off TratamFito rather than off a register of its own.
+    -- Nullable because most treatments are not advised; the snapshots freeze
+    -- the printed values at write time (the legal-value-capture rule), so
+    -- correcting an advisor's registration number later never rewrites what a
+    -- past record said.
+    advisor_id                    TEXT REFERENCES advisor(id),
+    advisor_name_snapshot         TEXT,
+    advisor_registration_snapshot TEXT,          -- the ROPO number in Spain
+    -- The NON-CHEMICAL half (SIEX OtrasActuacionesFito), which the official
+    -- model prints as 3.1 bis's "Alternativas no químicas de intervención".
+    -- measure_code is a TIPO_MEDIDA_FITOSANITARIA code stored verbatim with no
+    -- FK — the catalogue rule: the code is the regulatory payload, the
+    -- catalogue row is display metadata, and a reimport must never cascade
+    -- into records.
+    measure_code                  TEXT,
+    -- "Intensidad de la medida (Nº de trampas, nº de difusores, etc.)" as a
+    -- value + unit pair like every other amount in the book, never free text.
+    measure_intensity_value       REAL,
+    measure_intensity_unit_code   TEXT REFERENCES unit(code),   -- dimension 'intensity'
+    measure_registration_number   TEXT,          -- twin's NumRegistroMDF
+    -- Derived from the product, so both go when the product does. The plazo
+    -- runs from the LAST application (application_end_date when set).
+    phi_days_used                 INTEGER,                       -- input
+    phi_end_date                  TEXT,                          -- derived = application date + phi_days_used
     -- legal snapshots, frozen at write time:
-    product_name_snapshot         TEXT NOT NULL,
+    product_name_snapshot         TEXT,
     authorisation_number_snapshot TEXT,
     active_substances_snapshot    TEXT,
     operator_name_snapshot        TEXT NOT NULL,
@@ -163,7 +223,30 @@ CREATE TABLE treatment_record (
     notes                         TEXT,
     created_at                    TEXT NOT NULL,
     updated_at                    TEXT NOT NULL,
-    deleted_at                    TEXT
+    deleted_at                    TEXT,
+    -- The chemical block is all-or-nothing. Making six columns nullable so a
+    -- purely non-chemical actuation can be recorded would otherwise also let a
+    -- product be stored with no dose, or with no plazo de seguridad — and a
+    -- product application whose phi_end_date is NULL raises no PHI alert,
+    -- which is a silent wrong answer rather than a visible gap. This restores
+    -- at block level what the NOT NULLs used to guarantee per column.
+    CHECK (
+        (product_id IS     NULL AND dose_value IS     NULL AND dose_unit_code IS     NULL
+                                AND phi_days_used IS  NULL AND phi_end_date IS       NULL
+                                AND product_name_snapshot IS NULL)
+     OR (product_id IS NOT NULL AND dose_value IS NOT NULL AND dose_unit_code IS NOT NULL
+                                AND phi_days_used IS NOT NULL AND phi_end_date IS NOT NULL
+                                AND product_name_snapshot IS NOT NULL)
+    ),
+    -- An actuation has to BE something: a product application, a non-chemical
+    -- measure, or both on the same day.
+    CHECK (product_id IS NOT NULL OR measure_code IS NOT NULL),
+    -- An intensity is a number and its unit or neither — a bare "12" against a
+    -- measure states nothing, and a unit with no figure states less.
+    CHECK (
+        (measure_intensity_value IS NULL     AND measure_intensity_unit_code IS NULL)
+     OR (measure_intensity_value IS NOT NULL AND measure_intensity_unit_code IS NOT NULL)
+    )
 );
 
 -- Junction: one treatment entry applies to many plots, with surface treated per plot.
@@ -175,6 +258,18 @@ CREATE TABLE treatment_plot (
     surface_treated_ha  REAL NOT NULL,            -- may be a partial subset of plot.area_ha
     crop_name_snapshot  TEXT,                     -- frozen crop at treatment time
     variety_snapshot    TEXT,
+    -- The crop's growth stage, as an EST_FENOLOGICO code stored verbatim with no
+    -- FK (the catalogue rule). Reglamento (UE) 2023/564's annex asks for the
+    -- "growth stage in line with the BBCH monograph" and places it inside the
+    -- "Crop or situation/land use" column, so it belongs to the treated crop and
+    -- not to the record — which is where the exchange format puts it too
+    -- (TratamFito.DGCs[].EstadoFenologico). Footnote 7 makes it conditional, on
+    -- a product whose use is restricted to particular stages, hence nullable.
+    -- NOTE the catalogue's code (1-10) is NOT the BBCH stage (0-9): the
+    -- monograph's principal stage is a column of its own, so every reader
+    -- resolves the label through module_cue::catalogue::growth_stage_label
+    -- rather than printing this value.
+    growth_stage_code   TEXT,
     UNIQUE (treatment_record_id, plot_id)
 );
 
@@ -203,6 +298,327 @@ CREATE TABLE treatment_justification (
     treatment_record_id TEXT NOT NULL REFERENCES treatment_record(id) ON DELETE CASCADE,
     justification_code  TEXT NOT NULL REFERENCES justification(code),
     UNIQUE (treatment_record_id, justification_code)
+);
+
+-- ---------------------------------------------------------------------------
+-- Non-field treatments: model sections 3.3, 3.4 and 3.5
+--
+-- Three printed sections, one table. Postcosecha, locales de almacenamiento and
+-- medios de transporte are structurally the same record — date, what was
+-- treated, how much of it, the phytosanitary problem, the product and how much
+-- was used, the applicator — differing only in WHAT the subject is. Three
+-- tables would triplicate the junctions and every query over them.
+--
+-- Deliberately shaped like treatment_record, because the SIEX twins
+-- (TratamientosPostCosecha, TratamientosEdifInstalaciones) demand the same
+-- discipline the printed form does not show: coded problems, coded
+-- justifications, a named applicator and an observed efficacy. Capturing less
+-- would make a future un-parking of the export impossible without a migration.
+CREATE TABLE non_field_subject_kind (
+    code     TEXT PRIMARY KEY,   -- 'postharvest' | 'storage_premises' | 'transport'
+    i18n_key TEXT NOT NULL
+);
+
+CREATE TABLE non_field_treatment (
+    id                          TEXT PRIMARY KEY,
+    season_id                   TEXT NOT NULL REFERENCES season(id),
+    farm_id                     TEXT NOT NULL REFERENCES farm(id),
+    country_code                TEXT NOT NULL REFERENCES country(code),
+    subject_kind_code           TEXT NOT NULL REFERENCES non_field_subject_kind(code),
+    treated_on                  TEXT NOT NULL,             -- 'YYYY-MM-DD'
+    -- What was treated, in the wording each section asks for: the plant product
+    -- (3.3), the premises' type and address (3.4), or the vehicle's type, model
+    -- and plate (3.5). Free text because only 3.3 has a coded counterpart.
+    subject_description         TEXT NOT NULL,
+    -- 3.3 only: the PROD_VEGETAL catalogue code for the plant product treated
+    -- (the SIEX twin codes it as ProductoVegetal). That is the HARVESTED
+    -- PRODUCE catalogue, not the crop catalogue PRODUCTOS — "Aceitunas", not
+    -- "OLIVO". Stored verbatim with NO FK, the treatment_problem.problem_code
+    -- rationale. NULL for the other kinds, and for a product no picker matched.
+    subject_product_code        TEXT,
+    -- How much of the subject: tonnes for 3.3, cubic metres for 3.4/3.5 — the
+    -- repository enforces the pairing. Nullable as a pair: the printed form
+    -- leaves the cell hand-fillable and the export precheck is where a format
+    -- requirement belongs (the efficacy precedent), not the insert.
+    treated_quantity_value      REAL,
+    treated_quantity_unit_code  TEXT REFERENCES unit(code),   -- 't' | 'm3'
+    product_id                  TEXT NOT NULL REFERENCES product(id),
+    -- Product actually used ("Cantidad utilizada, kg o l"), same nullable pair.
+    product_quantity_value      REAL,
+    product_quantity_unit_code  TEXT REFERENCES unit(code),   -- 'kg' | 'l'
+    operator_id                 TEXT NOT NULL REFERENCES operator(id),
+    -- Optional, like treatment_record: the SIEX twin's EquipoAplicador object
+    -- has no required members, and the printed sections carry no equipment
+    -- column at all.
+    machinery_id                TEXT REFERENCES machinery(id),
+    -- Anexo III Parte I B.d — "identificación del aplicador y, en su caso, del
+    -- asesor" — reaches these three registers by B's own words: B.b identifies
+    -- what was treated as "la parcela, o en su caso, local o medio de
+    -- transporte tratado", and B.f asks for the volume in cubic metres "como
+    -- tratamiento de locales". They are B, not a register that resembles it,
+    -- so the advisor is captured here exactly as on treatment_record. The
+    -- printed model shows no such column, which is why the book folds it into
+    -- the applicator cell — the model is orientativo and B is what binds.
+    advisor_id                  TEXT REFERENCES advisor(id),
+    advisor_name_snapshot       TEXT,
+    advisor_registration_snapshot TEXT,        -- the ROPO number in Spain
+    -- Observed after the fact, exactly as on treatment_record.
+    efficacy_code               TEXT REFERENCES efficacy(code),
+    -- legal snapshots, frozen at write time:
+    product_name_snapshot       TEXT NOT NULL,
+    authorisation_number_snapshot TEXT,
+    operator_name_snapshot      TEXT NOT NULL,
+    operator_licence_snapshot   TEXT,
+    machinery_roma_snapshot     TEXT,
+    machinery_reganip_snapshot  TEXT,
+    notes                       TEXT,
+    created_at                  TEXT NOT NULL,
+    updated_at                  TEXT NOT NULL,
+    deleted_at                  TEXT
+);
+
+-- The coded problems and IPM justifications, ≥1 of each enforced in the
+-- repository — the treatment_problem / treatment_justification contract.
+-- NOTE for a future export: the twins' problem buckets are narrower than
+-- treatment_record's. Postcosecha maps enfermedades / artrópodos-gasterópodos /
+-- reguladores-otros, and edificaciones only the first two — neither carries
+-- weeds. Capture stays permissive (a record the farmer made is real whatever a
+-- parked format accepts); the export precheck is where that gets reported.
+CREATE TABLE non_field_treatment_problem (
+    id                      TEXT PRIMARY KEY,
+    non_field_treatment_id  TEXT NOT NULL REFERENCES non_field_treatment(id) ON DELETE CASCADE,
+    reason_category_code    TEXT NOT NULL REFERENCES reason_category(code),
+    problem_code            TEXT NOT NULL,
+    UNIQUE (non_field_treatment_id, reason_category_code, problem_code)
+);
+
+CREATE TABLE non_field_treatment_justification (
+    id                      TEXT PRIMARY KEY,
+    non_field_treatment_id  TEXT NOT NULL REFERENCES non_field_treatment(id) ON DELETE CASCADE,
+    justification_code      TEXT NOT NULL REFERENCES justification(code),
+    UNIQUE (non_field_treatment_id, justification_code)
+);
+
+-- ---------------------------------------------------------------------------
+-- Treated seed: model section 3.2
+--
+-- What is registered is a SOWING with seed the supplier already treated — not
+-- a treatment the farmer applied. Hence the product block is free capture
+-- (name, registration number, active substance) with an optional link to the
+-- product registry: treated seed arrives in a sack whose label names a product
+-- the farmer never bought as such, and forcing a registry row first would stop
+-- a lawful record being written.
+--
+-- The plot linkage below comes from the PRINTED model ("Id. parcelas",
+-- "Superficie sembrada"); the SIEX twin `UsoSemillaTratada` carries no plots at
+-- all. The model is the compliance artifact, so it wins.
+
+-- Where the seed was treated, and by whom — the twin's required `Tratamiento`.
+-- Our own codes, mapped to the FEGA TIPO_TRATAMIENTO integers at export (the
+-- efficacy / justification tier-1 pattern). NOTE for a future export precheck,
+-- from the field descriptor: the seed lot is required for the two purchased
+-- kinds, and the product registration number is only accepted for the two
+-- treated-here kinds.
+CREATE TABLE seed_treatment_kind (
+    code     TEXT PRIMARY KEY,   -- 'on_farm' | 'processing_centre' | 'purchased_es' | 'purchased_abroad'
+    i18n_key TEXT NOT NULL
+);
+
+CREATE TABLE seed_treatment (
+    id                  TEXT PRIMARY KEY,
+    season_id           TEXT NOT NULL REFERENCES season(id),
+    farm_id             TEXT NOT NULL REFERENCES farm(id),
+    sown_on             TEXT NOT NULL,             -- 'YYYY-MM-DD'
+    species_name        TEXT NOT NULL,
+    variety             TEXT,
+    -- Species code in the FEGA PRODUCTOS catalogue, verbatim and without a
+    -- foreign key (the treatment_problem.problem_code rationale). The SIEX twin
+    -- codes the same thing as `Producto`.
+    crop_code           TEXT,
+    -- Kilograms of seed sown. Nullable: the printed form leaves the cell to be
+    -- filled by hand, and a format that requires it says so at export.
+    seed_quantity_kg    REAL,
+    -- The seed lot, as printed on the sack (SIEX `NumeroLote`). The one field
+    -- that makes a treated-seed record traceable back to its supplier.
+    seed_lot            TEXT,
+    -- Nullable: the model's own table has no such column, so a book kept only
+    -- on paper terms cannot be made to answer it. Records that do state it are
+    -- exportable; the rest print the register exactly as the model does.
+    treatment_kind_code TEXT REFERENCES seed_treatment_kind(code),
+    product_name        TEXT NOT NULL,
+    product_registration_number TEXT,
+    product_active_substance    TEXT,
+    -- Set only when the treated seed's product is also in the farmer's own
+    -- registry; the free-text fields above stay the printed truth either way.
+    product_id          TEXT REFERENCES product(id),
+    -- Observed after emergence, so it cannot be demanded at insert — the
+    -- treatment_record rule. The SIEX twin lists Eficacia as required, which
+    -- an export precheck is the place to enforce.
+    efficacy_code       TEXT REFERENCES efficacy(code),
+    notes               TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    deleted_at          TEXT
+);
+
+-- Where the treated seed went, and how much ground it covered. Reconciled from
+-- the submitted form state on update, like the extension tables.
+CREATE TABLE seed_treatment_plot (
+    id                 TEXT PRIMARY KEY,
+    seed_treatment_id  TEXT NOT NULL REFERENCES seed_treatment(id) ON DELETE CASCADE,
+    plot_id            TEXT NOT NULL REFERENCES plot(id),
+    surface_sown_ha    REAL NOT NULL,
+    UNIQUE (seed_treatment_id, plot_id)
+);
+
+-- The official model heads each conditional register with "APLICA TRATAMIENTO:
+-- ☐SÍ ☐NO". SÍ derives from rows existing; NO cannot — an empty register is
+-- indistinguishable from an unfilled one, and only one of those is evidence
+-- that the farmer checked. So the negative is stored, exactly as
+-- plot_zone_flag stores an 'outside' result.
+CREATE TABLE register_kind (
+    code     TEXT PRIMARY KEY,   -- 'seed_treatment' | 'postharvest' | 'storage_premises' | 'transport'
+    i18n_key TEXT NOT NULL
+);
+
+CREATE TABLE register_declaration (
+    id            TEXT PRIMARY KEY,
+    farm_id       TEXT NOT NULL REFERENCES farm(id),
+    season_id     TEXT NOT NULL REFERENCES season(id),
+    register_code TEXT NOT NULL REFERENCES register_kind(code),
+    declared_on   TEXT NOT NULL,             -- 'YYYY-MM-DD', when the farmer said so
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    deleted_at    TEXT
+);
+
+-- One live declaration per register and campaign; a withdrawn one keeps its
+-- history (soft delete), so re-declaring does not resurrect the old row.
+CREATE UNIQUE INDEX idx_register_declaration_active
+    ON register_declaration(farm_id, season_id, register_code)
+    WHERE deleted_at IS NULL;
+
+-- ---------------------------------------------------------------------------
+-- Analyses: model section 4
+--
+-- Metadata only. The register records that an analysis was made and where its
+-- bulletin can be found; the bulletin itself stays in the farmer's folder,
+-- which art. 16.3 obliges keeping for three years and the annex page states.
+-- The app has no attachment capability, and giving it one has backup, sync and
+-- mobile-storage consequences that belong to their own decision.
+--
+-- Section 4 carries no "APLICA TRATAMIENTO: SÍ/NO" line — it is a
+-- model-recommended register (art. 16.3's conservation duty), not one of the
+-- conditional ones — so no register_declaration code backs it.
+-- The model's "Material analizado". Our own codes, mapped to the FEGA
+-- MATERIAL_ANALIZADO integers at export — and there are FOUR of them, because
+-- the authority distinguishes the standing crop from the produce taken off it.
+-- The model's parenthetical hint (vegetal / tierra / agua) cannot express that
+-- split, so the book prints FEGA's wording instead.
+CREATE TABLE analysis_material (
+    code     TEXT PRIMARY KEY,   -- 'crop' | 'harvested_produce' | 'soil' | 'water'
+    i18n_key TEXT NOT NULL
+);
+
+-- What the laboratory looked for — the twin's `TiposAnalisis[]`, an array, so a
+-- junction. Our own codes over the FEGA TIPO_ANALISIS six.
+CREATE TABLE analysis_type (
+    code     TEXT PRIMARY KEY,
+    i18n_key TEXT NOT NULL
+);
+
+
+CREATE TABLE analysis_record (
+    id                  TEXT PRIMARY KEY,
+    season_id           TEXT NOT NULL REFERENCES season(id),
+    farm_id             TEXT NOT NULL REFERENCES farm(id),
+    sampled_on          TEXT NOT NULL,             -- 'YYYY-MM-DD'
+    material_kind_code  TEXT NOT NULL REFERENCES analysis_material(code),
+    bulletin_number     TEXT,
+    lab_name            TEXT,
+    -- The printed model asks for "Laboratorio (nombre y dirección)"; the twin
+    -- carries only a name and a NIF. The model is the compliance artifact.
+    lab_address         TEXT,
+    lab_tax_id          TEXT,
+    -- Free text, KEPT alongside the coded analysis_substance junction rather
+    -- than replaced by it: SUST_ACTIVAS only codes phytosanitary actives
+    -- (TipoAnalisis 1), so a heavy-metals, nutrients or soil-parameters
+    -- bulletin has nothing to code and would otherwise be unrecordable.
+    substances_detected TEXT,
+
+    -- Anexo III Parte I A.3 — the soil block (added 2026-08-08).
+    --
+    -- It lives HERE rather than in a soil table, and here rather than in
+    -- module-fertilisation, for two separate reasons. The SIEX twin settles
+    -- the first: `Analitica.ParametrosSuelo` is a sub-object OF an analysis,
+    -- because soil data reaches a holding as a laboratory bulletin like any
+    -- other. The module boundary settles the second: `analysis_record` is
+    -- module-cue's table, and a module may never add columns to another
+    -- module's schema — so although the *consumer* of soil data is the
+    -- fertilisation domain (RD 1051/2022 art. 5.b and art. 6 make it an input
+    -- to the plan de abonado), the columns belong to the crate that owns the
+    -- register, and the record book reads across both.
+    --
+    -- All nullable, and deliberately: A.3's minimums bind only one year after
+    -- MAPA publishes its sampling and analysis guides, which it has not, and a
+    -- bulletin reports whatever the farmer asked to be measured.
+    --
+    -- Units are fixed by the column name, the `water_nitric_n_mg_l` precedent
+    -- — the twin states none. Safe here where importing a provider's number
+    -- would not be: the farmer reads a figure off a bulletin into a field
+    -- whose label states the unit, converting if their lab used another.
+    soil_ph                  REAL,   -- dimensionless
+    soil_organic_matter_pct  REAL,   -- % of dry matter
+    soil_available_p_mg_kg   REAL,   -- P asimilable (Olsen/Bray), mg/kg
+    soil_available_k_mg_kg   REAL,   -- K asimilable, mg/kg
+    soil_total_n_pct         REAL,   -- N total, %
+    soil_conductivity_ds_m   REAL,   -- CE at 25 °C, dS/m
+    -- Texture is THREE figures in the twin (`Arena`/`Limo`/`Arcilla`), not one
+    -- class name: the repository checks they sum to 100 when all three are
+    -- given, since they are fractions of one whole.
+    soil_sand_pct            REAL,
+    soil_silt_pct            REAL,
+    soil_clay_pct            REAL,
+
+    notes               TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    deleted_at          TEXT
+);
+
+-- What was sampled, as the model's "Cultivo o cosecha muestreados" (order
+-- numbers from table 2.1). No surface column: the model asks which parcels, not
+-- how much of them. Reconciled from the submitted form state on update.
+CREATE TABLE analysis_plot (
+    id                 TEXT PRIMARY KEY,
+    analysis_record_id TEXT NOT NULL REFERENCES analysis_record(id) ON DELETE CASCADE,
+    plot_id            TEXT NOT NULL REFERENCES plot(id),
+    crop_id            TEXT REFERENCES crop(id),
+    crop_name_snapshot TEXT,                     -- frozen crop at sampling time
+    variety_snapshot   TEXT,
+    UNIQUE (analysis_record_id, plot_id)
+);
+
+CREATE TABLE analysis_record_type (
+    id                  TEXT PRIMARY KEY,
+    analysis_record_id  TEXT NOT NULL REFERENCES analysis_record(id) ON DELETE CASCADE,
+    analysis_type_code  TEXT NOT NULL REFERENCES analysis_type(code),
+    UNIQUE (analysis_record_id, analysis_type_code)
+);
+
+-- The active substances a residue analysis found, as FEGA SUST_ACTIVAS codes
+-- stored verbatim with NO FK — the treatment_problem.problem_code rule. The
+-- catalogue carries each substance's CAS number, which is the key a future
+-- French or Italian export would match on; that, not its size, is why the code
+-- is the payload here.
+--
+-- A code absent from the vendored snapshot is ACCEPTED, never rejected: the
+-- snapshot travels with app releases and a laboratory does not wait for one.
+CREATE TABLE analysis_substance (
+    id                  TEXT PRIMARY KEY,
+    analysis_record_id  TEXT NOT NULL REFERENCES analysis_record(id) ON DELETE CASCADE,
+    substance_code      TEXT NOT NULL,
+    UNIQUE (analysis_record_id, substance_code)
 );
 
 -- Integer aliases regulatory exports assign to activity records (2026-07-15,
@@ -255,5 +671,17 @@ CREATE INDEX idx_treatment_problem_treatment ON treatment_problem(treatment_reco
 CREATE INDEX idx_treatment_justification_treatment ON treatment_justification(treatment_record_id);
 CREATE INDEX idx_treatment_record_season  ON treatment_record(season_id);
 CREATE INDEX idx_treatment_record_farm    ON treatment_record(farm_id);
+CREATE INDEX idx_non_field_problem_treatment
+    ON non_field_treatment_problem(non_field_treatment_id);
+CREATE INDEX idx_non_field_justification_treatment
+    ON non_field_treatment_justification(non_field_treatment_id);
+CREATE INDEX idx_non_field_treatment_book ON non_field_treatment(season_id, farm_id);
+CREATE INDEX idx_register_declaration_book ON register_declaration(farm_id, season_id);
+CREATE INDEX idx_seed_treatment_book      ON seed_treatment(season_id, farm_id);
+CREATE INDEX idx_seed_treatment_plot_rec  ON seed_treatment_plot(seed_treatment_id);
+CREATE INDEX idx_analysis_record_book     ON analysis_record(season_id, farm_id);
+CREATE INDEX idx_analysis_plot_rec        ON analysis_plot(analysis_record_id);
+CREATE INDEX idx_analysis_type_rec        ON analysis_record_type(analysis_record_id);
+CREATE INDEX idx_analysis_substance_rec   ON analysis_substance(analysis_record_id);
 CREATE INDEX idx_product_auth_product     ON product_authorisation(product_id, country_code);
 CREATE INDEX idx_alert_status_due         ON alert(status, due_date);

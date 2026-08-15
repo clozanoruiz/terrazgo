@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[package]
+name = "terrazgo-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo network seam — the HTTP agent, its TLS trust policy and the offline diagnosis every in-app fetch shares (no caching, no domain, no user data)"
+
+[lints]
+workspace = true
+
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+thiserror = { workspace = true }
+ureq = { workspace = true }
+
+# Android-only: lazy platform-verifier initialization before the first request
+# (see src/android.rs for why it lives at the request chokepoint, not startup).
+[target.'cfg(target_os = "android")'.dependencies]
+jni = { workspace = true }
+tao = { workspace = true }
+rustls-platform-verifier = { workspace = true }

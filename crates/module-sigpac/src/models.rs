@@ -36,6 +36,85 @@ impl RecintoInfo {
     }
 }
 
+/// One line of the PAC graphical declaration (`cultivo_declarado`) for a
+/// recinto: what the holder declared growing there in a given campaign.
+///
+/// `properties` keeps the full attribute set untyped, like [`RecintoInfo`] —
+/// the declaration carries aid lines and expediente identity the app has no
+/// use for today. Note what is NOT here: `exp_ano`. The service accepts it as
+/// a filter but omits it from item responses (live-probed 2026-08-02), so the
+/// campaign a line belongs to is the campaign that was asked for, and it
+/// travels in [`DeclaredCampaign`] rather than being read back per feature.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclaredCrop {
+    pub properties: Map<String, Value>,
+}
+
+impl DeclaredCrop {
+    /// Declared crop code (`parc_producto`), a FEGA PRODUCTOS catalogue code.
+    pub fn product_code(&self) -> Option<i64> {
+        self.properties.get("parc_producto").and_then(Value::as_i64)
+    }
+
+    /// Secondary crop code (`cultsecun_producto`) when the line declares one —
+    /// a second crop on the same recinto, not a replacement for the first.
+    pub fn secondary_product_code(&self) -> Option<i64> {
+        self.properties
+            .get("cultsecun_producto")
+            .and_then(Value::as_i64)
+    }
+
+    /// Exploitation system (`parc_sistexp`): `"S"` secano, `"R"` regadío —
+    /// both observed live 2026-08-03. It says whether the crop is irrigated,
+    /// never by which system, so it maps to `rainfed` or to nothing.
+    pub fn exploitation_system(&self) -> Option<&str> {
+        self.properties.get("parc_sistexp").and_then(Value::as_str)
+    }
+
+    /// Declared cultivated surface in hectares. `parc_supcult` is in **square
+    /// metres** (296800 = 29,68 ha — the same m² trap as the MVT layer).
+    pub fn cultivated_area_ha(&self) -> Option<f64> {
+        self.properties
+            .get("parc_supcult")
+            .and_then(Value::as_f64)
+            .map(|m2| m2 / 10_000.0)
+    }
+}
+
+/// Declaration lines together with the campaign that actually answered for
+/// them — the service serves one campaign behind, so which year a proposal
+/// speaks for is part of the answer, never an assumption.
+#[derive(Debug, Clone, Serialize)]
+pub struct DeclaredCampaign {
+    pub campaign: i64,
+    pub lines: Vec<DeclaredCrop>,
+}
+
+/// Parse an OGC API Features `cultivo_declarado` items response.
+///
+/// Unlike [`parse_recinto_response`], **every** feature is kept: one recinto
+/// can carry several declaration lines. An empty FeatureCollection is a real
+/// answer — "nothing declared here" — and the service returns it as HTTP 200
+/// with `numberMatched: 0`, never a 404 (live-probed 2026-08-02).
+pub fn parse_declared_crops_response(bytes: &[u8]) -> Result<Vec<DeclaredCrop>> {
+    let document: Value = serde_json::from_slice(bytes)?;
+    let features = document
+        .get("features")
+        .and_then(Value::as_array)
+        .ok_or(GeoError::Invalid("sigpac_response_invalid"))?;
+    features
+        .iter()
+        .map(|feature| {
+            let properties = feature
+                .get("properties")
+                .and_then(Value::as_object)
+                .cloned()
+                .ok_or(GeoError::Invalid("sigpac_response_invalid"))?;
+            Ok(DeclaredCrop { properties })
+        })
+        .collect()
+}
+
 /// One zone-layer intersection as the service reports it: percentage of the
 /// recinto inside the zone, plus an optional description ("Zona periférica").
 #[derive(Debug, Clone, Serialize)]

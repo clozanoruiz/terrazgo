@@ -13,8 +13,10 @@ Terrazgo is an offline-first desktop/mobile app: a Svelte webview talking to
 a Rust backend over Tauri's IPC, with SQLite as the single source of truth on
 the device. No network calls exist in any core or module code path — that is
 a hard rule, not an accident of youth. The one sanctioned network seam is the
-`terrazgo-geo` crate (map tiles and providers, see "The map tier" below), and
-even that is cache-through: with no network the app keeps working.
+`terrazgo-net` crate (see "The network seam" below); its two consumers are
+`terrazgo-geo`, which wraps it in cache-through map fetching, and the shell's
+catalogue refresh, which the user has to ask for. With no network the app
+keeps working.
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -25,7 +27,7 @@ even that is cache-through: with no network the app keeps working.
            │ invoke (JSON in/out)    │ geo:// (tiles, styles)
 ┌──────────▼─────────────────────────▼───────────────────┐
 │  src-tauri/  — shell (crate `terrazgo`)                │
-│  commands.rs (thin wrappers + error boundary)          │
+│  commands.rs (boundary) + commands/ (one file/domain)  │
 │  geo_protocol.rs (geo:// handler) · registry.rs        │
 │  db.rs (composed migration runner)                     │
 │  state.rs (AppState, GeoState, SettingsState)          │
@@ -37,13 +39,15 @@ even that is cache-through: with no network the app keeps working.
 │ treatment domain │ │ farm registry +  │ │ base-map sources,    │
 │ product,         │ │ geo_feature,     │ │ style rewriting,     │
 │ treatment, alert │ │ audit, backup,   │ │ boundary-file import │
-│ + CUE lookups    │ │ date, geojson    │ │ (ALL network I/O)    │
+│ + CUE lookups    │ │ date, geojson    │ │ cache-through fetch  │
 └──────────────────┘ └─────┬────────────┘ └───┬──────────────────┘
-                     ┌─────▼───────┐   ┌──────▼───────┐
-                     │ terrazgo.db │   │ geo-cache.db │  derived, re-fetchable,
-                     │ user data,  │   │ tiles/styles │  never in backups or
-                     │ WAL, FKs on │   │ own runner   │  record_change
-                     └─────────────┘   └──────────────┘
+                     ┌─────▼───────┐   ┌──────▼───────┐  ┌──────────────────┐
+                     │ terrazgo.db │   │ geo-cache.db │  │ terrazgo-net     │
+                     │ user data,  │   │ tiles/styles │  │ the ONLY HTTP    │
+                     │ WAL, FKs on │   │ own runner   │  │ agent + TLS      │
+                     └─────────────┘   └──────────────┘  └──────────────────┘
+                        derived, re-fetchable, never in    ▲ used by geo and
+                        backups or record_change           │ the shell only
 ```
 
 Dependency direction is one-way and enforced by the crate graph — the
@@ -56,16 +60,45 @@ compiler, not discipline, prevents a core→module import:
   pure-parsing GeoJSON validator, backup and the device-local settings file.
 - Modules depend on `terrazgo-core`. The CUE module owns the treatment
   domain: products, authorisations, treatment records, alerts.
-- `terrazgo-geo` depends on `terrazgo-core` only (for the GeoJSON validator
-  and error conventions) and owns **all network I/O in the app** plus the
-  boundary-file importers. No user data lives there.
+- `terrazgo-net` is the **network seam** (2026-08-09): the process-wide HTTP
+  agent, its TLS trust policy, the Android bootstrap that policy needs, and the
+  offline diagnosis. It depends on no other workspace crate and knows nothing
+  about caching, tiles or catalogues — it answers "fetch these bytes, or say
+  why not". **Core and the modules must never name it**: core having no HTTP
+  crate anywhere in its dependency tree is the build-enforced form of the
+  offline-first rule.
+- `terrazgo-geo` depends on `terrazgo-core` (for the GeoJSON validator and
+  error conventions) and on `terrazgo-net`, and owns the map's cache-through
+  fetching plus the boundary-file importers. No user data lives there.
 - `terrazgo-report` depends on no other workspace crate — pure
-  infrastructure: in-process PDF generation via Typst, with the Liberation
-  Sans faces embedded in the binary. Modules own their `.typ` templates and
-  depend on this crate to render them (see "The report engine" below); the
-  first consumer is the CUE printable cuaderno (`module_cue::report` +
-  `crates/module-cue/templates/cuaderno.typ`).
-- The shell depends on all three and owns everything Tauri-specific: command
+  infrastructure: in-process **PDF** generation via Typst (Liberation Sans
+  faces embedded in the binary) and in-process **spreadsheet** generation via
+  `rust_xlsxwriter` (added 2026-08-02). Templates and workbook descriptions
+  live with whoever owns the document; both are rendered here, so document
+  technology never leaks into a domain crate (see "The report engine" below).
+- `terrazgo-recordbook` is the **record book itself** (2026-08-07): the data
+  assembly, the per-language labels, the region → language map, the Typst
+  template and both renderers. It is a **read model** — it holds no state and
+  writes nothing, it reads core and the domain modules and projects one
+  document. That is why it may depend on several modules where a module never
+  may: it is a top-layer *consumer*, like the shell, and a **leaf** that
+  nothing depends on but the shell, so it cannot create cycles. It was
+  extracted from `module_cue::report`, whose assembly already read
+  `terrazgo_core::` 18 times against its own domain 4 — the book was a core
+  reader living in the treatment module, and a second contributing module
+  would have forced everything the book touches into the core. It owns its own
+  `RecordbookError` (2026-08-07): the book borrowed `module_cue::Result` when
+  it was first extracted, and a document that reads several domains must not
+  report failures as though it were any one of them.
+- `module-fertilisation` is the record book's **second decree** (2026-08-07):
+  fertilisation, irrigation and soil records under RD 1051/2022, whose art. 5
+  has been binding since 1 January 2026. It depends on `terrazgo-core` and on
+  no other module — where it needs something module-cue also needs (units of
+  measure), that thing lives in core. The *record* of irrigation is here rather
+  than in a future Irrigation module because art. 5.e puts irrigation doses and
+  dates inside the same cuaderno duty as fertilisation; the Irrigation module
+  keeps planning.
+- The shell depends on all of these and owns everything Tauri-specific: command
   wrappers, the migration runner, the `geo://` protocol, managed state, the
   window.
 - In the frontend, `i18n.js`, the locale dictionaries, `lib/backend.js` and
@@ -76,6 +109,22 @@ The mental model for the split: **the core is the farm registry; a module is
 a regulatory or functional domain built on top of it.** CUE gives the core
 entities their Spanish phytosanitary meaning; a future irrigation module
 would give plots an irrigation meaning without the core changing.
+
+**Where a new thing goes**, so the question is answered once:
+
+- shared **data** → the core (harvest, water points, advisors)
+- a **domain** with its own logic → a module (treatments, fertilisation, SIGPAC)
+- shared **presentation** → a consumer crate above the modules (the record book)
+
+A document that spans domains does *not* justify moving those domains into the
+core. The alternative considered and rejected was a `Module` trait method
+letting each module contribute its own section: the record book is a **fixed
+legal form** whose sections cross-reference each other (3.1 prints the plot
+order numbers computed in 2.1), so no module can emit its section without
+knowing the whole book, and the single template that serves every language
+would fragment across crates. If a module ever needs to contribute without the
+book knowing it, that method can be added **over** the consumer crate rather
+than instead of it.
 
 ## Life of a command
 
@@ -107,7 +156,7 @@ in `lib.rs`'s `generate_handler!` list. Argument names arrive camelCase on
 the JS side for plain arguments (`farmId`), but struct payloads keep their
 snake_case field names — they are serde's business, not Tauri's.
 
-**4. The command wrapper** (`src-tauri/src/commands.rs`) is deliberately
+**4. The command wrapper** (`src-tauri/src/commands/cue.rs`) is deliberately
 thin — lock, delegate, `?`:
 
 ```rust
@@ -150,12 +199,19 @@ Either all of it commits or none of it does.
 resolves the JS promise; the view shows a success notification and reloads
 its list. An `Err` is where the error boundary earns its keep:
 
-- Repositories return typed errors (`CoreError`, `CueError` — `thiserror`).
+- Repositories return typed errors (`CoreError`, `CueError`, `GeoError` —
+  `thiserror`); the record book returns `RecordbookError`.
 - The command's `?` converts them into `CommandError(anyhow::Error)` via a
   blanket `From` impl.
 - `CommandError` serializes as `{ code, params, message }`: `classify()`
-  downcasts the `anyhow::Error` back to the domain error and maps variants
-  to stable machine codes (`authorisation_missing`, `invalid.empty_name`…).
+  downcasts the `anyhow::Error` back to the domain error and asks it for its
+  code. **The mapping lives in the crate that owns the error** (the
+  `terrazgo_core::Classify` impl beside each enum, since 2026-08-13), so the
+  exhaustive match is next to the variants: adding one is a compile error in
+  the crate where it was added rather than a silent fall-through to `internal`
+  in a shell file the module author never opens. The shell keeps only the
+  downcast chain, which is irreducible — `anyhow::downcast_ref` needs a
+  concrete type.
 - The frontend renders the `error.<code>` i18n key with `params`
   interpolated. `internal` (any non-domain error) deliberately has **no**
   dictionary entry: the localized `error.internal_intro` line is prefixed to
@@ -189,6 +245,85 @@ never be used from two threads at once — so the mutex serialises all
 database access through the single connection. For a single-user desktop app
 that is exactly right; if a long query ever blocks the UI, the upgrade path
 is a connection pool (r2d2), not removing the lock.
+
+### On Android the webview starts first, and the first reply waits for a second message
+
+Desktop creates its window after `setup()` returns, so nothing can call a
+command too early. **Android does not**: the activity builds the webview while
+`setup()` is still running, so the frontend is live and invoking before managed
+state exists. `src/main.js` therefore gates `mount()` behind a poll of
+`app_ready`, a command that deliberately takes `AppHandle` rather than `State`
+so it is callable before anything is managed, and reports readiness by probing
+the `SetupComplete` marker that `setup()` manages **last**.
+
+The gate polls rather than awaits once, and that is load-bearing for a reason
+measured on-device (Galaxy A22, Android 13, WebView 151, fresh data dir):
+
+```
++0.000s  rust: app_ready executed #1 -> false
++0.670s  rust: setup hook COMPLETE
++6.069s  js:   probe #1 finally resolves false   <- 10ms after probe #2 was posted
+```
+
+The command runs immediately and its answer is ready at once; setup finishes
+well before the answer is delivered. Widening the probe timeout from 2s to 6s
+moved that delivery from +2.07s to +6.07s in step with it, always ~10 ms after
+the *next* probe was posted. **A pending reply is delivered when the next IPC
+message is posted** — not when the command returns, not when the main thread
+frees.
+
+So a single awaited `invoke` at startup deadlocks against itself: its answer is
+waiting for a next message, and the caller only sends one after receiving the
+answer. That is what produced a permanently blank first launch on a fresh
+install, recoverable only by relaunching.
+
+**The fix is the startup order, not the retry.** `setup()` now returns in
+microseconds and does its real work — open and migrate the database, import the
+catalogues, refresh alerts, load settings, open the geo cache — on a worker in
+`initialise()`, managing `SetupComplete` last exactly as before. The event loop
+is therefore running *before the webview exists*, so nothing can be queued into
+the window where replies are parked, and the defect is unreachable rather than
+worked around. The 2 s probe timeout stays as a belt: it costs one timer, and on
+a launch slow enough to exceed it (the first start after an install, while ART
+compiles) the retry still posts the message that delivers the previous answer.
+
+The cost of returning early is that the window now appears before the app can
+render, so `src/index.html` carries a wordless spinner that `main.js` removes
+just before `mount()`. Wordless because it renders before i18n has resolved a
+locale.
+
+The consequence for anything else that runs early: **do not await a lone invoke
+before the gate has completed.** Everything downstream is safe by construction —
+`loadLookups()` and every view's mount-time fetch run after `await
+waitForBackend()`, by which point at least two messages have been exchanged and
+replies flow in ~10 ms — but code that moves ahead of the gate loses that
+guarantee, and a parked promise raises nothing for `run()` to report.
+
+**Where the defect actually lives — measured, after two wrong guesses.** It is
+in **tao**, not in wry and not in this app. A command result returned from a
+non-main thread is dispatched through tao's `EventLoopProxy`
+(`tauri-runtime-wry`, `send_user_message`), and on Android **a user event sent
+before `event_loop.run()` is queued but never wakes the loop**; it arrives only
+when some later event flushes the whole backlog. Reproduced standalone in ~90
+lines of pure tao — no wry, no webview, no Tauri — on both tao 0.35.3 and
+0.36.0, while the identical pattern delivers on desktop. It needs concurrent
+ndk_glue traffic to bite, which an activity starting up always produces; with a
+quiet pipe the same event is delivered in 1 ms.
+
+Two earlier explanations were wrong and are recorded so they are not re-derived.
+It is **not** wry's `MainPipe`: probes sent down it (`JniHandle::exec`) are
+delivered in 0–1 ms in every configuration, including with the Android UI thread
+deliberately blocked. And it is **not** a blocked main thread as such: blocking
+either thread *while the loop is already running* delays delivery correctly and
+no more. Both claims were asserted before being measured, and both died on the
+first measurement.
+
+**Tried and rejected, so it is not retried:** making `app_ready` an `async fn`.
+Tauri dispatches sync commands to the main thread and async ones to the runtime
+pool, so "the main thread is contended during Android startup" was the obvious
+suspect. Measured with the retry pump disabled, it changes nothing — Rust logs
+the command executing while the frontend's promise is still pending 15 s later.
+The parking is in reply **delivery**, not in command dispatch.
 
 ## The data model in five ideas
 
@@ -333,7 +468,15 @@ re-opened and integrity-checked before success is reported; an unverified
 backup of regulatory records is worse than none. Import validates, exports
 an automatic safety copy of the live db first, then swaps and re-migrates.
 Older backups are fine (migrated forward on open); newer-than-app backups
-are refused. Details: [backup-restore.md](backup-restore.md).
+are refused. A backup at the *current* version is also shape-checked, because
+while the project is pre-release the migration files are edited in place and
+`user_version` therefore cannot tell a file taken before an edit from one
+taken after — left unchecked it would import cleanly and fail later with
+`no such column`. **That fingerprint composes the way the migration sequence
+does**: core owns its own tables, each module contributes its own through
+`validate_backup`'s `module_shape` argument, and the shell passes them
+together — core may never name a module's table, not even in a constant.
+Details: [backup-restore.md](backup-restore.md).
 
 **Sync** is staged, and the stages explain several present-day choices:
 
@@ -348,6 +491,30 @@ Stages 2–3 need no schema rework. The live db file itself must never be
 placed on a network drive or file-sync service — WAL breaks across network
 filesystems; sync travels through exported bundles only.
 
+### Spreadsheets: the second renderer
+
+`render_xlsx` (2026-08-02) is the same shape of seam as `render_pdf`: callers
+describe *what* a document contains — `Workbook` → `Sheet` → `Cell` — and the
+engine owns *how* it looks (bold frozen header, autofilter, column widths,
+`dd/mm/yyyy` dates). No module touches `rust_xlsxwriter`, so the look stays
+consistent across the reports modules will add, and the crate could be swapped
+without touching a caller.
+
+The design rule that matters is **typed cells**. The Typst template consumes
+pre-formatted Spanish strings because it only does layout; a spreadsheet must
+not, because sorting by date, filtering a product and summing hectares all
+need real values. So a document's assembly produces a typed intermediate and
+each renderer formats from it — one read of the database, two presentations,
+and a new field is added in one place. Numbers deliberately carry no number
+format: Excel renders them in the reader's own locale, which is how a Spanish
+user gets decimal commas without the app hard-coding them.
+
+Empty stays empty: an unknown value is a blank cell, never a zero (a
+spreadsheet would add zeros up, and official forms leave blanks for
+hand-filling). Excel's tab-name rules — forbidden characters, a 31-character
+cap, no duplicates — are repaired by the engine rather than pushed onto
+callers, because a report must never fail over a tab name.
+
 ## The report engine: Typst in-process
 
 Printable documents (the official cuaderno first; fertilisation plans, cost
@@ -360,8 +527,10 @@ row breaking and repeating headers).
 The whole pipeline is offline by construction:
 
 - **Templates** are Typst source owned by the consuming module, embedded via
-  `include_str!`. Report labels are per-country template content (Spanish
-  for the official cuaderno), never UI i18n keys.
+  `include_str!`. A template holds layout, not prose: its labels are
+  per-country document content — never UI i18n keys — but they arrive as
+  ordinary inputs, so one template serves every language the document may be
+  printed in (see "The book's language" below).
 - **Fonts**: the four Liberation Sans faces (~1.6 MB, OFL-1.1 — licence
   vendored alongside in `crates/terrazgo-report/fonts/`) are embedded with
   `include_bytes!`. Liberation Sans is metric-compatible with Arial, the
@@ -391,7 +560,7 @@ Rendering is synchronous and CPU-bound; commands that call it follow the
 long-running-command rule (`async fn`).
 
 **The printable cuaderno** (first consumer, added 2026-07-16) follows one
-more rule worth copying: `module_cue::report::cuaderno_inputs` pre-formats
+more rule worth copying: `terrazgo_recordbook::cuaderno_inputs` pre-formats
 EVERYTHING into strings (dd/mm/yyyy dates, decimal-comma numbers, the
 official Spanish words for closed lookups) so the template does layout only,
 and the data contract is pinned as plain JSON in `tests/report.rs` without
@@ -403,6 +572,70 @@ missing fields blank like the paper form (no precheck — unlike the SIEX
 export, a farmer can always print the current state), and adds a
 plazo-de-seguridad column the model lacks (the content list of RD 1311/2012
 Anexo III is what binds, and PHI is on it).
+
+**Catalogue labels resolve once per book, never once per row** (2026-08-13).
+Assembly used to read every coded cell with its own point query — each one a
+single indexed lookup, harmless on a smallholder's book, and exactly the shape
+the scale rule warns about: *"keep report assembly to a bounded number of
+queries rather than one per row"*. All of it now goes through one private
+`CatalogueCache`, created per book and threaded beside the connection, so the
+reads a book makes are bounded by the **distinct codes it prints** rather than
+by how many rows print them.
+
+**The design choice is memoise per code, NOT preload per catalogue.** Preloading
+is the obvious fix while the vocabularies are small (`EST_FENOLOGICO` has ten
+rows, `TIPO_MEDIDA_FITOSANITARIA` fourteen), but the same funnel resolves
+`MUNICIPIO_SIGPAC` (8 434 rows) and `DETALLE_MATERIAL_FERT` (1 243) while a book
+names a handful of towns and materials — reading a whole catalogue to resolve
+three of its rows costs more than the queries it saves. Memoising is bounded at
+either size, so one mechanism serves every catalogue and no call site has to
+choose. A code that resolves to nothing is remembered as such, or a book written
+against a catalogue this installation never imported would re-ask for every row.
+
+Counting the sites corrected what this section previously recorded, and the
+corrections are the useful part. There were **nine**, not three — the shape had
+spread through `catalogue_label` and through three functions that called
+`find_code` themselves. The per-row lookup on a plot row is the **término
+municipal**, not the province: the holding's province is read once for the 1.1
+header, while `MUNICIPIO_SIGPAC` is asked per plot. And "nothing else in
+assembly has this shape" was wrong twice over — the fertilisation register
+resolved its machinery name with a query per row, and `list_plots` ran a third
+time to build a plot-name map `plot_rows` already had the data for (the order
+numbers and the names now travel together as one `PlotIndex`).
+
+The invariant is pinned by assembling the demo book twice, the second time with
+four times the treatments, and asserting the asks multiply while the reads stand
+still.
+
+### The book's language
+
+The record book's **layout is per country** (the Spanish official model, which
+never forks) while its **language is per region**: where a co-official language
+exists, a farmer must be able to hand an inspector the same book in either one.
+So the document owns a `Labels` struct per language
+(`terrazgo_recordbook::labels`), serialized into the template's `sys.inputs` and
+read by the spreadsheet renderer as well.
+
+Three properties are worth keeping when a second document needs this:
+
+- **A Rust struct, not a dictionary file.** A missing translation becomes a
+  compile error, which is stronger than the key-parity contract test the
+  frontend dictionaries need — and serde produces the template's dictionary
+  for free.
+- **Prose translates, codes do not.** The model's own siglas (SEC/ASP/LOC/GRA,
+  AE/PI/CP/…), dose-unit symbols and the FEGA catalogue labels resolved for
+  "problema fitosanitario" are payload printed verbatim in every language; the
+  footnote that explains a sigla is what translates. The assembly therefore
+  holds no prose at all — even the 2.2 zone summary is stored as values and
+  worded at render time.
+- **Which languages are offered is derived, not configured.**
+  `terrazgo_recordbook::region` maps INE province codes (the farm's registry
+  province plus each plot's SIGPAC reference) to the languages co-official
+  there, intersected with the ones that have a dictionary — so a co-official
+  language with no dictionary yet simply does not appear, and adding one is a
+  single `Labels` const. A holding with no province recorded is offered every
+  language rather than none: an unfilled form field is not a statement about
+  what the farmer may print.
 
 ## Device-local settings
 
@@ -747,6 +980,15 @@ architectural skeleton:
 - **i18n**: every user-facing string is a key present in *every* locale
   dictionary (a contract test enforces it); schema codes are translated at
   display time via `tCode`; user-entered data is never translated.
+- **The form controls are owned, not the platform's** (2026-08-14): dates,
+  time and every dropdown are the `.tz-*` component family on Bits UI
+  (headless primitives — behaviour and ARIA, no styling). The reason is
+  correctness, not looks: the native date picker follows the **OS** locale and
+  would override the language the holding chose, on a field that appears in
+  every register of the book. Each takes and returns a plain string, so the
+  migration moved no view logic. Rules, the 40-row cap and the four Bits UI
+  components that must never be used are in
+  [frontend-conventions.md](frontend-conventions.md) → "Owned controls".
 - **No `@tauri-apps/api` dependency** — `withGlobalTauri` exposes
   `window.__TAURI__`, and plugin calls ride the same transport
   (`invoke("plugin:dialog|save")`).
@@ -841,8 +1083,9 @@ Selective test-first, by code category:
 
 Releases live at
 [github.com/clozanoruiz/terrazgo](https://github.com/clozanoruiz/terrazgo),
-together with the issue tracker: per-platform installers (Linux AppImage/deb,
-Windows NSIS + portable `.zip`) plus the **complete source of that version** —
+together with the issue tracker: per-platform installers (Linux AppImage/deb/rpm,
+Windows NSIS + portable `.zip`, Android APK) plus the **complete source of that
+version** —
 one snapshot commit per release, so the AGPL source-offer travels with every
 distributed binary. The installers are built by that repository's own
 `build.yml` workflow from the tagged source itself, so every binary comes from
@@ -858,12 +1101,26 @@ written by hand before a draft release is published.
   [frontend-conventions.md](frontend-conventions.md#adding-a-command-end-to-end-checklist)
   (repository + test → thin wrapper → `generate_handler!` → i18n keys →
   `refresh_alerts` if inputs changed → `run()` + `notify()`).
-- **Add a view** → one `NAV_ITEMS` entry in `src/lib/nav.js` + a router
-  branch in `App.svelte`; keys in every locale file.
-- **Add a module** → new crate under `crates/` depending on
-  `terrazgo-core`; implement `Module` (name + `migration_set()`); register
-  it at the END of `registered_modules()`; list its commands manually in
-  `lib.rs`. The core does not change.
+- **Add a view** → one `NAV_ITEMS` entry in `src/lib/nav.js` + one entry in
+  `src/lib/routes.js` (the router table is data, not a branch chain); keys in
+  the area file of every locale.
+- **Add a module** → new crate under `crates/` depending on `terrazgo-core`;
+  implement `Module` (`name`, `migrations`, `backup_shape`); register it at the
+  END of `registered_modules()`; add `src-tauri/src/commands/<module>.rs` and
+  list its commands in `lib.rs`'s `generate_handler!`; add a `Classify` impl for
+  its error type and one line to the shell's downcast chain; add one area file
+  per locale. The core does not change.
+  *This used to be about ten hardcoded points; six were removed on 2026-08-13
+  (the single 2940-line `commands.rs`, the backup-shape hand-join, the composed
+  migration count, the i18n contract's crate list, the router branch chain and
+  the three flat dictionaries), and `classify` shrank to one line per module.
+  Two remain ON PURPOSE: the registration line — which IS the seam, and whose
+  removal would mean linker-section discovery, fragile exactly where mobile
+  static linking is — and the `generate_handler!` entry, because the ways out
+  are a tt-muncher macro chain or a build script that regex-scans sources, and
+  the drift it would prevent is already impossible (`command_registration.rs`
+  checks both directions). The reasoning, and why a third-party plugin API is
+  the wrong goal instead, is in* [stack-choices.md](stack-choices.md) *§5.*
 - **Change the schema** → high-stakes: design first.
   Pre-release, edit the squashed `0001`/`0002` and recreate dev databases;
   post-release, append a migration and write both migration tests.

@@ -13,11 +13,11 @@
 "12";"Extracto natural de semillas de Camellia sp. 20% P/V [SL]";"Productos fitosanitarios formulados a base de extracto natural de semillas de Camellia sp. -20% P/V [SL] para su uso en arroz";08/08/2024;06/05/2026;
 "13";"Extracto natural de semillas de Camellia sp. 15% P/P [GR]";"Productos fitosanitarios formulados a base de extracto natural de semillas de Camellia sp. -15% P/P [GR] para su uso en arroz";04/07/2024;06/05/2026;
 "14";"Lambda Cihalotrin 1,5% [CS] P/V";"Productos fitosanitarios formulados a base de Lambda Cihalotrin 1,5% [CS] P/V para aplicación aérea en eriales y arándanos";08/08/2024;12/06/2026;
-"15";"Azadiractin 2,6% [EC] p/v";"Productos fitosanitarios formulados a base de Azadiractin 2,6% [EC] p/v para su uso en pastos, eriales, cerezo, melocotonero (se incluye nectarina, paraguayo y platerina), albaricoquero, manzano, sandía y barbecho";08/08/2024;07/07/2025;11/11/2025
+"15";"Azadiractin 2,6% [EC] p/v";"Productos fitosanitarios formulados a base de Azadiractin 2,6% [EC] p/v para su uso en vid de mesa";08/08/2024;11/08/2026;
 "16";"Fluxapyroxad 30% [SC] P/V";"Productos fitosanitarios formulados a base de Fluxapyroxad 30% [SC] P/V para su uso en caqui";08/08/2024;08/08/2024;14/02/2025
 "17";"Abamectina 1,8 % [EW] P/V";"Productos fitosanitarios formulados a base de Abamectina 1,8 % [EW] P/V para su uso en cultivo protegido por macrotuneles de fresa, frambuesa y mora";08/08/2024;18/03/2025;
 "18";"Spinetoram 25% [WG] P/V";"Productos fitosanitarios formulados a base de Spinetoram 25% [WG] P/V para su uso en naranjo y mandarino";08/08/2024;08/08/2024;18/03/2025
-"19";"Ciantraniliprole 10% [OD] P/V";"Productos fitosanitarios formulados a base de Ciantraniliprole 10% [OD] P/V para su uso en cebolla, ajo, brécol, repollo y coliflor";08/08/2024;06/05/2026;
+"19";"Ciantraniliprole 10% [OD] P/V";"Productos fitosanitarios formulados a base de Ciantraniliprole 10% [OD] P/V para su uso en cebolla, ajo, brécol, repollo, coliflor y zanahoria";08/08/2024;11/08/2026;
 "20";"Spirotetramat 10% [SC] P/V";"Productos fitosanitarios formulados a base de Spirotetramat 10% [SC] P/V para su uso en remolacha azucarera";08/08/2024;08/08/2024;14/02/2025
 "21";"Sulfoxaflor 12% [SC] P/V";"Productos fitosanitarios formulados a base de Sulfoxaflor 12% [SC] P/V para su uso en brócoli, repollo, coliflor, coles chinas, apio, lechuga y similares, espinaca, acelga y hierbas aromáticas, caqui, cítricos (excepto lima), vid de mesa y granado";08/08/2024;06/05/2026;
 "22";"Spinosad 48% [SC] P/V";"Productos fitosanitarios formulados a base de Spinosad 48% [SC] P/V para su uso en granado, caqui y cítricos";08/08/2024;16/04/2026;
@@ -35,11 +35,11 @@
 "34";"Azoxistrobin 25% [SC] P/V";"Productos fitosanitarios formulados a base de Azoxistrobin 25% [SC] P/V para la aplicación aérea en el cultivo del arroz";08/08/2024;08/08/2024;14/02/2025
 "35";"Azoxistrobin 20% + Difenoconazol 12,5% [SC] P/V";"Productos fitosanitarios formulados a base de Azoxistrobin 20% + Difenoconazol 12,5% [SC] P/V para la aplicación aérea en el cultivo del arroz";08/08/2024;07/07/2025;02/03/2026
 "36";"Tidiazurón 50% [WP] P/P";"Productos fitosanitarios formulados a base de Tidiazurón 50% [WP] P/P para su uso en el cultivo del algodón";08/08/2024;12/08/2025;02/03/2026
-"37";"Fluopyram 25% + Trifloxistrobin 25% [SC] P/V";"Productos fitosanitarios formulados a base de Fluopyram 25% + Trifloxistrobin 25% [SC] P/V para su uso en el cultivo del lúpulo";08/08/2024;12/08/2025;02/03/2026
+"37";"Fluopyram 25% + Trifloxistrobin 25% [SC] P/V";"Productos fitosanitarios formulados a base de Fluopyram 25% + Trifloxistrobin 25% [SC] P/V para su uso en el cultivo del lúpulo";08/08/2024;11/08/2026;
 "38";"Oxifluorfen 24% [EC] P/V";"Productos fitosanitarios formulados a base de Oxifluorfen 24% [EC] P/V para su uso en el cultivo del tabaco";08/08/2024;07/07/2025;02/03/2026
 "39";"Carfentrazona-etil 6% [ME] P/V";"Productos fitosanitarios formulados a base de Carfentrazona-etil 6% [ME] P/V para su uso en el cultivo del girasol";08/08/2024;08/08/2024;09/10/2024
 "40";"Ciantraniliprol 20% [SC] P/V";"Productos fitosanitarios formulados a base de Ciantraniliprol 20% [SC] P/V para su uso en Lechuga y similares, acelga, verdolaga, brécol, coliflor, col de Bruselas y repollo";01/10/2024;18/03/2026;
-"41";"Acetamiprid 20% [SG] P/P";"Productos fitosanitarios formulados a base de Acetamiprid 20% [SG] P/P para su uso en almendro, melocotonero y nectarino";01/10/2024;;14/02/2025
+"41";"Acetamiprid 20% [SG] P/P";"Productos fitosanitarios formulados a base de Acetamiprid 20% [SG] P/P para su uso en almendro, melocotonero y nectarino";01/10/2024;11/08/2026;
 "42";"Lambda cihalotrin 22% [CS] P/V";"Tratamiento de semillas de girasol y posterior siembra de semillas tratadas con productos fitosanitarios formulados a base de Lambda cihalotrin 22% [CS] P/V";01/10/2024;01/10/2024;02/10/2024
 "43";"Lambda cihalotrin 10% [CS] P/V";"Productos fitosanitarios a base de Lambda cihalotrin 10% [SC] P/V para su uso en tratamientos insecticidas contra Euwallacea fornicatus sensu lato en aguacates sin fruto, vegetales ornamentales y plantas de especies adventicias";15/11/2024;16/04/2026;
 "44";"Fluxapyroxad 30% [SC] P/V";"Productos fitosanitarios a base de Fluxapyroxad 30% [SC] P/V para su uso en tratamientos fungicidas contra Dactylium dendroides en el cultivo del champiñón";15/11/2024;15/11/2024;04/04/2025
@@ -73,3 +73,5 @@
 "72";"(Z, Z) 3,13 Octadecadien-1-yl acetato 808 g/kg + (E,Z) 3,13 Octadecadien-1-yl acetato 43 g/kg";"Productos fitosanitarios formulados a base de (Z, Z) 3,13 Octadecadien-1-yl acetato 808 g/kg + (E,Z) 3,13 Octadecadien-1-yl acetato 43 g/kg para su uso en frutales de pepita";12/06/2026;12/06/2026;
 "73";"Hexitiazox 25,87% [SC] P/V";"Productos fitosanitarios formulados a base de Hexitiazox 25,87% [SC] P/V para su uso en post recolección en cerezo";12/06/2026;12/06/2026;
 "74";"Hexitiazox 10% [WP] P/P";"Productos fitosanitarios formulados a base de Hexitiazox 10% [WP] P/P para su uso en post cosecha en cerezo";12/06/2026;;
+"75";"Flonicamid 5,25%+Aceite de naranja 45% [EC] P/V";"Productos fitosanitarios formulados a base de Flonicamid 5,25%+Aceite de naranja 45% [EC] P/V para su uso en peral";11/08/2026;11/08/2026;
+"76";"Deltametrin 1,5% [EW] P/V";"Productos fitosanitarios formulados a base de deltametrin 1,5% [EW] P/V para su uso en olmos";11/08/2026;11/08/2026;

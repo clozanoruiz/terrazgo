@@ -17,6 +17,7 @@ typst = { workspace = true }
 typst-layout = { workspace = true }
 typst-pdf = { workspace = true }
 typst-as-lib = { workspace = true }
+rust_xlsxwriter = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 

@@ -7,9 +7,10 @@
 //! table); no UI lives here (that is the shell's `MapCanvas`).
 //!
 //! Design rules (docs/architecture.md + docs/sigpac-integration.md):
-//!   * All network I/O in the app funnels through this crate's cache-through
-//!     [`fetch`]; core and modules stay offline-only. With no network the map
-//!     degrades to cached tiles + stored geometry — the app keeps working.
+//!   * Everything the MAP fetches funnels through this crate's cache-through
+//!     [`fetch`], which rides the shared `terrazgo-net` seam; core and modules
+//!     stay offline-only. With no network the map degrades to cached tiles +
+//!     stored geometry — the app keeps working.
 //!   * The cache is a SEPARATE SQLite file (`geo-cache.db`): bulky, derived,
 //!     re-fetchable — never in backups, `record_change`, or sync.
 //!   * No `sigpac_` names here: Spain-specific service code arrives later as
@@ -18,16 +19,13 @@
 //! Layout:
 //!   * [`db`]      — open/migrate the cache database.
 //!   * [`sources`] — base-map source & resource registry (data, not code).
-//!   * [`fetch`]   — cache-through tile/resource fetching (`ureq`).
+//!   * [`fetch`]   — cache-through tile/resource fetching (over
+//!     `terrazgo-net`).
 //!   * [`style`]   — MapLibre style JSON building/rewriting so the webview
 //!     only ever sees `geo://` URLs.
 //!   * [`import`]  — boundary files (GeoJSON, GeoPackage) → GeoJSON geometries.
 //!   * [`error`]   — `GeoError` / `Result`.
 
-// Android-only TLS bootstrap for the platform verifier; private — its one
-// entry point is called from `fetch::http_get`.
-#[cfg(target_os = "android")]
-mod android;
 pub mod db;
 pub mod error;
 pub mod fetch;

@@ -122,7 +122,7 @@ fn validate_accepts_a_fresh_export_and_reports_its_version() {
     let current = user_version(&conn);
 
     export_backup(&conn, &dest).unwrap();
-    let info = validate_backup(&dest, current).unwrap();
+    let info = validate_backup(&dest, current, &[]).unwrap();
     assert_eq!(info.schema_version, current);
 
     // An OLDER backup (lower user_version) is also accepted: reopening the
@@ -131,7 +131,7 @@ fn validate_accepts_a_fresh_export_and_reports_its_version() {
     copy.pragma_update(None, "user_version", current - 1)
         .unwrap();
     drop(copy);
-    let info = validate_backup(&dest, current).unwrap();
+    let info = validate_backup(&dest, current, &[]).unwrap();
     assert_eq!(info.schema_version, current - 1);
 
     std::fs::remove_file(&source_path).unwrap();
@@ -151,7 +151,7 @@ fn validate_rejects_a_backup_from_a_newer_schema() {
         .unwrap();
     drop(copy);
 
-    let result = validate_backup(&dest, current);
+    let result = validate_backup(&dest, current, &[]);
     assert!(
         matches!(result, Err(CoreError::Invalid("backup_newer_schema"))),
         "importing a newer-schema backup would downgrade and lose data"
@@ -167,7 +167,7 @@ fn validate_rejects_files_that_are_not_terrazgo_backups() {
     let garbage = temp_path("garbage.bin");
     std::fs::write(&garbage, b"definitely not a database").unwrap();
     assert!(matches!(
-        validate_backup(&garbage, 99),
+        validate_backup(&garbage, 99, &[]),
         Err(CoreError::Invalid("backup_invalid"))
     ));
     std::fs::remove_file(&garbage).unwrap();
@@ -179,12 +179,96 @@ fn validate_rejects_files_that_are_not_terrazgo_backups() {
         .execute_batch("CREATE TABLE t (x)")
         .unwrap();
     assert!(matches!(
-        validate_backup(&empty, 99),
+        validate_backup(&empty, 99, &[]),
         Err(CoreError::Invalid("backup_invalid"))
     ));
     std::fs::remove_file(&empty).unwrap();
 
     // A missing file.
     let missing = temp_path("missing.db");
-    assert!(validate_backup(&missing, 99).is_err());
+    assert!(validate_backup(&missing, 99, &[]).is_err());
+}
+
+/// The reason the shape probe exists (docs/cuaderno-print.md → Capture design):
+/// while the project is pre-release, migration files are edited in place, which
+/// adds columns WITHOUT bumping the migration count. `user_version` alone
+/// therefore cannot tell a backup taken before an edit from one taken after —
+/// the stale file would import "successfully" and then fail with `no such
+/// column` on the first query, far from the cause. Comparing the shape rejects
+/// it at the door instead.
+#[test]
+fn validate_rejects_a_current_version_backup_missing_columns() {
+    let source_path = temp_path("stale-shape-src.db");
+    let dest = temp_path("stale-shape-dest.db");
+    let conn = seeded_db(&source_path);
+    let current = user_version(&conn);
+    export_backup(&conn, &dest).unwrap();
+
+    // A fresh export passes.
+    assert!(validate_backup(&dest, current, &[]).is_ok());
+
+    // Simulate the backup of an older squashed schema: same user_version, one
+    // column short. (Dropping is how a real pre-edit file differs from this one.)
+    let copy = Connection::open(&dest).unwrap();
+    copy.execute("ALTER TABLE operator DROP COLUMN tax_id", [])
+        .unwrap();
+    drop(copy);
+
+    let result = validate_backup(&dest, current, &[]);
+    assert!(
+        matches!(result, Err(CoreError::Invalid("backup_invalid"))),
+        "a same-version backup with an older shape must be refused, not imported"
+    );
+
+    std::fs::remove_file(&source_path).unwrap();
+    std::fs::remove_file(&dest).unwrap();
+}
+
+/// Every pre-release schema edit must join the fingerprint, or the probe stops
+/// catching the file it was written for. This pins the crop provenance columns
+/// added for the SIGPAC declared-crops import.
+#[test]
+fn validate_rejects_a_backup_taken_before_the_crop_provenance_columns() {
+    let source_path = temp_path("stale-crop-src.db");
+    let dest = temp_path("stale-crop-dest.db");
+    let conn = seeded_db(&source_path);
+    let current = user_version(&conn);
+    export_backup(&conn, &dest).unwrap();
+
+    let copy = Connection::open(&dest).unwrap();
+    copy.execute("ALTER TABLE crop DROP COLUMN source", [])
+        .unwrap();
+    drop(copy);
+
+    assert!(matches!(
+        validate_backup(&dest, current, &[]),
+        Err(CoreError::Invalid("backup_invalid"))
+    ));
+
+    std::fs::remove_file(&source_path).unwrap();
+    std::fs::remove_file(&dest).unwrap();
+}
+
+/// The shape probe applies only at the current version. An OLDER backup is
+/// exempt on purpose — it is migrated forward on reopen, which is exactly what
+/// makes it importable.
+#[test]
+fn an_older_backup_is_not_shape_checked() {
+    let source_path = temp_path("older-shape-src.db");
+    let dest = temp_path("older-shape-dest.db");
+    let conn = seeded_db(&source_path);
+    let current = user_version(&conn);
+    export_backup(&conn, &dest).unwrap();
+
+    let copy = Connection::open(&dest).unwrap();
+    copy.execute("ALTER TABLE operator DROP COLUMN tax_id", [])
+        .unwrap();
+    drop(copy);
+
+    // Same file, but the app now knows a later version: the backup is "older".
+    let info = validate_backup(&dest, current + 1, &[]).expect("older backups migrate forward");
+    assert_eq!(info.schema_version, current);
+
+    std::fs::remove_file(&source_path).unwrap();
+    std::fs::remove_file(&dest).unwrap();
 }

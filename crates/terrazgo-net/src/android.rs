@@ -9,14 +9,16 @@
 //! hit exactly that: the panic killed a tokio worker mid-`get_map_style`,
 //! the invoke never resolved, and the map stayed silently blank.
 //!
-//! The init is lazy and lives at the fetch chokepoint (`fetch::http_get`)
+//! The init is lazy and lives at the request chokepoint ([`super::http_get`])
 //! rather than at app startup, because startup races activity creation: the
 //! Rust main thread is spawned from the process-lifecycle `onCreate` while
 //! tao captures the activity context in the activity's own `onCreate`. A
 //! network fetch, by contrast, can only be triggered once the webview exists
 //! — and the webview lives inside the activity — so by then the context is
 //! guaranteed. It also keeps the whole TLS trust policy in this crate, next
-//! to the `RootCerts::PlatformVerifier` choice it completes.
+//! to the `RootCerts::PlatformVerifier` choice it completes — which is why it
+//! travelled here with the agent when the network seam was extracted out of
+//! `terrazgo-geo` (2026-08-09).
 //!
 //! The verifier's Kotlin half (`org.rustls.platformverifier.CertificateVerifier`)
 //! must be compiled into the APK: `src-tauri/gen/android/app/build.gradle.kts`

@@ -84,6 +84,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             es: Some(FarmEsFields {
                 rega_code: None,
                 rea_code: Some("ES244700000123".into()),
+                siex_code: None,
                 province_code: Some("47".into()),
             }),
         },
@@ -95,6 +96,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
         conn,
         NewOperator {
             full_name: "Carlos Pérez".into(),
+            tax_id: None,
             licence_number: Some("ROPO-4700123".into()),
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2027-03-01".into()),
@@ -179,7 +181,15 @@ fn insert_crop(
             species_name: species.into(),
             variety: variety.map(Into::into),
             production_system_code: None,
+            area_ha: None,
+            irrigation_code: None,
+            growing_environment_code: None,
+            gip_system_code: None,
             sown_on: None,
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )
@@ -193,11 +203,20 @@ fn treatment(fx: &Fixture, application_date: &str) -> NewTreatmentRecord {
         season_id: fx.season_id.clone(),
         farm_id: fx.farm_id.clone(),
         application_date: application_date.into(),
-        product_id: fx.product_id.clone(),
+        application_end_date: None,
+        application_time: None,
+        product_id: Some(fx.product_id.clone()),
         country_code: None,
-        dose_value: 1.5,
-        dose_unit_code: "l_ha".into(),
+        dose_value: Some(1.5),
+        dose_unit_code: Some("l_ha".into()),
+        total_quantity_value: None,
+        total_quantity_unit_code: None,
         target_organism: None,
+        advisor_id: None,
+        measure_code: None,
+        measure_intensity_value: None,
+        measure_intensity_unit_code: None,
+        measure_registration_number: None,
         // ENFERMEDADES code 254 (mildiu) — a real catalogue code, per the
         // demo-seed convention.
         problems: vec![NewTreatmentProblem {
@@ -218,6 +237,7 @@ fn on_plot(plot_id: &str, crop_id: Option<&str>, surface: f64) -> NewTreatmentPl
         plot_id: plot_id.into(),
         crop_id: crop_id.map(Into::into),
         surface_treated_ha: surface,
+        growth_stage_code: None,
     }
 }
 
@@ -233,6 +253,7 @@ fn insert_machinery(
             farm_id: farm_id.into(),
             name: "Atomizador".into(),
             kind: Some("sprayer".into()),
+            acquired_on: None,
             last_inspection_date: None,
             next_inspection_due_date: None,
             roma_number: roma.map(Into::into),
@@ -244,7 +265,7 @@ fn insert_machinery(
     .id
 }
 
-fn tratamientos(doc: &Value) -> &Vec<Value> {
+fn treatment_activities(doc: &Value) -> &Vec<Value> {
     doc["CUADERNO"][0]["ActividadesExplotacion"]["TratamFito"]
         .as_array()
         .unwrap()
@@ -292,7 +313,7 @@ fn export_validates_against_the_official_schema() {
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
     assert_schema_valid(&doc);
     // Sanity: the multi-crop record split, so 1 + 2 TratamFito entries.
-    assert_eq!(tratamientos(&doc).len(), 3);
+    assert_eq!(treatment_activities(&doc).len(), 3);
 }
 
 #[test]
@@ -334,10 +355,33 @@ fn dates_are_rendered_dd_mm_yyyy() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let t = &tratamientos(&doc)[0];
+    let t = &treatment_activities(&doc)[0];
     // One application day: FechaInicio = FechaFin, in the schema's dd/mm/yyyy.
     assert_eq!(t["FechaInicio"], "01/05/2026");
     assert_eq!(t["FechaFin"], "01/05/2026");
+}
+
+/// The exchange format requires both ends of the actuation. A treatment that
+/// really ran over several days now says so, instead of repeating its start —
+/// the same interval Anexo III Parte I B allows the paper register to record.
+#[test]
+fn an_actuation_interval_fills_both_ends_of_the_exported_dates() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let mut new = treatment(&fx, "2026-05-01");
+    new.application_end_date = Some("2026-05-03".into());
+    repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
+    )
+    .unwrap();
+
+    let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
+    let t = &treatment_activities(&doc)[0];
+    assert_eq!(t["FechaInicio"], "01/05/2026");
+    assert_eq!(t["FechaFin"], "03/05/2026");
 }
 
 #[test]
@@ -356,7 +400,7 @@ fn codes_map_through_the_siex_catalogues() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let t = &tratamientos(&doc)[0];
+    let t = &treatment_activities(&doc)[0];
     // JUSTIFICACION_ACTUACION: monitoring → 2, alert_device → 6;
     // EFICACIA_TRATAMIENTO: fair → 2; TIPO_PRODFITO: registered → 1.
     let justs: Vec<i64> = t["Justificaciones"]
@@ -414,7 +458,7 @@ fn problems_land_in_their_export_buckets() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let pf = &tratamientos(&doc)[0]["ProblematicaFito"];
+    let pf = &treatment_activities(&doc)[0]["ProblematicaFito"];
     assert_eq!(
         pf["Enfermedades"]["TipoEnfermedad"],
         serde_json::json!([254])
@@ -446,7 +490,7 @@ fn absent_problem_buckets_are_omitted() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let pf = &tratamientos(&doc)[0]["ProblematicaFito"];
+    let pf = &treatment_activities(&doc)[0]["ProblematicaFito"];
     assert!(pf.get("Enfermedades").is_some());
     assert!(pf.get("ArtropodosGasteropodos").is_none());
     assert!(pf.get("MalasHierbas").is_none());
@@ -459,8 +503,8 @@ fn dose_units_convert_with_their_exact_factor() {
     let fx = fixture(&mut conn);
     let mut new = treatment(&fx, "2026-05-01");
     // SIEX has no ml/ha: 1500 ml/ha exports as 1.5 L/ha (UNIDADES_MEDIDA 18).
-    new.dose_value = 1500.0;
-    new.dose_unit_code = "ml_ha".into();
+    new.dose_value = Some(1500.0);
+    new.dose_unit_code = Some("ml_ha".into());
     repo::insert_treatment_record(
         &mut conn,
         new,
@@ -470,10 +514,10 @@ fn dose_units_convert_with_their_exact_factor() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let p = &tratamientos(&doc)[0]["ProductosFito"][0];
+    let p = &treatment_activities(&doc)[0]["ProductosFito"][0];
     assert_eq!(p["Unidad"], 18);
-    let dosis = p["Dosis"].as_f64().unwrap();
-    assert!((dosis - 1.5).abs() < 1e-9, "expected 1.5 L/ha, got {dosis}");
+    let dose = p["Dosis"].as_f64().unwrap();
+    assert!((dose - 1.5).abs() < 1e-9, "expected 1.5 L/ha, got {dose}");
     assert!(
         p.get("Cantidad").is_none(),
         "Dosis XOR Cantidad — rate units emit Dosis (descriptor: 'nunca ambas')"
@@ -514,7 +558,7 @@ fn exceptional_authorisations_emit_their_substance_code() {
     .unwrap();
 
     let mut new = treatment(&fx, "2026-05-01");
-    new.product_id = product_id;
+    new.product_id = Some(product_id);
     repo::insert_treatment_record(
         &mut conn,
         new,
@@ -524,7 +568,7 @@ fn exceptional_authorisations_emit_their_substance_code() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let p = &tratamientos(&doc)[0]["ProductosFito"][0];
+    let p = &treatment_activities(&doc)[0]["ProductosFito"][0];
     // TIPO_PRODFITO 4 = autorización excepcional; MateriaActiva is mandatory
     // exactly there (AUTORIZACION_EXCP catalogue code).
     assert_eq!(p["TipoProducto"], 4);
@@ -572,21 +616,21 @@ fn applicator_equipment_emits_exactly_one_identifier() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let ts = tratamientos(&doc);
+    let ts = treatment_activities(&doc);
     assert_eq!(ts.len(), 3);
 
-    let equipo = |i: usize| &ts[i]["IdentificadorAplicador"][0]["EquipoAplicador"];
-    let manual = equipo(0);
+    let equipment = |i: usize| &ts[i]["IdentificadorAplicador"][0]["EquipoAplicador"];
+    let manual = equipment(0);
     assert_eq!(manual["AplicacionManual"], true);
     assert_eq!(manual["IdEquipoAplicador"], "manual");
     assert!(manual.get("NumROMA").is_none() && manual.get("NumREGANIP").is_none());
 
-    let roma = equipo(1);
+    let roma = equipment(1);
     assert_eq!(roma["AplicacionManual"], false);
     assert_eq!(roma["NumROMA"], "47-00123");
     assert!(roma.get("NumREGANIP").is_none() && roma.get("IdEquipoAplicador").is_none());
 
-    let free = equipo(2);
+    let free = equipment(2);
     assert_eq!(free["AplicacionManual"], false);
     assert_eq!(free["IdEquipoAplicador"], unregistered.as_str());
     assert!(free.get("NumROMA").is_none() && free.get("NumREGANIP").is_none());
@@ -620,7 +664,7 @@ fn multi_crop_treatments_split_into_one_tratamfito_per_crop() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let ts = tratamientos(&doc);
+    let ts = treatment_activities(&doc);
     // 3.11.4 descriptor rule: all DGCs in one TratamFito share the crop, so
     // the record splits — each half carries its own frozen integer alias and
     // exactly its crop's plots.
@@ -679,7 +723,7 @@ fn dgc_aliases_are_shared_across_treatments_of_the_same_crop() {
     }
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let ts = tratamientos(&doc);
+    let ts = treatment_activities(&doc);
     assert_eq!(ts.len(), 2);
     // A DGC is the plot+crop+season unit — both treatments reference the SAME
     // ajena code, so the authority sees one crop unit, not two.
@@ -696,7 +740,7 @@ fn dgc_aliases_are_shared_across_treatments_of_the_same_crop() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn deleted_records_export_borrar_only_if_previously_exported() {
+fn deleted_records_export_a_deletion_entry_only_if_previously_exported() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
     let exported = repo::insert_treatment_record(
@@ -708,7 +752,7 @@ fn deleted_records_export_borrar_only_if_previously_exported() {
     .unwrap();
 
     let first = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let alias = tratamientos(&first)[0]["IdAjenaTratamFito"]
+    let alias = treatment_activities(&first)[0]["IdAjenaTratamFito"]
         .as_i64()
         .unwrap();
 
@@ -725,7 +769,7 @@ fn deleted_records_export_borrar_only_if_previously_exported() {
     repo::soft_delete_treatment_record(&mut conn, &exported.id, None).unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    let ts = tratamientos(&doc);
+    let ts = treatment_activities(&doc);
     assert_eq!(ts.len(), 1, "the never-exported deletion leaves no trace");
     assert_eq!(ts[0]["IdAjenaTratamFito"].as_i64().unwrap(), alias);
     assert_eq!(ts[0]["Borrar"], true);
@@ -733,7 +777,7 @@ fn deleted_records_export_borrar_only_if_previously_exported() {
 }
 
 #[test]
-fn active_entries_do_not_carry_borrar() {
+fn active_entries_do_not_carry_the_deletion_flag() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
     repo::insert_treatment_record(
@@ -745,7 +789,7 @@ fn active_entries_do_not_carry_borrar() {
     .unwrap();
 
     let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
-    assert!(tratamientos(&doc)[0].get("Borrar").is_none());
+    assert!(treatment_activities(&doc)[0].get("Borrar").is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -807,6 +851,7 @@ fn precheck_flags_an_unmappable_province() {
             es: Some(FarmEsFields {
                 rega_code: None,
                 rea_code: Some("ES249900000001".into()),
+                siex_code: None,
                 province_code: Some("99".into()), // no such INE province
             }),
         },
@@ -834,6 +879,7 @@ fn precheck_flags_a_malformed_rea_code() {
                 // Present but not the national 14-character code the schema
                 // demands (minLength = maxLength = 14).
                 rea_code: Some("12345".into()),
+                siex_code: None,
                 province_code: Some("47".into()),
             }),
         },
@@ -864,6 +910,7 @@ fn precheck_lists_records_missing_efficacy_or_licence_and_plots_missing_crop() {
         &mut conn,
         NewOperator {
             full_name: "Sin carnet".into(),
+            tax_id: None,
             licence_number: None,
             licence_level_code: None,
             licence_expiry_date: None,
@@ -897,7 +944,10 @@ fn precheck_lists_records_missing_efficacy_or_licence_and_plots_missing_crop() {
         check.records_missing_efficacy[0].treatment_record_id,
         no_efficacy.id
     );
-    assert_eq!(check.records_missing_efficacy[0].product_name, "Fungitop");
+    assert_eq!(
+        check.records_missing_efficacy[0].product_name.as_deref(),
+        Some("Fungitop")
+    );
     assert_eq!(check.records_missing_operator_licence.len(), 1);
     assert_eq!(
         check.records_missing_operator_licence[0].treatment_record_id,
@@ -930,6 +980,89 @@ fn precheck_ignores_deleted_records() {
     );
 }
 
+/// A purely non-chemical actuation is a first-class treatment the serializer
+/// cannot carry: `OtrasActuacionesFito` is not emitted, so the only descriptor
+/// it could produce is a `TratamFito` with an empty `ProductosFito` — a record
+/// asserting that a treatment happened while naming nothing that was done.
+#[test]
+fn precheck_refuses_a_purely_non_chemical_actuation_by_name() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let mut measure = treatment(&fx, "2026-05-04");
+    measure.product_id = None;
+    measure.dose_value = None;
+    measure.dose_unit_code = None;
+    measure.measure_code = Some("15".into()); // feromonas y atrayentes
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        measure,
+        vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
+    )
+    .unwrap();
+
+    let check = export_precheck(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    assert!(!check.is_clean());
+    assert_eq!(check.records_with_non_chemical_measure.len(), 1);
+    let listed = &check.records_with_non_chemical_measure[0];
+    assert_eq!(listed.treatment_record_id, record.id);
+    // No product to name: the caller words this case, and a caller that
+    // interpolated it blindly would print "null" at the farmer.
+    assert_eq!(listed.product_name, None);
+
+    let err = build_cuaderno(&mut conn, &fx.season_id, &fx.farm_id, None).unwrap_err();
+    assert!(
+        matches!(err, CueError::Invalid("export_precheck_failed")),
+        "got {err:?}"
+    );
+}
+
+/// The mixed case is the one that would have gone out silently: a record
+/// carrying a spray AND a measure serializes cleanly as a `TratamFito`, and
+/// nothing in the output would say the measure had been left behind.
+#[test]
+fn precheck_refuses_a_record_that_carries_both_a_product_and_a_measure() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let mut mixed = treatment(&fx, "2026-05-06");
+    mixed.measure_code = Some("15".into());
+    let record = repo::insert_treatment_record(
+        &mut conn,
+        mixed,
+        vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
+    )
+    .unwrap();
+
+    let check = export_precheck(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    assert!(!check.is_clean(), "a dropped measure must block: {check:?}");
+    assert_eq!(check.records_with_non_chemical_measure.len(), 1);
+    let listed = &check.records_with_non_chemical_measure[0];
+    assert_eq!(listed.treatment_record_id, record.id);
+    // This one HAS a product, which is exactly why the list is not named
+    // after the purely non-chemical case.
+    assert_eq!(listed.product_name.as_deref(), Some("Fungitop"));
+}
+
+/// The counterpart, so the refusal cannot creep: an ordinary spray with no
+/// measure stays exportable.
+#[test]
+fn precheck_leaves_an_ordinary_product_application_exportable() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    repo::insert_treatment_record(
+        &mut conn,
+        treatment(&fx, "2026-05-07"),
+        vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
+    )
+    .unwrap();
+
+    let check = export_precheck(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    assert!(check.records_with_non_chemical_measure.is_empty());
+    assert!(check.is_clean(), "{check:?}");
+}
+
 #[test]
 fn build_refuses_while_the_precheck_is_not_clean() {
     let mut conn = open_in_memory().unwrap();
@@ -949,4 +1082,59 @@ fn build_refuses_while_the_precheck_is_not_clean() {
         matches!(err, CueError::Invalid("export_precheck_failed")),
         "got {err:?}"
     );
+}
+
+/// Reglamento (UE) 2023/564's two conditional fields on the one twin the
+/// serializer already emits. Both are optional in the format, so an ordinary
+/// record omits them entirely rather than sending a placeholder.
+#[test]
+fn the_annex_fields_serialize_in_the_shapes_the_format_wants() {
+    let mut conn = open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    let fx = fixture(&mut conn);
+
+    let mut new = treatment(&fx, "2026-05-01");
+    new.application_time = Some("20:30".into());
+    repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![NewTreatmentPlot {
+            growth_stage_code: Some("6".into()),
+            ..on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)
+        }],
+        None,
+    )
+    .unwrap();
+
+    let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
+    assert_schema_valid(&doc);
+    let activity = &treatment_activities(&doc)[0];
+
+    // Anexo VI types the hour string(8) as HH:MM:SS, so the stored HH:MM is
+    // padded at export — never stored padded, a farmer records no seconds.
+    assert_eq!(activity["HoraTratamiento"], "20:30:00");
+    // An INTEGER, and the catalogue's own code rather than the BBCH stage the
+    // book prints: the schema validates EstadoFenologico against EST_FENOLOGICO.
+    assert_eq!(activity["DGCs"][0]["EstadoFenologico"], 6);
+}
+
+#[test]
+fn a_record_stating_neither_annex_field_omits_both_keys() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    repo::insert_treatment_record(
+        &mut conn,
+        treatment(&fx, "2026-05-01"),
+        vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
+    )
+    .unwrap();
+
+    let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
+    assert_schema_valid(&doc);
+    let activity = &treatment_activities(&doc)[0];
+    // Absent, not "" and not 0 — the schema's own defaults would read as
+    // midnight and as a stage the crop was never at.
+    assert!(activity.get("HoraTratamiento").is_none());
+    assert!(activity["DGCs"][0].get("EstadoFenologico").is_none());
 }

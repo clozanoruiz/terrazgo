@@ -29,14 +29,28 @@ tauri-plugin-fs = { workspace = true }
 # `demo` is enabled unconditionally because cargo features cannot be
 # debug-profile-conditional; the seed command itself refuses in release builds.
 module-cue = { workspace = true, features = ["demo"] }
+module-fertilisation = { workspace = true }
+# The printable/exportable record book. A consumer crate above the modules: the
+# shell asks it for a document, it reads core and the modules to build one.
+terrazgo-recordbook = { workspace = true }
 # SIGPAC parcel lookups (P3, 2026-07-08); network rides terrazgo-geo's fetch.
 module-sigpac = { workspace = true }
 terrazgo-core = { workspace = true }
 # Geo plumbing: geo-cache.db, the geo:// protocol's fetch layer, map styles,
 # boundary-file import (added 2026-07-07).
 terrazgo-geo = { workspace = true }
+# The network seam, used directly for the catalogue refresh: catalogue rows
+# land in the app database via core's upsert importer, so there is nothing for
+# terrazgo-geo's cache-through layer to do here — what is needed is the agent,
+# its TLS policy and the offline diagnosis (src/catalogues.rs).
+terrazgo-net = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
+
+# GPS for the map's point lookup (P5) — the plugin only supports Android/iOS,
+# so desktop builds compile without it (lib.rs gates the init on `mobile`).
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri-plugin-geolocation = { workspace = true }

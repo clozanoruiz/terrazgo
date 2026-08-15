@@ -20,12 +20,18 @@
 //! - Data arrives as `sys.inputs`, converted from a `serde_json::Value`
 //!   object: strings, ints, floats, bools, `null` → `none`, arrays and
 //!   nested objects all map to their Typst counterparts.
-//! - Report labels are per-country template content (Spanish for the
-//!   official cuaderno), never UI i18n keys.
+//! - A template holds LAYOUT, not prose. Its labels are per-country document
+//!   content — never UI i18n keys — but the language may vary within a
+//!   country (Spain's co-official languages), so labels arrive from the
+//!   owning module's assembly as ordinary inputs rather than sitting in the
+//!   `.typ` file. One template then serves every language it is printed in.
+//!   See `module_cue::report::labels`.
 
 mod error;
+mod sheet;
 
 pub use error::ReportError;
+pub use sheet::{Cell, Column, RenderedWorkbook, Sheet, Workbook, render_xlsx};
 
 use serde_json::Value as JsonValue;
 use typst::diag::SourceDiagnostic;

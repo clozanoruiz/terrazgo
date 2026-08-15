@@ -47,6 +47,24 @@ Consequences:
 - Dated raster products (NDVI composites) carry their date in the cache key,
   the same mechanism as SIGPAC's campaign-keyed tiles.
 
+Two consequences added 2026-08-12, after a raster/GeoTIFF review
+([stack-choices.md](stack-choices.md) §1):
+
+- **A farmer's own raster** (a drone orthomosaic, a scanned plan) follows the
+  same rule as everything else here: **Rust decodes and tiles it once on import
+  and serves XYZ through `geo://`**, rather than being read in the webview.
+  Client-side reading is not merely slower — on Android a dialog result is a
+  `content://` URI the webview cannot open at all, and an orthomosaic runs to
+  100 MB–2 GB. It needs a storage design pass before any code: a farm ortho is
+  derived-but-irreplaceable, so it belongs in neither the evictable tile cache
+  nor the backed-up app database as they stand.
+- **Recolouring a raster must happen in Rust.** maplibre-gl 5.24 has no
+  `raster-color`/`raster-array` (verified against the installed bundle), so
+  rendered tiles are baked — only opacity, hue-rotate, brightness, saturation
+  and contrast are available client-side. An adjustable NDVI ramp therefore
+  means caching the values and re-rendering locally, which also keeps the
+  adjustment working offline.
+
 ### 2. CDSE credentials are farmer-supplied
 
 For Copernicus Data Space Ecosystem APIs (NDVI overlays beyond CyL, and the

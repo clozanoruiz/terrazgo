@@ -11,8 +11,10 @@
 <ul class="card-list" aria-hidden="true">
   {#each { length: rows }, i (i)}
     <li class="card skeleton">
-      <span class="skel-bar" style="width: 22%"></span>
-      <span class="skel-bar" style="width: 46%"></span>
+      <!-- Widths come from classes, never a style attribute: the production CSP
+           blocks style attributes outright (see .skel-short in styles.css). -->
+      <span class="skel-bar skel-short"></span>
+      <span class="skel-bar skel-long"></span>
     </li>
   {/each}
 </ul>

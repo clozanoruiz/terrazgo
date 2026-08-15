@@ -54,8 +54,11 @@ pub fn export_backup(conn: &Connection, dest: &Path) -> Result<BackupSummary> {
     conn.execute("VACUUM INTO ?1", [dest_str])?;
 
     let schema_version = schema_version(conn)?;
-    // Trust nothing: reopen the copy and verify it is intact and current.
-    let info = validate_backup(dest, schema_version)?;
+    // Trust nothing: reopen the copy and verify it is intact and current. No
+    // module shape to check — a snapshot just taken from the live database has
+    // the running app's shape by construction; the probe is for files that
+    // arrive from somewhere else.
+    let info = validate_backup(dest, schema_version, &[])?;
     if info.schema_version != schema_version {
         return Err(CoreError::Invalid("backup_invalid"));
     }
@@ -67,6 +70,9 @@ pub fn export_backup(conn: &Connection, dest: &Path) -> Result<BackupSummary> {
     })
 }
 
+/// One table of a shape fingerprint: its name and the columns it must carry.
+pub type TableShape = (&'static str, &'static [&'static str]);
+
 /// Check that `path` is an intact Terrazgo backup importable by an app whose
 /// composed migration sequence reaches `max_supported_version`.
 ///
@@ -75,7 +81,16 @@ pub fn export_backup(conn: &Connection, dest: &Path) -> Result<BackupSummary> {
 /// * `user_version` beyond what this app knows → `Invalid("backup_newer_schema")`
 ///   (importing would downgrade the schema and lose data);
 /// * an OLDER version passes: reopening the imported file migrates it forward.
-pub fn validate_backup(path: &Path, max_supported_version: i64) -> Result<BackupInfo> {
+///
+/// `module_shape` extends the core fingerprint with the tables registered
+/// modules own — the same composition the migration runner does, and for the
+/// same reason: core cannot name a module's tables. Callers that validate a
+/// snapshot of their own live database pass an empty slice.
+pub fn validate_backup(
+    path: &Path,
+    max_supported_version: i64,
+    module_shape: &[TableShape],
+) -> Result<BackupInfo> {
     let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -98,8 +113,108 @@ pub fn validate_backup(path: &Path, max_supported_version: i64) -> Result<Backup
     if schema_version > max_supported_version {
         return Err(CoreError::Invalid("backup_newer_schema"));
     }
+    // A backup at the CURRENT version must also have the current shape. While
+    // the project is pre-release the migration files are edited in place, which
+    // adds columns WITHOUT bumping the migration count — so `user_version`
+    // alone cannot tell a backup taken before an edit from one taken after.
+    // Left unchecked, such a file imports "successfully" and then fails with
+    // `no such column` on the first query, long after the reason is visible.
+    // Compare the shape instead. Older versions are exempt: they are migrated
+    // forward on reopen, which is what makes them importable at all.
+    if schema_version == max_supported_version {
+        for (table, columns) in REQUIRED_SHAPE.iter().chain(module_shape) {
+            let present = table_columns(&conn, table)?;
+            if columns.iter().any(|c| !present.iter().any(|p| p == c)) {
+                return Err(CoreError::Invalid("backup_invalid"));
+            }
+        }
+    }
 
     Ok(BackupInfo { schema_version })
+}
+
+/// The columns a current-version backup must carry, as a fingerprint of the
+/// squashed schema. Not the whole schema: the point is to catch a stale file
+/// cheaply, so this lists the tables whose shape changed most recently, and
+/// each pre-release schema edit adds its new columns here. Post-release, when
+/// migrations become append-only and `user_version` becomes trustworthy again,
+/// this check becomes redundant and can go.
+///
+/// Core tables only — a module's own tables reach the probe through
+/// `validate_backup`'s `module_shape` argument.
+const REQUIRED_SHAPE: &[TableShape] = &[
+    (
+        "farm",
+        &[
+            "address",
+            "postal_code",
+            "phone_fixed",
+            "phone_mobile",
+            "email",
+        ],
+    ),
+    ("farm_es_extension", &["siex_code"]),
+    ("farm_representative", &["farm_id", "full_name"]),
+    (
+        "crop",
+        &[
+            "area_ha",
+            "irrigation_code",
+            "growing_environment_code",
+            "gip_system_code",
+            "crop_code",
+            "source",
+            "source_campaign",
+            "declared_area_ha",
+        ],
+    ),
+    ("operator", &["tax_id"]),
+    ("machinery", &["acquired_on"]),
+    ("season", &["deleted_at"]),
+    ("advisor", &["id", "name", "registration_number"]),
+    (
+        "farm_advisor",
+        &["farm_id", "advisor_id", "gip_system_code"],
+    ),
+    (
+        "harvest_record",
+        &[
+            "harvested_on",
+            "product_name",
+            "plant_product_code",
+            "quantity_value",
+            "quantity_unit_code",
+            "buyer_name",
+            "buyer_registry_number",
+        ],
+    ),
+    ("harvest_plot", &["harvest_record_id", "plot_id", "crop_id"]),
+    (
+        "plot_water_point",
+        &[
+            "plot_id",
+            "denomination",
+            "inside_plot",
+            "distance_m",
+            "latitude",
+            "longitude",
+        ],
+    ),
+    ("plot_water_declaration", &["plot_id", "declared_on"]),
+    // Not user data, but the startup catalogue import writes this column on
+    // every launch: a backup taken before it existed would import cleanly and
+    // then fail with `no such column` at the next startup, which is exactly
+    // the delayed failure this probe exists to prevent.
+    ("catalogue", &["source_digest"]),
+];
+
+/// Column names of `table`, empty when the table itself is missing.
+fn table_columns(conn: &Connection, table: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare("SELECT name FROM pragma_table_info(?1)")?;
+    let names = stmt
+        .query_map([table], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(names)
 }
 
 fn schema_version(conn: &Connection) -> Result<i64> {

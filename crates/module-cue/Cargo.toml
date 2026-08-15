@@ -12,9 +12,6 @@ workspace = true
 # Versions live in [workspace.dependencies] at the repo root.
 [dependencies]
 terrazgo-core = { workspace = true }
-# The printable cuaderno rides the shared report engine; the module owns the
-# Typst template (templates/cuaderno.typ) and the data assembly (src/report.rs).
-terrazgo-report = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
 uuid = { workspace = true }

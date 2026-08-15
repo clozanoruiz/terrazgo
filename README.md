@@ -2,11 +2,12 @@
 
 **Aplicación libre y de código abierto para la gestión integral de la explotación agrícola.**
 
-🌐 **[Página del proyecto](https://clozanoruiz.github.io/terrazgo/)**
+🌐 **[terrazgo.com](https://terrazgo.com)**
 
 Terrazgo funciona primero sin conexión (*offline-first*): todos los datos viven en tu
 dispositivo, en una base de datos local, y la aplicación sigue funcionando completa sin
-cobertura — pensada para el campo, no para la oficina. Escritorio hoy; móvil en el plan.
+cobertura — pensada para el campo, no para la oficina. Hay versiones para escritorio
+(Linux y Windows) y para Android.
 
 > ⚠️ **En desarrollo activo.** Todavía no hay una versión estable. Las versiones
 > publicadas en [Releases](../../releases) son versiones tempranas para probar y opinar:
@@ -15,14 +16,24 @@ cobertura — pensada para el campo, no para la oficina. Escritorio hoy; móvil 
 
 ## Módulos
 
-- **Cuaderno de explotación (CUE)** — el primer módulo: registro de tratamientos
-  fitosanitarios (productos, operadores, maquinaria, plazos de seguridad con alertas),
-  alineado con el registro electrónico obligatorio desde el 1 de enero de 2027
-  (RD 1311/2012, RD 34/2025, Reglamento UE 2023/564).
+- **Cuaderno de explotación (CUE)** — el primer módulo, ya en pruebas. Cubre los
+  registros del **RD 1311/2012** (tratamientos fitosanitarios y actuaciones no químicas,
+  semilla tratada, tratamientos de postcosecha, locales y medios de transporte, analíticas
+  y cosecha) y los del **RD 1051/2022**, obligatorio desde el 1 de enero de 2026
+  (fertilización, plan de abonado y riego). Registra productos, operadores, asesores y
+  maquinaria, avisa de los plazos de seguridad y de la caducidad de carnés e ITV, y
+  cualquier registro se puede corregir. El cuaderno se imprime en **PDF** siguiendo el
+  modelo oficial y se exporta también como **hoja de cálculo**, en castellano y en
+  catalán. Todo ello con la vista puesta en el registro electrónico obligatorio desde
+  2027 (RD 34/2025, Reglamento UE 2023/564).
 - **Mapas y SIGPAC** — mapa de la explotación con dibujo de recintos, importación de
   ficheros (GeoJSON/GeoPackage), consulta SIGPAC (verificación de referencias, superficie
-  oficial, zonas vulnerables a nitratos / Natura 2000 / restricciones fitosanitarias).
-- **En camino** — riego, planificación de cultivos, costes, fertilización y suelo.
+  oficial, zonas vulnerables a nitratos / Natura 2000 / restricciones fitosanitarias),
+  capas del parcelario y de cultivos declarados, y localización por GPS en el móvil.
+- **Fertilización** — registro de materias fertilizantes con su composición, aplicaciones,
+  plan de abonado y registro de riego.
+- **En camino** — planificación del riego, planificación de cultivos, costes y los
+  registros de ecorregímenes (RD 1048/2022).
 
 El cuaderno es el primer módulo, no el producto: Terrazgo es una aplicación de gestión
 de toda la explotación, para cualquier cultivo y cualquier comunidad autónoma.
@@ -31,9 +42,9 @@ de toda la explotación, para cualquier cultivo y cualquier comunidad autónoma.
 
 En [Releases](../../releases) encontrarás los instaladores de cada versión:
 
-- **Linux** — AppImage y paquete `.deb`
-- **Windows** — instalador `.exe`
-- **Android** — más adelante
+- **Linux** — AppImage, paquete `.deb` (Debian/Ubuntu) y paquete `.rpm` (Fedora/openSUSE)
+- **Windows** — instalador `.exe` y versión portable
+- **Android** — APK para instalación directa (aarch64)
 
 ## Incidencias y sugerencias
 

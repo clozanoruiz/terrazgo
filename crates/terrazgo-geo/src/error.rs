@@ -7,6 +7,7 @@
 //! error identity.
 
 use terrazgo_core::CoreError;
+use terrazgo_net::NetError;
 use thiserror::Error;
 
 /// Crate-local result alias so signatures stay short.
@@ -55,6 +56,19 @@ pub enum GeoError {
     Catalogue(String),
 }
 
+/// The network seam's two cases map onto the two variants this crate already
+/// had — the fetch layer keeps behaving exactly as it did while the agent
+/// lived inside it, and `empty_on_404` still gets a real `Http { status }` to
+/// match on.
+impl From<NetError> for GeoError {
+    fn from(err: NetError) -> Self {
+        match err {
+            NetError::Http { status } => GeoError::Http { status },
+            NetError::Offline(reason) => GeoError::Offline(reason),
+        }
+    }
+}
+
 /// Variant-preserving: a core `NotFound` stays `NotFound`, a core
 /// `Invalid(code)` keeps its machine code (e.g. the GeoJSON validator's
 /// `geometry_invalid`), so callers and the command boundary match on the
@@ -70,6 +84,31 @@ impl From<CoreError> for GeoError {
             CoreError::Invalid(code) => GeoError::Invalid(code),
             CoreError::InvalidDate(s) => GeoError::InvalidDate(s),
             CoreError::Catalogue(s) => GeoError::Catalogue(s),
+        }
+    }
+}
+
+/// The command boundary's view of this error (`terrazgo_core::Classify`).
+impl terrazgo_core::Classify for GeoError {
+    fn classify(&self) -> (String, serde_json::Value) {
+        use serde_json::json;
+        match self {
+            GeoError::NotFound => ("not_found".into(), json!({})),
+            GeoError::InvalidDate(date) => ("invalid_date".into(), json!({ "date": date })),
+            GeoError::Invalid(code) => (format!("invalid.{code}"), json!({})),
+            // The two user-explainable network outcomes: the service said no,
+            // or there is no network. Both leave the app fully usable.
+            GeoError::Http { status } => ("geo_http".into(), json!({ "status": status })),
+            // The transport detail (DNS, TLS, refused, timeout…) rides along:
+            // "offline" is a diagnosis the user must be able to dispute — a
+            // firewalled or proxied machine is online for the browser and
+            // unreachable for us, and the reason string is the only evidence.
+            GeoError::Offline(reason) => ("geo_offline".into(), json!({ "reason": reason })),
+            GeoError::Cache(_)
+            | GeoError::Migration(_)
+            | GeoError::Json(_)
+            | GeoError::Io(_)
+            | GeoError::Catalogue(_) => ("internal".into(), json!({})),
         }
     }
 }

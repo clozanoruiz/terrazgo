@@ -9,11 +9,18 @@
   import { formatDate, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
+  import DateInput from "./DateInput.svelte";
   import Skeleton from "./Skeleton.svelte";
+  import { sortedBy } from "./collate.js";
+  import TzSelect from "./TzSelect.svelte";
+  import { nameItems } from "./selectItems.js";
 
   let farms = $state([]);
   let farmId = $state("");
   let machines = $state([]);
+  // Display order is the client's business: SQL orders by BINARY collation,
+  // which puts "Ángel" after "Zubiri".
+  const sortedMachines = $derived(sortedBy(machines, (m) => m.machinery.name));
   let loading = $state(true);
 
   // Form; null editingId = the form creates, an id = it edits.
@@ -21,6 +28,7 @@
   let editingId = $state(null);
   let name = $state("");
   let kind = $state("");
+  let acquiredOn = $state("");
   let lastInspection = $state("");
   let nextInspection = $state("");
   let roma = $state("");
@@ -47,6 +55,7 @@
     editingId = machinery?.id ?? null;
     name = machinery?.name ?? "";
     kind = machinery?.type ?? "";
+    acquiredOn = machinery?.acquired_on ?? "";
     lastInspection = machinery?.last_inspection_date ?? "";
     nextInspection = machinery?.next_inspection_due_date ?? "";
     roma = es?.roma_number ?? "";
@@ -65,6 +74,7 @@
     const payload = {
       name: trimmed,
       kind: kind.trim() || null,
+      acquired_on: acquiredOn || null,
       last_inspection_date: lastInspection || null,
       next_inspection_due_date: nextInspection || null,
       roma_number: farmCountry === "es" ? roma.trim() || null : null,
@@ -118,14 +128,12 @@
   <p>{t("machinery.no_farms")} <a href="#/farms">{t("nav.farms")}</a></p>
 {:else}
   <div class="form-grid">
-    <label>
-      <span>{t("machinery.farm")}</span>
-      <select bind:value={farmId} onchange={selectFarm}>
-        {#each farms as farm (farm.id)}
-          <option value={farm.id}>{farm.name}</option>
-        {/each}
-      </select>
-    </label>
+    <TzSelect
+      label={t("machinery.farm")}
+      items={nameItems(farms)}
+      bind:value={farmId}
+      onchange={selectFarm}
+    />
   </div>
 
   {#if formOpen}
@@ -133,14 +141,9 @@
       <div class="form-grid">
         <label><span>{t("machinery.name")}</span><input required bind:value={name} /></label>
         <label><span>{t("machinery.kind")}</span><input bind:value={kind} /></label>
-        <label>
-          <span>{t("machinery.last_inspection")}</span>
-          <input type="date" bind:value={lastInspection} />
-        </label>
-        <label>
-          <span>{t("machinery.next_inspection")}</span>
-          <input type="date" bind:value={nextInspection} />
-        </label>
+        <DateInput label={t("machinery.acquired_on")} bind:value={acquiredOn} />
+        <DateInput label={t("machinery.last_inspection")} bind:value={lastInspection} />
+        <DateInput label={t("machinery.next_inspection")} bind:value={nextInspection} />
       </div>
       {#if farmCountry === "es"}
         <fieldset class="es-only">
@@ -159,7 +162,7 @@
   {/if}
 
   <ul class="card-list">
-    {#each machines as { machinery, es } (machinery.id)}
+    {#each sortedMachines as { machinery, es } (machinery.id)}
       <li class="card">
         <strong>{machinery.name}</strong>
         <span class="detail">{machineryDetail(machinery, es)}</span>

@@ -121,14 +121,27 @@ fn print_treatment(
     println!("TREATMENT {n} — {}", r.application_date);
     println!(
         "  product    {} (reg. {})",
-        r.product_name_snapshot,
+        r.product_name_snapshot
+            .as_deref()
+            .unwrap_or("— (no product)"),
         r.authorisation_number_snapshot.as_deref().unwrap_or("—"),
     );
     println!(
         "  substances {}",
         r.active_substances_snapshot.as_deref().unwrap_or("—")
     );
-    println!("  dose       {} {}", r.dose_value, r.dose_unit_code);
+    match (r.dose_value, r.dose_unit_code.as_deref()) {
+        (Some(value), Some(unit)) => println!("  dose       {value} {unit}"),
+        // A purely non-chemical actuation: the measure IS what was done.
+        _ => println!(
+            "  measure    {} (intensity {} {})",
+            r.measure_code.as_deref().unwrap_or("—"),
+            r.measure_intensity_value
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "—".into()),
+            r.measure_intensity_unit_code.as_deref().unwrap_or("—"),
+        ),
+    }
     let problems = t
         .problems
         .iter()
@@ -161,10 +174,12 @@ fn print_treatment(
         r.machinery_roma_snapshot.as_deref().unwrap_or("—"),
         r.machinery_reganip_snapshot.as_deref().unwrap_or("—")
     );
-    println!(
-        "  PHI        {} days → harvest allowed from {}",
-        r.phi_days_used, r.phi_end_date
-    );
+    match (r.phi_days_used, r.phi_end_date.as_deref()) {
+        (Some(days), Some(end)) => {
+            println!("  PHI        {days} days → harvest allowed from {end}")
+        }
+        _ => println!("  PHI        — (no product, so no plazo de seguridad)"),
+    }
     for p in &t.plots {
         let plot_name: String =
             conn.query_row("SELECT name FROM plot WHERE id = ?1", [&p.plot_id], |r| {

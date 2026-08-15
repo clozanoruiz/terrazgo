@@ -118,9 +118,14 @@ fn collect_candidates(
 
     // PHI windows: one alert per live treatment record (multi-plot treatments are a
     // single record, hence a single alert).
+    //
+    // A record with no product has no plazo de seguridad, so there is no window
+    // to open — filtered in SQL rather than in Rust because that is where the
+    // rule belongs, and because reading a NULL into a `String` would fail the
+    // whole refresh and leave the holding with NO alerts at all.
     let mut stmt = tx.prepare(
         "SELECT id, season_id, application_date, phi_end_date
-         FROM treatment_record WHERE deleted_at IS NULL",
+         FROM treatment_record WHERE deleted_at IS NULL AND phi_end_date IS NOT NULL",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok((

@@ -10,6 +10,7 @@
 //!     logging; one submodule per entity group, re-exported from `repository`.
 //!   * [`alerts`]     — pure alert rules (PHI window, licence/ITV expiry) + `AlertConfig`.
 //!   * [`siex`]       — neutral-code ↔ SIEX-code mapping for the Spanish export.
+//!   * [`catalogue`]  — reference-catalogue reads the book's coded fields need.
 //!   * [`export`]     — the SIEX cuaderno export: precheck + descriptor-JSON builder.
 //!   * [`error`]      — `CueError` / `Result`.
 //!   * [`demo`]       — demo-campaign seeding (only with the `demo` feature).
@@ -19,16 +20,16 @@
 //! PHI/alert rules are built on it.
 
 pub mod alerts;
+pub mod catalogue;
 pub mod db;
 #[cfg(feature = "demo")]
 pub mod demo;
 pub mod error;
 pub mod export;
 pub mod models;
-pub mod report;
 pub mod repository;
 pub mod siex;
 
-pub use db::{migration_set, migrations, open, open_in_memory};
+pub use db::{BACKUP_SHAPE, migration_set, migrations, open, open_in_memory};
 pub use error::{CueError, Result};
 pub use terrazgo_core::date;

@@ -6,8 +6,15 @@
   // mandatory fields). Multi-plot rows are dynamic; the legal snapshots, the
   // country and the PHI end date are derived in Rust at insert time, not here.
   import { formatDate, t, tCode } from "../i18n.js";
+  import { lookups } from "./lookups.svelte.js";
   import { invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
+  import { emptyProblemRow, emptyRow } from "./treatmentDraft.js";
+  import DateInput from "./DateInput.svelte";
+  import TimeInput from "./TimeInput.svelte";
+  import TzSelect from "./TzSelect.svelte";
+  import { codeItems, nameItems } from "./selectItems.js";
+  import TzCombobox from "./TzCombobox.svelte";
 
   let {
     farmId,
@@ -18,35 +25,39 @@
     operators,
     machinery,
     products,
-    units,
-    justifications,
-    efficacies,
-    reasons,
+    advisors,
+    // The working state, owned by the register view: blank for a new entry,
+    // filled from the stored record for a correction (see treatmentDraft.js).
+    // This form is a view over it and holds no copy of its own — so switching
+    // to a different record to correct refills the fields on screen.
+    draft,
     onSaved,
     onCancel,
   } = $props();
 
-  let applicationDate = $state("");
-  let productId = $state("");
-  let doseValue = $state("");
-  let doseUnit = $state("l_ha");
-  let targetOrganism = $state("");
-  let operatorId = $state("");
-  let machineryId = $state("");
-  let phiDays = $state("");
-  let notes = $state("");
-  let rows = $state([emptyRow()]);
+  // Session-wide reference data, read from the module instead of drilled
+  // through every parent (lib/lookups.svelte.js).
+  const units = $derived(lookups.units);
+  const quantityUnits = $derived(lookups.quantityUnits);
+  const intensityUnits = $derived(lookups.intensityUnits);
+  const justifications = $derived(lookups.justifications);
+  const efficacies = $derived(lookups.efficacies);
+  const reasons = $derived(lookups.reasons);
 
-  // The coded problems treated (≥1) and IPM justifications (≥1) — required by
-  // the record rules; efficacy is optional here because it is observed after
-  // application (the record list offers it once known).
-  let problemRows = $state([emptyProblemRow()]);
-  let checkedJustifications = $state([]);
-  let efficacyCode = $state("");
+  let measures = $state([]);
+  let growthStages = $state([]);
 
   // Official problem catalogues per category, fetched once per category used
-  // (600-entry lists — never re-fetched while the form is open).
+  // (600-entry lists — never re-fetched while the form is open). A category
+  // present with an empty list has been asked for and has not arrived yet,
+  // which is what keeps two rows sharing a category from fetching it twice.
   let problemCatalogues = $state({});
+
+  // Fetch the catalogue behind every category the draft names. At mount that is
+  // a correction's stored problems; later it is rows the farmer adds or changes.
+  $effect(() => {
+    for (const row of draft.problemRows) loadProblemCatalogue(row.category);
+  });
 
   // Prefill the applicator from the active profile's linked operator (the
   // user_profile.operator_id link, the convention that the applicator records
@@ -61,27 +72,48 @@
       ]);
       const active = profiles.find((profile) => profile.id === info.settings.active_user_id);
       const linked = active?.operator_id;
-      if (linked && !operatorId && operators.some((operator) => operator.id === linked)) {
-        operatorId = linked;
+      if (linked && !draft.operatorId && operators.some((operator) => operator.id === linked)) {
+        draft.operatorId = linked;
       }
     } catch (err) {
       console.error(err); // prefill must never block treatment entry
     }
   })();
 
-  function emptyRow() {
-    return { plotId: "", cropId: "", surface: "" };
-  }
+  // The fourteen non-chemical measures (TIPO_MEDIDA_FITOSANITARIA). A closed
+  // list, so a plain select; failure leaves it empty rather than blocking
+  // treatment entry, like the prefill above.
+  (async () => {
+    try {
+      measures = await invoke("list_measures", { countryCode });
+    } catch (err) {
+      console.error(err);
+    }
+  })();
 
-  function emptyProblemRow() {
-    return { category: "", code: "", filter: "" };
-  }
+  // The BBCH monograph's ten principal growth stages (EST_FENOLOGICO). Also a
+  // closed list, so also a plain select — and the names already carry the BBCH
+  // number, which the catalogue's own code is not.
+  (async () => {
+    try {
+      growthStages = await invoke("list_growth_stages", { countryCode });
+    } catch (err) {
+      console.error(err);
+    }
+  })();
 
+  /// A new category invalidates the problem chosen under the old one; the
+  /// effect above fetches whatever catalogue the new one needs.
   function onCategoryChosen(row) {
     row.code = "";
-    row.filter = "";
-    const category = row.category;
-    if (!category || problemCatalogues[category]) return;
+  }
+
+  /// Fetch a category's catalogue once, so its picker shows labels rather than
+  /// empty boxes. The claim is staked before awaiting, so the effect above can
+  /// re-run freely while a fetch is in flight.
+  function loadProblemCatalogue(category) {
+    if (!category || category in problemCatalogues) return;
+    problemCatalogues = { ...problemCatalogues, [category]: [] };
     run(async () => {
       const codes = await invoke("list_problem_codes", {
         countryCode,
@@ -91,24 +123,52 @@
     });
   }
 
-  function problemOptions(row) {
-    const codes = problemCatalogues[row.category] ?? [];
-    const needle = row.filter.trim().toLowerCase();
-    if (!needle) return codes;
-    // Keep the selected entry visible even when the filter excludes it.
-    return codes.filter((c) => c.label.toLowerCase().includes(needle) || c.code === row.code);
+  // The combobox narrows the list itself (folded, ranked and capped in
+  // lib/collate.js), so this only shapes the category's codes into items —
+  // the hand-rolled filter it replaces lived in a second input.
+  function problemItems(row) {
+    return (problemCatalogues[row.category] ?? []).map((code) => ({
+      value: code.code,
+      label: code.label,
+    }));
   }
 
   function addProblemRow() {
-    problemRows.push(emptyProblemRow());
+    draft.problemRows.push(emptyProblemRow());
   }
 
   function removeProblemRow(index) {
-    problemRows.splice(index, 1);
+    draft.problemRows.splice(index, 1);
   }
 
   // Shown as a hint so the farmer knows what leaving PHI blank means.
-  const defaultPhi = $derived(products.find((p) => p.id === productId)?.default_phi_days ?? null);
+  const defaultPhi = $derived(
+    products.find((p) => p.id === draft.productId)?.default_phi_days ?? null,
+  );
+
+  // A per-hectare dose times the treated surface IS the total used, so offer
+  // it. A concentration dose (g/l, ml/l, %) says nothing about how much spray
+  // was mixed — which is exactly why the column exists — so nothing is offered
+  // there and the farmer states the figure.
+  const PER_HECTARE_TOTAL = { l_ha: "l", kg_ha: "kg" };
+
+  const suggestedTotal = $derived.by(() => {
+    const unit = PER_HECTARE_TOTAL[draft.doseUnit];
+    const dose = Number(draft.doseValue);
+    if (!unit || !(dose > 0)) return null;
+    const surfaces = draft.rows.map((row) => Number(row.surface));
+    if (surfaces.length === 0 || surfaces.some((s) => !(s > 0))) return null;
+    const total = dose * surfaces.reduce((sum, s) => sum + s, 0);
+    // Trim float noise (1.5 × 3.2 = 4.800000000000001) without pretending to
+    // more precision than the inputs carry.
+    return { value: Number(total.toFixed(4)), unit };
+  });
+
+  function applySuggestedTotal() {
+    if (!suggestedTotal) return;
+    draft.totalQuantity = suggestedTotal.value;
+    draft.totalQuantityUnit = suggestedTotal.unit;
+  }
 
   function cropsForPlot(plotId) {
     return crops.filter((crop) => crop.plot_id === plotId);
@@ -128,42 +188,76 @@
   }
 
   function addRow() {
-    rows.push(emptyRow());
+    draft.rows.push(emptyRow());
   }
 
   function removeRow(index) {
-    rows.splice(index, 1);
+    draft.rows.splice(index, 1);
   }
 
   function submit(event) {
     event.preventDefault();
-    const record = {
-      season_id: seasonId,
-      farm_id: farmId,
-      application_date: applicationDate,
-      product_id: productId,
-      country_code: null, // derived from the farm in Rust
-      dose_value: Number(doseValue),
-      dose_unit_code: doseUnit,
-      target_organism: targetOrganism.trim() || null,
-      problems: problemRows
+    const fields = {
+      application_date: draft.applicationDate,
+      application_end_date: draft.applicationEndDate || null,
+      // Local wall-clock HH:MM, sent as typed. Never "" — an empty string is
+      // not an hour, and the backend would refuse it as malformed.
+      application_time: draft.applicationTime || null,
+      // The chemical block travels whole or not at all: a purely non-chemical
+      // actuation states a measure instead, and the backend refuses halves.
+      product_id: draft.productId || null,
+      dose_value: draft.productId ? Number(draft.doseValue) : null,
+      dose_unit_code: draft.productId ? draft.doseUnit : null,
+      // Both parts travel together or neither does; the backend rejects halves.
+      total_quantity_value: draft.totalQuantity === "" ? null : Number(draft.totalQuantity),
+      total_quantity_unit_code: draft.totalQuantity === "" ? null : draft.totalQuantityUnit,
+      target_organism: draft.targetOrganism.trim() || null,
+      problems: draft.problemRows
         .filter((row) => row.category && row.code)
         .map((row) => ({ reason_category_code: row.category, problem_code: row.code })),
-      justifications: [...checkedJustifications],
-      efficacy_code: efficacyCode || null,
-      operator_id: operatorId,
-      machinery_id: machineryId || null,
-      phi_days_used: String(phiDays).trim() === "" ? null : Number(phiDays),
-      notes: notes.trim() || null,
+      justifications: [...draft.checkedJustifications],
+      operator_id: draft.operatorId,
+      machinery_id: draft.machineryId || null,
+      phi_days_used: String(draft.phiDays).trim() === "" ? null : Number(draft.phiDays),
+      advisor_id: draft.advisorId || null,
+      measure_code: draft.measureCode || null,
+      // Value and unit together or neither, like every other amount here.
+      measure_intensity_value:
+        draft.measureIntensity === "" ? null : Number(draft.measureIntensity),
+      measure_intensity_unit_code:
+        draft.measureIntensity === "" ? null : draft.measureIntensityUnit,
+      measure_registration_number: draft.measureRegistration.trim() || null,
+      notes: draft.notes.trim() || null,
     };
-    const treatedPlots = rows.map((row) => ({
+    const treatedPlots = draft.rows.map((row) => ({
       plot_id: row.plotId,
       crop_id: row.cropId || null,
       surface_treated_ha: Number(row.surface),
+      growth_stage_code: row.growthStage || null,
     }));
     run(async () => {
-      const saved = await invoke("create_treatment_record", { record, plots: treatedPlots });
-      notify(t("message.treatment_saved", { date: formatDate(saved.phi_end_date) }));
+      if (draft.editingId) {
+        // A correction carries neither campaign nor holding (a treatment never
+        // moves either) and no efficacy — that keeps its own control in the
+        // list, because it is observed after the fact.
+        const saved = await invoke("update_treatment_record", {
+          treatmentId: draft.editingId,
+          update: { ...fields, plots: treatedPlots },
+        });
+        notify(t("message.treatment_updated", { date: formatDate(saved.record.application_date) }));
+      } else {
+        const saved = await invoke("create_treatment_record", {
+          record: {
+            ...fields,
+            season_id: seasonId,
+            farm_id: farmId,
+            country_code: null, // derived from the farm in Rust
+            efficacy_code: draft.efficacyCode || null,
+          },
+          plots: treatedPlots,
+        });
+        notify(t("message.treatment_saved", { date: formatDate(saved.phi_end_date) }));
+      }
       await onSaved();
     });
   }
@@ -171,107 +265,183 @@
 
 <form onsubmit={submit}>
   <div class="form-grid">
-    <label>
-      <span>{t("treatment.date")}</span>
-      <input type="date" required bind:value={applicationDate} />
-    </label>
-    <label>
-      <span>{t("treatment.product")}</span>
-      <select required bind:value={productId}>
-        <option value="" disabled hidden></option>
-        {#each products as product (product.id)}
-          <option value={product.id}>{product.commercial_name}</option>
-        {/each}
-      </select>
-    </label>
+    <DateInput label={t("treatment.date")} required bind:value={draft.applicationDate} />
+    <DateInput
+      label={t("treatment.end_date")}
+      hint={t("treatment.end_date_hint")}
+      min={draft.applicationDate}
+      bind:value={draft.applicationEndDate}
+    />
+    <TimeInput
+      label={t("treatment.time")}
+      hint={t("treatment.time_hint")}
+      bind:value={draft.applicationTime}
+    />
+    <TzSelect
+      label={t("treatment.product")}
+      hint={t("treatment.product_hint")}
+      items={nameItems(products, (p) => p.commercial_name)}
+      nullable
+      nullLabel=""
+      bind:value={draft.productId}
+    />
     <label>
       <span>{t("treatment.dose")}</span>
-      <input type="number" step="any" min="0.001" required bind:value={doseValue} />
+      <input
+        type="number"
+        step="any"
+        min="0.001"
+        required={draft.productId !== ""}
+        disabled={draft.productId === ""}
+        bind:value={draft.doseValue}
+      />
     </label>
+    <TzSelect
+      label={t("treatment.unit")}
+      items={codeItems(units, "unit")}
+      required={draft.productId !== ""}
+      disabled={draft.productId === ""}
+      bind:value={draft.doseUnit}
+    />
     <label>
-      <span>{t("treatment.unit")}</span>
-      <select required bind:value={doseUnit}>
-        {#each units as unit (unit.code)}
-          <option value={unit.code}>{tCode("unit", unit.code)}</option>
-        {/each}
-      </select>
+      <span>{t("treatment.total_quantity")}</span>
+      <input type="number" step="any" min="0.0001" bind:value={draft.totalQuantity} />
+      {#if suggestedTotal && Number(draft.totalQuantity) !== suggestedTotal.value}
+        <small>
+          <button type="button" class="link-button" onclick={applySuggestedTotal}>
+            {t("treatment.total_quantity_suggest", {
+              value: suggestedTotal.value,
+              unit: tCode("unit", suggestedTotal.unit),
+            })}
+          </button>
+        </small>
+      {:else}
+        <small>{t("treatment.total_quantity_hint")}</small>
+      {/if}
     </label>
+    <TzSelect
+      label={t("treatment.total_quantity_unit")}
+      items={codeItems(quantityUnits, "unit")}
+      disabled={draft.totalQuantity === ""}
+      bind:value={draft.totalQuantityUnit}
+    />
     <label>
       <span>{t("treatment.target")}</span>
-      <input bind:value={targetOrganism} />
+      <input bind:value={draft.targetOrganism} />
     </label>
-    <label>
-      <span>{t("treatment.operator")}</span>
-      <select required bind:value={operatorId}>
-        <option value="" disabled hidden></option>
-        {#each operators as operator (operator.id)}
-          <option value={operator.id}>{operator.full_name}</option>
-        {/each}
-      </select>
-    </label>
-    <label>
-      <span>{t("treatment.machinery")}</span>
-      <select bind:value={machineryId}>
-        <option value="">{t("treatment.machinery_none")}</option>
-        {#each machinery as machine (machine.id)}
-          <option value={machine.id}>{machine.name}</option>
-        {/each}
-      </select>
-    </label>
+    <TzSelect
+      label={t("treatment.operator")}
+      items={nameItems(operators, (o) => o.full_name)}
+      required
+      bind:value={draft.operatorId}
+    />
+    <TzSelect
+      label={t("treatment.machinery")}
+      items={nameItems(machinery)}
+      nullable
+      nullLabel={t("treatment.machinery_none")}
+      bind:value={draft.machineryId}
+    />
     <label>
       <span>{t("treatment.phi_days")}</span>
-      <input type="number" min="0" step="1" bind:value={phiDays} placeholder={defaultPhi ?? ""} />
+      <input
+        type="number"
+        min="0"
+        step="1"
+        bind:value={draft.phiDays}
+        placeholder={defaultPhi ?? ""}
+      />
       {#if defaultPhi != null}
         <small>{t("treatment.phi_default", { days: defaultPhi })}</small>
       {/if}
     </label>
-    <label>
-      <span>{t("treatment.efficacy")}</span>
-      <select bind:value={efficacyCode}>
-        <option value="">{t("treatment.efficacy_pending")}</option>
-        {#each efficacies as efficacy (efficacy.code)}
-          <option value={efficacy.code}>{tCode("efficacy", efficacy.code)}</option>
-        {/each}
-      </select>
-      <small>{t("treatment.efficacy_hint")}</small>
-    </label>
+    <!-- Efficacy is observed after the application, so a correction does not
+         carry it: the register list keeps its own control for that. -->
+    {#if !draft.editingId}
+      <TzSelect
+        label={t("treatment.efficacy")}
+        hint={t("treatment.efficacy_hint")}
+        items={codeItems(efficacies, "efficacy")}
+        nullable
+        nullLabel={t("treatment.efficacy_pending")}
+        bind:value={draft.efficacyCode}
+      />
+    {/if}
     <label>
       <span>{t("treatment.notes")}</span>
-      <input bind:value={notes} />
+      <input bind:value={draft.notes} />
     </label>
   </div>
 
+  <!-- Model 3.1 bis. Everything here is optional: an ordinary treatment names
+       no advisor and takes no non-chemical measure, and the page prints only
+       the actuations that do. -->
+  <fieldset class="subsection">
+    <legend>{t("treatment.advised_section")}</legend>
+    <p class="hint">{t("treatment.advised_hint")}</p>
+    <div class="form-grid">
+      <TzSelect
+        label={t("treatment.advisor")}
+        items={nameItems(advisors)}
+        nullable
+        nullLabel=""
+        bind:value={draft.advisorId}
+      />
+      <!-- TIPO_MEDIDA_FITOSANITARIA: the catalogue's own order, not sorted. -->
+      <TzSelect
+        label={t("treatment.measure")}
+        hint={t("treatment.measure_hint")}
+        items={measures.map((measure) => ({ value: measure.code, label: measure.name }))}
+        nullable
+        nullLabel=""
+        bind:value={draft.measureCode}
+      />
+      <label>
+        <span>{t("treatment.measure_intensity")}</span>
+        <input
+          type="number"
+          step="any"
+          min="0.001"
+          disabled={draft.measureCode === ""}
+          bind:value={draft.measureIntensity}
+        />
+        <small>{t("treatment.measure_intensity_hint")}</small>
+      </label>
+      <TzSelect
+        label={t("treatment.measure_intensity_unit")}
+        items={codeItems(intensityUnits, "unit")}
+        disabled={draft.measureIntensity === ""}
+        bind:value={draft.measureIntensityUnit}
+      />
+      <label>
+        <span>{t("treatment.measure_registration")}</span>
+        <input disabled={draft.measureCode === ""} bind:value={draft.measureRegistration} />
+      </label>
+    </div>
+  </fieldset>
+
   <fieldset class="subsection">
     <legend>{t("treatment.problems_section")}</legend>
-    {#each problemRows as row, index (row)}
+    {#each draft.problemRows as row, index (row)}
       <div class="form-grid plot-row">
-        <label>
-          <span>{t("treatment.reason")}</span>
-          <select required bind:value={row.category} onchange={() => onCategoryChosen(row)}>
-            <option value="" disabled hidden></option>
-            {#each reasons as reason (reason.code)}
-              <option value={reason.code}>{tCode("reason_category", reason.code)}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          <span>{t("treatment.problem_filter")}</span>
-          <input
-            bind:value={row.filter}
-            disabled={!row.category}
-            placeholder={t("treatment.problem_filter_hint")}
-          />
-        </label>
-        <label>
-          <span>{t("treatment.problem")}</span>
-          <select required bind:value={row.code} disabled={!row.category}>
-            <option value="" disabled hidden></option>
-            {#each problemOptions(row) as code (code.id)}
-              <option value={code.code}>{code.label}</option>
-            {/each}
-          </select>
-        </label>
-        {#if problemRows.length > 1}
+        <TzSelect
+          label={t("treatment.reason")}
+          items={codeItems(reasons, "reason_category")}
+          required
+          bind:value={row.category}
+          onchange={() => onCategoryChosen(row)}
+        />
+        <!-- The filter box is gone: the combobox's own input IS the trigger, so
+             one control does what two used to. -->
+        <TzCombobox
+          label={t("treatment.problem")}
+          items={problemItems(row)}
+          placeholder={t("treatment.problem_filter_hint")}
+          required
+          disabled={!row.category}
+          bind:value={row.code}
+        />
+        {#if draft.problemRows.length > 1}
           <button type="button" class="btn-danger" onclick={() => removeProblemRow(index)}>
             {t("treatment.remove")}
           </button>
@@ -286,7 +456,11 @@
     <div class="checkbox-grid">
       {#each justifications as justification (justification.code)}
         <label class="checkbox">
-          <input type="checkbox" value={justification.code} bind:group={checkedJustifications} />
+          <input
+            type="checkbox"
+            value={justification.code}
+            bind:group={draft.checkedJustifications}
+          />
           <span>{tCode("justification", justification.code)}</span>
         </label>
       {/each}
@@ -295,31 +469,39 @@
 
   <fieldset class="subsection">
     <legend>{t("treatment.plots_section")}</legend>
-    {#each rows as row, index (row)}
+    {#each draft.rows as row, index (row)}
       <div class="form-grid plot-row">
-        <label>
-          <span>{t("crop.plot")}</span>
-          <select required bind:value={row.plotId} onchange={() => onPlotChosen(row)}>
-            <option value="" disabled hidden></option>
-            {#each plots as { plot } (plot.id)}
-              <option value={plot.id}>{plot.name}</option>
-            {/each}
-          </select>
-        </label>
-        <label>
-          <span>{t("treatment.crop")}</span>
-          <select bind:value={row.cropId}>
-            <option value="">{t("treatment.crop_none")}</option>
-            {#each cropsForPlot(row.plotId) as crop (crop.id)}
-              <option value={crop.id}>{cropLabel(crop)}</option>
-            {/each}
-          </select>
-        </label>
+        <TzSelect
+          label={t("crop.plot")}
+          items={nameItems(
+            plots,
+            (p) => p.plot.name,
+            (p) => p.plot.id,
+          )}
+          required
+          bind:value={row.plotId}
+          onchange={() => onPlotChosen(row)}
+        />
+        <TzSelect
+          label={t("treatment.crop")}
+          items={nameItems(cropsForPlot(row.plotId), cropLabel)}
+          nullable
+          nullLabel={t("treatment.crop_none")}
+          bind:value={row.cropId}
+        />
         <label>
           <span>{t("treatment.surface")}</span>
           <input type="number" step="any" min="0.01" required bind:value={row.surface} />
         </label>
-        {#if rows.length > 1}
+        <!-- EST_FENOLOGICO: BBCH order, 0-9. Never alphabetical. -->
+        <TzSelect
+          label={t("treatment.growth_stage")}
+          items={growthStages.map((stage) => ({ value: stage.code, label: stage.name }))}
+          nullable
+          nullLabel=""
+          bind:value={row.growthStage}
+        />
+        {#if draft.rows.length > 1}
           <button type="button" class="btn-danger" onclick={() => removeRow(index)}>
             {t("treatment.remove")}
           </button>

@@ -110,15 +110,28 @@ fn client_serves_a_cached_lookup_without_network() {
 }
 
 fn seed_resource(cache: &Mutex<Connection>, key: &str, data: &[u8]) {
+    seed_resource_at(cache, key, data, "2026-07-08T00:00:00Z");
+}
+
+/// Seed with an explicit fetch time. The declared-crops fallback re-asks an
+/// EMPTY current-campaign answer that was stored on an earlier day, so any
+/// test about a trusted empty must seed it as today's — otherwise the test
+/// silently depends on the machine having network.
+fn seed_resource_at(cache: &Mutex<Connection>, key: &str, data: &[u8], fetched_at: &str) {
     cache
         .lock()
         .unwrap()
         .execute(
             "INSERT INTO resource (key, data, content_type, fetched_at)
-             VALUES (?1, ?2, 'application/json', '2026-07-08T00:00:00Z')",
-            rusqlite::params![key, data],
+             VALUES (?1, ?2, 'application/json', ?3)",
+            rusqlite::params![key, data, fetched_at],
         )
         .unwrap();
+}
+
+/// Today, as the cache writes it.
+fn today_stamp() -> String {
+    format!("{}T00:00:00Z", terrazgo_core::date::today_utc())
 }
 
 // --- zone intersections + campaign (P4, fixtures harvested 2026-07-08) -----
@@ -168,4 +181,181 @@ fn current_campaign_reads_the_max_year_from_the_listing() {
         current_campaign(&cache, false),
         Err(GeoError::Invalid("sigpac_response_invalid"))
     ));
+}
+
+// --- declared crops: OGC API Features `cultivo_declarado` -------------------
+// Fixtures harvested live 2026-08-03: recinto 47/163/0/0/11/40/1 (Valladolid,
+// campaign 2025) and 47/219/0/0/11/28/2, which declares a secondary crop.
+
+const DECLARED: &[u8] = include_bytes!("fixtures/cultivo-declarado.json");
+const DECLARED_EMPTY: &[u8] = include_bytes!("fixtures/cultivo-declarado-empty.json");
+const DECLARED_SECONDARY: &[u8] = include_bytes!("fixtures/cultivo-declarado-secondary.json");
+
+fn valladolid_ref() -> SigpacRef {
+    SigpacRef::from_parts(["47", "163", "0", "0", "11", "40", "1"]).unwrap()
+}
+
+#[test]
+fn declared_crops_fixture_parses_the_declaration_line() {
+    use module_sigpac::models::parse_declared_crops_response;
+
+    let lines = parse_declared_crops_response(DECLARED).unwrap();
+    assert_eq!(lines.len(), 1);
+    let line = &lines[0];
+    // PRODUCTOS code 5 = CEBADA in the vendored FEGA catalogue.
+    assert_eq!(line.product_code(), Some(5));
+    assert_eq!(line.secondary_product_code(), None);
+    // "S" = secano (live-observed; "R" = regadío, see the secondary fixture).
+    assert_eq!(line.exploitation_system(), Some("S"));
+    // parc_supcult is in SQUARE METRES: 296800 m² = 29,68 ha.
+    assert_eq!(line.cultivated_area_ha(), Some(29.68));
+}
+
+#[test]
+fn declared_crops_read_the_secondary_crop_and_regadio() {
+    use module_sigpac::models::parse_declared_crops_response;
+
+    let lines = parse_declared_crops_response(DECLARED_SECONDARY).unwrap();
+    assert_eq!(lines.len(), 1);
+    let line = &lines[0];
+    // Codes 4 = MAÍZ (main) and 6 = CENTENO (secondary): a second crop on the
+    // same recinto, not a correction of the first.
+    assert_eq!(line.product_code(), Some(4));
+    assert_eq!(line.secondary_product_code(), Some(6));
+    assert_eq!(line.exploitation_system(), Some("R"));
+    assert_eq!(line.cultivated_area_ha(), Some(4.17));
+}
+
+/// Nothing declared is a real answer the service gives as HTTP 200 with
+/// `numberMatched: 0` — never a 404, so no status special-casing is needed.
+#[test]
+fn declared_crops_empty_collection_is_an_empty_list_not_an_error() {
+    use module_sigpac::models::parse_declared_crops_response;
+
+    assert!(
+        parse_declared_crops_response(DECLARED_EMPTY)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        parse_declared_crops_response(br#"{"no":"features"}"#),
+        Err(GeoError::Invalid("sigpac_response_invalid"))
+    ));
+}
+
+#[test]
+fn declared_crops_cache_key_carries_the_campaign() {
+    use module_sigpac::client::declared_crops_cache_key;
+
+    assert_eq!(
+        declared_crops_cache_key(2025, &valladolid_ref()),
+        "sigpac/cultivos/2025/47/163/0/0/11/40/1"
+    );
+    // A different campaign is a different row, so a rollover adds rather than
+    // overwrites and last year's answer stays available as the fallback.
+    assert_ne!(
+        declared_crops_cache_key(2025, &valladolid_ref()),
+        declared_crops_cache_key(2026, &valladolid_ref())
+    );
+}
+
+/// The service runs one campaign behind, so the fallback is the normal path:
+/// the current campaign answers nothing and the previous one carries the
+/// declaration. No network here — the current campaign's empty is seeded as
+/// TODAY's, which is exactly the answer the day rule trusts.
+#[test]
+fn fallback_serves_the_previous_campaign_and_labels_it() {
+    use module_sigpac::client::{declared_crops_cache_key, declared_crops_with_fallback};
+
+    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let reference = valladolid_ref();
+    seed_resource_at(
+        &cache,
+        &declared_crops_cache_key(2026, &reference),
+        DECLARED_EMPTY,
+        &today_stamp(),
+    );
+    seed_resource(
+        &cache,
+        &declared_crops_cache_key(2025, &reference),
+        DECLARED,
+    );
+
+    let answer = declared_crops_with_fallback(&cache, &reference, 2026, false)
+        .unwrap()
+        .unwrap();
+    // The campaign that answered, not the one that was asked for first — every
+    // proposal has to be able to say which year's declaration it repeats.
+    assert_eq!(answer.campaign, 2025);
+    assert_eq!(answer.lines.len(), 1);
+    assert_eq!(answer.lines[0].product_code(), Some(5));
+}
+
+/// A stored non-empty answer for the current campaign is final: it is served
+/// without asking upstream, which is what makes a loaded farm work offline.
+#[test]
+fn fallback_trusts_a_stored_current_campaign_answer() {
+    use module_sigpac::client::{declared_crops_cache_key, declared_crops_with_fallback};
+
+    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let reference = valladolid_ref();
+    seed_resource(
+        &cache,
+        &declared_crops_cache_key(2026, &reference),
+        DECLARED,
+    );
+
+    let answer = declared_crops_with_fallback(&cache, &reference, 2026, false)
+        .unwrap()
+        .unwrap();
+    assert_eq!(answer.campaign, 2026);
+}
+
+/// "Nothing declared" is only reported when both campaigns actually answered:
+/// the previous campaign's cached empty is authoritative (closed dataset) and
+/// the current one's was asked today, so both are real answers rather than
+/// gaps — and no network is involved in establishing that.
+#[test]
+fn fallback_reports_none_when_both_campaigns_answered_empty() {
+    use module_sigpac::client::{declared_crops_cache_key, declared_crops_with_fallback};
+
+    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let reference = valladolid_ref();
+    seed_resource_at(
+        &cache,
+        &declared_crops_cache_key(2026, &reference),
+        DECLARED_EMPTY,
+        &today_stamp(),
+    );
+    seed_resource(
+        &cache,
+        &declared_crops_cache_key(2025, &reference),
+        DECLARED_EMPTY,
+    );
+
+    assert!(
+        declared_crops_with_fallback(&cache, &reference, 2026, false)
+            .unwrap()
+            .is_none()
+    );
+}
+
+/// The read-only cache probe the fallback needs: it must never fetch, so that
+/// "stored but empty" can be told apart from "never asked".
+#[test]
+fn cached_probe_reads_without_fetching() {
+    use terrazgo_geo::fetch;
+
+    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    assert!(
+        fetch::cached(&cache, "sigpac/cultivos/2025/x")
+            .unwrap()
+            .is_none()
+    );
+
+    seed_resource(&cache, "sigpac/cultivos/2025/x", DECLARED_EMPTY);
+    let hit = fetch::cached(&cache, "sigpac/cultivos/2025/x")
+        .unwrap()
+        .unwrap();
+    assert_eq!(hit.data, DECLARED_EMPTY);
 }

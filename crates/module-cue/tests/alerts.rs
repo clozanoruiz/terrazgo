@@ -74,6 +74,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
         conn,
         NewOperator {
             full_name: "Carlos Pérez".into(),
+            tax_id: None,
             licence_number: Some("CL-12345".into()),
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2026-07-15".into()),
@@ -89,6 +90,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             farm_id: farm_id.clone(),
             name: "Atomizador".into(),
             kind: Some("sprayer".into()),
+            acquired_on: None,
             last_inspection_date: Some("2023-07-01".into()),
             next_inspection_due_date: Some("2026-07-01".into()),
             roma_number: None,
@@ -133,10 +135,14 @@ fn fixture(conn: &mut Connection) -> Fixture {
             season_id,
             farm_id,
             application_date: "2026-06-01".into(),
-            product_id,
+            application_end_date: None,
+            application_time: None,
+            product_id: Some(product_id),
             country_code: None,
-            dose_value: 1.0,
-            dose_unit_code: "l_ha".into(),
+            dose_value: Some(1.0),
+            dose_unit_code: Some("l_ha".into()),
+            total_quantity_value: None,
+            total_quantity_unit_code: None,
             problems: vec![NewTreatmentProblem {
                 reason_category_code: "disease".into(),
                 problem_code: "1".into(),
@@ -146,6 +152,11 @@ fn fixture(conn: &mut Connection) -> Fixture {
             target_organism: None,
             operator_id: operator_id.clone(),
             machinery_id: Some(machinery_id.clone()),
+            advisor_id: None,
+            measure_code: None,
+            measure_intensity_value: None,
+            measure_intensity_unit_code: None,
+            measure_registration_number: None,
             phi_days_used: None, // falls back to the product's 21-day PHI
             notes: None,
         },
@@ -153,6 +164,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             plot_id,
             crop_id: None,
             surface_treated_ha: 3.0,
+            growth_stage_code: None,
         }],
         None,
     )
@@ -230,6 +242,7 @@ fn operator_without_expiry_date_produces_no_alert() {
         &mut conn,
         NewOperator {
             full_name: "Sin Carné".into(),
+            tax_id: None,
             licence_number: None,
             licence_level_code: None,
             licence_expiry_date: None,
@@ -293,10 +306,14 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
             season_id,
             farm_id,
             application_date: "2026-06-05".into(),
-            product_id,
+            application_end_date: None,
+            application_time: None,
+            product_id: Some(product_id),
             country_code: None,
-            dose_value: 1.0,
-            dose_unit_code: "l_ha".into(),
+            dose_value: Some(1.0),
+            dose_unit_code: Some("l_ha".into()),
+            total_quantity_value: None,
+            total_quantity_unit_code: None,
             problems: vec![NewTreatmentProblem {
                 reason_category_code: "pest".into(),
                 problem_code: "1".into(),
@@ -306,6 +323,11 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
             target_organism: None,
             operator_id: fx.operator_id.clone(),
             machinery_id: None,
+            advisor_id: None,
+            measure_code: None,
+            measure_intensity_value: None,
+            measure_intensity_unit_code: None,
+            measure_registration_number: None,
             phi_days_used: Some(14),
             notes: None,
         },
@@ -314,11 +336,13 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
                 plot_id: plot_a,
                 crop_id: None,
                 surface_treated_ha: 2.0,
+                growth_stage_code: None,
             },
             NewTreatmentPlot {
                 plot_id: plot_b,
                 crop_id: None,
                 surface_treated_ha: 2.0,
+                growth_stage_code: None,
             },
         ],
         None,
@@ -711,4 +735,172 @@ fn zone_alerts_lapse_with_the_plot() {
     soft_delete_plot(&mut conn, &plot_id, None).unwrap();
     repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
     assert!(repo::list_active_alerts(&conn).unwrap().is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Non-chemical actuations and the plazo de seguridad
+//
+// RD 1311/2012 art. 10.1 asks professionals to prefer non-chemical methods, so
+// the register has to be able to hold an actuation with no product — and a
+// measure imposes no waiting period before harvest. These two tests pin the
+// rule in BOTH directions on purpose: the failure that would matter is not a
+// spurious alert but a MISSING one, and the earlier shape of the candidate
+// query (`phi_end_date` read as a non-null String) would have failed the whole
+// refresh, leaving a holding with no alerts of any kind.
+// ---------------------------------------------------------------------------
+
+/// Insert a purely non-chemical actuation on the fixture's farm/season:
+/// pheromone diffusers, no product, no dose, no plazo.
+fn insert_non_chemical(conn: &mut Connection, fx: &Fixture) -> String {
+    let (season_id, farm_id): (String, String) = conn
+        .query_row(
+            "SELECT season_id, farm_id FROM treatment_record WHERE id = ?1",
+            [&fx.treatment_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    let plot_id: String = conn
+        .query_row(
+            "SELECT plot_id FROM treatment_plot WHERE treatment_record_id = ?1",
+            [&fx.treatment_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    repo::insert_treatment_record(
+        conn,
+        NewTreatmentRecord {
+            season_id,
+            farm_id,
+            // Same day as the fixture's chemical treatment, so any PHI window
+            // this wrongly opened would be live on TODAY and the test would
+            // see it.
+            application_date: "2026-06-01".into(),
+            application_end_date: None,
+            application_time: None,
+            product_id: None,
+            country_code: None,
+            dose_value: None,
+            dose_unit_code: None,
+            total_quantity_value: None,
+            total_quantity_unit_code: None,
+            problems: vec![NewTreatmentProblem {
+                reason_category_code: "pest".into(),
+                problem_code: "1".into(),
+            }],
+            justifications: vec!["monitoring".into()],
+            efficacy_code: None,
+            target_organism: None,
+            operator_id: fx.operator_id.clone(),
+            machinery_id: None,
+            advisor_id: None,
+            measure_code: Some("15".into()), // feromonas y atrayentes
+            measure_intensity_value: Some(4.0),
+            measure_intensity_unit_code: Some("diffusers_ha".into()),
+            measure_registration_number: None,
+            phi_days_used: None,
+            notes: None,
+        },
+        vec![NewTreatmentPlot {
+            plot_id,
+            crop_id: None,
+            surface_treated_ha: 3.0,
+            growth_stage_code: None,
+        }],
+        None,
+    )
+    .unwrap()
+    .id
+}
+
+#[test]
+fn a_non_chemical_actuation_stores_no_plazo_de_seguridad() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let id = insert_non_chemical(&mut conn, &fx);
+
+    let (phi_days, phi_end, dose, product): (
+        Option<i64>,
+        Option<String>,
+        Option<f64>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT phi_days_used, phi_end_date, dose_value, product_id
+             FROM treatment_record WHERE id = ?1",
+            [&id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    // The whole chemical block is absent together — the table CHECK refuses
+    // any partial combination, so this is the only shape it can take.
+    assert_eq!(phi_days, None);
+    assert_eq!(phi_end, None);
+    assert_eq!(dose, None);
+    assert_eq!(product, None);
+}
+
+#[test]
+fn a_non_chemical_actuation_raises_no_phi_alert_and_leaves_the_others_alone() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    // Baseline: the chemical fixture's PHI window is live on TODAY.
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    let before = repo::list_active_alerts(&conn).unwrap();
+    let phi_before: Vec<&str> = before
+        .iter()
+        .filter(|a| a.alert_type_code == "phi_window")
+        .map(|a| a.subject_id.as_str())
+        .collect();
+    assert_eq!(
+        phi_before,
+        vec![fx.treatment_id.as_str()],
+        "the chemical treatment's window is the baseline"
+    );
+
+    let non_chemical = insert_non_chemical(&mut conn, &fx);
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    let after = repo::list_active_alerts(&conn).unwrap();
+
+    // The measure raises nothing of its own...
+    assert!(
+        !after.iter().any(|a| a.subject_id == non_chemical),
+        "a measure imposes no plazo de seguridad, so it opens no window"
+    );
+    // ...and, the point of the test, it does not take the existing alerts with
+    // it: the licence and ITV alerts are derived in the same refresh pass.
+    assert_eq!(
+        after.len(),
+        before.len(),
+        "an actuation with no product must not disturb the rest of the refresh"
+    );
+    assert!(
+        after
+            .iter()
+            .any(|a| a.alert_type_code == "phi_window" && a.subject_id == fx.treatment_id),
+        "the chemical treatment's own window is still open"
+    );
+}
+
+#[test]
+fn phi_status_ignores_actuations_with_no_product() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let (farm_id, plot_id): (String, String) = conn
+        .query_row(
+            "SELECT tr.farm_id, tp.plot_id FROM treatment_record tr
+             JOIN treatment_plot tp ON tp.treatment_record_id = tr.id
+             WHERE tr.id = ?1",
+            [&fx.treatment_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    insert_non_chemical(&mut conn, &fx);
+
+    // The map overlay reads the same windows. The plot is in PHI because of
+    // the CHEMICAL treatment; the measure neither adds a window nor breaks the
+    // query that finds them.
+    let status = repo::phi_status_for_farm(&conn, &farm_id, TODAY).unwrap();
+    let plot = status.iter().find(|s| s.plot_id == plot_id).unwrap();
+    assert!(plot.in_phi);
+    assert_eq!(plot.phi_until.as_deref(), Some("2026-06-22"));
 }

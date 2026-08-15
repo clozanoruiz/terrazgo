@@ -2,37 +2,96 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Catalogue importer tests against the REAL vendored FEGA files
-//! (crates/terrazgo-core/catalogues/, snapshot fetched 2026-07-14 from
-//! https://www11.fega.es/bdcsixwsp/catalogos/zip/). Every expected value below
-//! is read off those files, not invented — see docs/siex-export.md → "Anexo VII
-//! catalogue study" for the per-catalogue shapes.
+//! (crates/terrazgo-core/catalogues/, fetched per idTabla from
+//! https://www11.fega.es/bdcsixwsp/catalogos/{id}). Every expected value below
+//! is read off those files, not invented — see docs/maintenance.md §1 for the
+//! snapshot's provenance and docs/siex-export.md → "Anexo VII catalogue study"
+//! for the per-catalogue shapes.
 // Test code may unwrap (clippy.toml exempts tests); the workspace lint only
 // auto-allows #[test] fns, so file-level for the shared helpers too.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use std::collections::HashSet;
+use std::path::PathBuf;
+
 use rusqlite::Connection;
 use terrazgo_core::catalogue::{self, CatalogueCode};
 
-/// The 16 vendored SIEX catalogues (idTabla ids), one per TratamFito-relevant
-/// coded field plus the crop↔SIGPAC-uso relation for the declared-crops prefill.
-const VENDORED_IDS: [&str; 16] = [
+/// Every vendored SIEX catalogue (idTabla ids). Kept in sync by hand with
+/// `catalogue.rs`'s `VENDORED`; `imports_all_vendored_catalogues` fails if the
+/// two drift, in either direction.
+const VENDORED_IDS: [&str; 48] = [
     "AUTORIZACION_EXCP",
     "BUENAS_PRACTICAS_AMBITOS",
+    "COMUNIDAD_AUTONOMA",
     "CULTIVO_USO_SIGPAC",
+    "DESTINO_CULTIVO",
+    "DEST_COSECHA",
+    "DEST_RES_VEG",
+    "DETALLE_MATERIAL_FERT",
+    "EDIFICACIONES_INSTALACIONES",
     "EFICACIA_TRATAMIENTO",
     "ENFERMEDADES",
     "EST_FENOLOGICO",
     "JUSTIFICACION_ACTUACION",
+    "MACRONUTRIENTES",
     "MALAS_HIERBAS",
+    "MATERIAL_ANALIZADO",
+    "MATERIAL_VEGETAL_REPRODUCCION",
+    "MAT_FERTI",
+    "MEDIDA_PREVENTIVA_CULTURAL",
+    "METALES_PESADOS",
+    "METODO_APLICACION_FERTILIZANTE",
+    "MUNICIPIO_SIGPAC",
+    "MICRONUTRIENTES",
+    "ORIGEN_AGUA_RIEGO",
+    "PAIS",
     "PLAGAS",
+    "PROC_VEGETAL",
     "PRODUCTOS",
+    "PROD_VEGETAL",
+    "PROVINCIA",
+    "REGIMEN_TENENCIA",
     "REGULADORES_CRECIMIENTO",
+    "SIST_CULTIVO",
+    "SIST_EXPLOTACION",
+    "SIST_RIEGO",
+    "SUST_ACTIVAS",
     "TIPENERGIA",
+    "TIPO_ANALISIS",
+    "TIPO_COBERTURA_SUELO",
+    "TIPO_FERITILIZACION",
+    "TIPO_LABOR",
     "TIPO_MAQUINA_UNE",
     "TIPO_MEDIDA_FITOSANITARIA",
     "TIPO_PRODFITO",
+    "TIPO_TRATAMIENTO",
+    "TRAT_ESTIERCOLES",
     "UNIDADES_MEDIDA",
+    "USO_SIGPAC",
 ];
+
+/// Data rows of one vendored file, read off disk (the importer reads the same
+/// bytes through `include_bytes!`). Windows-1252 decode, matching the importer.
+fn file_rows(catalogue_id: &str) -> Vec<Vec<String>> {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("catalogues")
+        .join(format!("{catalogue_id}.csv"));
+    let bytes = std::fs::read(&path).unwrap_or_else(|_| panic!("missing vendored file {path:?}"));
+    let text: String = match std::str::from_utf8(&bytes) {
+        Ok(text) => text.to_owned(),
+        // The 0x80-0x9F range differs between cp1252 and Latin-1, but no code
+        // or identity value in these files uses it — only labels do, and this
+        // helper is used for counting, not for label comparison.
+        Err(_) => bytes.iter().map(|&b| char::from(b)).collect(),
+    };
+    csv::ReaderBuilder::new()
+        .delimiter(b';')
+        .from_reader(text.as_bytes())
+        .records()
+        .map(|r| r.unwrap().iter().map(str::to_string).collect())
+        .collect()
+}
 
 fn ensured_db() -> Connection {
     let mut conn = terrazgo_core::open_in_memory().unwrap();
@@ -74,18 +133,66 @@ fn imports_all_vendored_catalogues() {
     let catalogues: i64 = conn
         .query_row("SELECT COUNT(*) FROM catalogue", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(catalogues, 16);
-    // The 2026-07-14 snapshot holds 5999 rows across the 16 files. Codes are
-    // only ever added or baja-dated upstream, so a refreshed snapshot may grow
+    assert_eq!(
+        catalogues,
+        VENDORED_IDS.len() as i64,
+        "VENDORED_IDS and catalogue.rs's VENDORED have drifted"
+    );
+    // The snapshot holds 17384 stored rows across the 48 files (17385 data
+    // rows less COMUNIDAD_AUTONOMA's code-less placeholder). Codes are only
+    // ever added or baja-dated upstream, so a refreshed snapshot may grow
     // this number but must never shrink it.
     let codes: i64 = conn
         .query_row("SELECT COUNT(*) FROM catalogue_code", [], |r| r.get(0))
         .unwrap();
-    assert!(codes >= 5999, "expected >= 5999 codes, got {codes}");
+    assert!(codes >= 17384, "expected >= 17384 codes, got {codes}");
 }
 
 #[test]
-fn eficacia_codes_match_the_fega_file() {
+fn every_file_row_is_imported_exactly_once() {
+    // The guard that catches a WRONG `identity_attrs`, which is otherwise
+    // silent: `reconcile` keys existing rows by (code, identity), so if a
+    // catalogue repeats a code and we don't say which attribute qualifies it,
+    // the HashMap keeps only the last row per code and re-UPDATEs the others
+    // onto one id. Row count and MAX(id) both stay put, so the idempotence
+    // test passes while labels are thrashed on every run. Comparing against
+    // the files is the only thing that notices.
+    let conn = ensured_db();
+    for id in VENDORED_IDS {
+        // COMUNIDAD_AUTONOMA's "Comunidad Desconocida" row carries no INE
+        // code and is deliberately skipped by the importer.
+        let expected = file_rows(id)
+            .iter()
+            .filter(|row| !(id == "COMUNIDAD_AUTONOMA" && row[1].trim().is_empty()))
+            .count() as i64;
+        assert_eq!(
+            code_count(&conn, id),
+            expected,
+            "{id}: imported row count does not match the vendored file"
+        );
+    }
+}
+
+#[test]
+fn every_imported_row_has_a_label() {
+    // An empty label is a mis-set `label_col`, and it would print as a blank
+    // cell in a picker or a report rather than failing loudly.
+    // DETALLE_MATERIAL_FERT is why this exists: the provider's own
+    // `descripcion` column is blank on its 83 "PERSONALIZADO" rows.
+    let conn = ensured_db();
+    for id in VENDORED_IDS {
+        for row in catalogue::all_codes(&conn, id).unwrap() {
+            assert!(
+                !row.label.trim().is_empty(),
+                "{id} code {} imported with an empty label",
+                row.code
+            );
+        }
+    }
+}
+
+#[test]
+fn efficacy_codes_match_the_fega_file() {
     // EFICACIA_TRATAMIENTO is the smallest catalogue: 1 Buena / 2 Regular /
     // 3 Mala, all active — pinned in full against the vendored file.
     let conn = ensured_db();
@@ -181,6 +288,64 @@ fn crop_catalogue_keeps_attribute_columns() {
     assert_eq!(attrs["Frutal"], "NO");
 }
 
+/// Reglamento (UE) 2023/564 art. 1.3 requires crop names to follow EPPO codes
+/// and puts the correspondence on the Member State. `PRODUCTOS` publishes an
+/// EPPO column, so the code looks derivable from `crop.crop_code` — and this
+/// pins how far that actually goes, because it is **not** every crop.
+///
+/// Measured 2026-08-12 against the vendored snapshot: **151 of the 1023 active
+/// rows carry no EPPO code**, and the gap is structural rather than an
+/// omission. EPPO codes a plant taxon, and a large part of this catalogue is
+/// not one: `BARBECHO TRADICIONAL` and `BARBECHO MEDIOAMBIENTAL` are fallow,
+/// `PASTOS PERMANENTES DE 5 O MÁS AÑOS` is a land use, `FLORES` is a generic
+/// group, and `TRANQUILLÓN` is a wheat-rye mixture with two taxa and so no
+/// single code. Those rows can never acquire one — which is consistent with the
+/// EU annex heading its column "Crop or situation/**land use**".
+///
+/// So nothing may derive an EPPO code and present the result as complete: the
+/// derivation must carry the gap rather than invent a code or drop the row.
+///
+/// The numbers are exact on purpose. A refresh that moves either one should
+/// make somebody look at what FEGA changed, which is the same discipline as the
+/// row-count guard — re-measure, then update these figures and their date.
+#[test]
+fn eppo_coverage_of_the_crop_catalogue_is_incomplete() {
+    let conn = ensured_db();
+    let active = terrazgo_core::catalogue::active_codes(&conn, "PRODUCTOS").unwrap();
+    assert_eq!(active.len(), 1023, "active PRODUCTOS rows");
+
+    let without_eppo = active
+        .iter()
+        .filter(|row| {
+            row.attrs
+                .as_ref()
+                .and_then(|attrs| attrs.get("EPPO"))
+                .and_then(|v| v.as_str())
+                .is_none_or(str::is_empty)
+        })
+        .count();
+    assert_eq!(
+        without_eppo, 151,
+        "active PRODUCTOS rows with no EPPO code — the EU annex's crop-name \
+         correspondence is not derivable for these"
+    );
+
+    // Named examples, so a change of shape stays distinguishable from a change
+    // of coverage. A mixture names two taxa; fallow names none.
+    for (code, label) in [("12", "TRANQUILLÓN"), ("20", "BARBECHO TRADICIONAL")] {
+        let row = one(&conn, "PRODUCTOS", code);
+        assert_eq!(row.label, label);
+        assert!(
+            row.attrs
+                .as_ref()
+                .and_then(|attrs| attrs.get("EPPO"))
+                .is_none(),
+            "{label} has no EPPO code, and an empty provider cell is omitted \
+             rather than stored as \"\""
+        );
+    }
+}
+
 #[test]
 fn lifecycle_dates_are_stored_iso() {
     // ENFERMEDADES code 1: alta and modificación 03/07/2024 in the file,
@@ -222,6 +387,109 @@ fn composite_identity_catalogues_keep_every_row_per_code() {
     let wheat_usos = catalogue::find_code(&conn, "CULTIVO_USO_SIGPAC", "1").unwrap();
     assert_eq!(wheat_usos.len(), 4);
     assert!(wheat_usos.iter().all(|r| r.label == "TRIGO BLANDO"));
+    // MATERIAL_VEGETAL_REPRODUCCION repeats its tipo code once per detalle.
+    let semilla = catalogue::find_code(&conn, "MATERIAL_VEGETAL_REPRODUCCION", "1").unwrap();
+    assert_eq!(semilla.len(), 11);
+    assert!(semilla.iter().all(|r| r.label == "Semilla"));
+}
+
+#[test]
+fn plant_product_is_not_the_crop_catalogue() {
+    // PROD_VEGETAL is the HARVESTED-PRODUCE catalogue that
+    // `ComercializacionVD.ProductoVegetal` and
+    // `TratamientosPostCosecha.ProductoVegetal` code against — a different
+    // list from PRODUCTOS, which codes the crop. The file states the relation
+    // itself: produce 1 "Aceitunas" comes from crops 101 OLIVO and 363
+    // ACEBUCHE, so the produce code repeats once per crop.
+    let conn = ensured_db();
+    let aceitunas = catalogue::find_code(&conn, "PROD_VEGETAL", "1").unwrap();
+    assert_eq!(aceitunas.len(), 2);
+    assert!(aceitunas.iter().all(|r| r.label == "Aceitunas"));
+    let mut crops: Vec<&str> = aceitunas
+        .iter()
+        .map(|r| r.attrs.as_ref().unwrap()["Cultivo SIEX"].as_str().unwrap())
+        .collect();
+    crops.sort_unstable();
+    assert_eq!(crops, ["ACEBUCHE", "OLIVO"]);
+    // The crop catalogue answers a different question for the same word.
+    assert_eq!(one(&conn, "PRODUCTOS", "101").label, "OLIVO");
+    // 208 distinct produce codes behind 692 rows — a picker must dedupe.
+    let distinct: HashSet<String> = catalogue::active_codes(&conn, "PROD_VEGETAL")
+        .unwrap()
+        .into_iter()
+        .map(|r| r.code)
+        .collect();
+    assert_eq!(distinct.len(), 208);
+}
+
+#[test]
+fn comunidad_autonoma_is_keyed_by_its_ine_code() {
+    // The file leads with the CATASTRO code, but SIEX `CAExplotacion` wants
+    // INE ("según codificacion INE"), and the two disagree for 10 of the 17
+    // communities. Keying on column 0 would resolve INE 07 to Castilla-La
+    // Mancha — a wrong region, silently, on a regulatory export.
+    let conn = ensured_db();
+    let cyl = one(&conn, "COMUNIDAD_AUTONOMA", "07");
+    assert_eq!(cyl.label, "Comunidad Autónoma de Castilla y León");
+    assert_eq!(cyl.attrs.unwrap()["Código catastro"], "08");
+    // 18 rows in the file, but the code-less "Comunidad Desconocida"
+    // placeholder is not a community and is not stored.
+    assert_eq!(code_count(&conn, "COMUNIDAD_AUTONOMA"), 17);
+}
+
+#[test]
+fn the_analysis_and_seed_catalogues_carry_what_slice_8_believed_missing() {
+    // Seams 2-4 recorded these as "no catalogue in the vendored FEGA set".
+    // They exist; the claim was about our snapshot, not about FEGA.
+    let conn = ensured_db();
+    let materials: Vec<(String, String)> = catalogue::active_codes(&conn, "MATERIAL_ANALIZADO")
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.code, r.label))
+        .collect();
+    // Four values, not the printed model's three: FEGA separates the standing
+    // crop from the harvested produce.
+    assert_eq!(
+        materials,
+        [
+            ("1".into(), "Cultivo".to_string()),
+            ("2".into(), "Producto cosechado".into()),
+            ("3".into(), "Suelo".into()),
+            ("4".into(), "Agua de riego".into()),
+        ]
+    );
+    assert_eq!(
+        one(&conn, "TIPO_ANALISIS", "5").label,
+        "Parámetros del Suelo"
+    );
+    // `UsoSemillaTratada.Tratamiento` — note the codes start at 2.
+    let seed: Vec<String> = catalogue::active_codes(&conn, "TIPO_TRATAMIENTO")
+        .unwrap()
+        .into_iter()
+        .map(|r| r.code)
+        .collect();
+    assert_eq!(seed, ["2", "3", "4", "5"]);
+    // `Analitica.TiposSustancias[]`, and the CAS number that makes it the
+    // cross-country key a future non-Spanish export would match on.
+    let acefato = one(&conn, "SUST_ACTIVAS", "1");
+    assert_eq!(acefato.label, "ACEFATO");
+    let attrs = acefato.attrs.unwrap();
+    assert_eq!(attrs["Número CAS"], "30560-19-1");
+    assert_eq!(attrs["Código Europeo"], "1049");
+}
+
+#[test]
+fn buildings_are_keyed_by_their_siex_code_not_their_tipologia() {
+    // EDIFICACIONES_INSTALACIONES leads with the tipología (9 values, each
+    // repeating); the row's own code is `Código SIEX` in column 2.
+    let conn = ensured_db();
+    let row = one(&conn, "EDIFICACIONES_INSTALACIONES", "1");
+    assert_eq!(row.label, "Abrevadero y abastecimiento de agua");
+    assert_eq!(
+        row.attrs.unwrap()["Tipología"],
+        "Naves y obras de edificación de entidad constructiva"
+    );
+    assert_eq!(code_count(&conn, "EDIFICACIONES_INSTALACIONES"), 109);
 }
 
 #[test]
@@ -284,15 +552,15 @@ fn upsert_never_deletes_and_repairs_drift() {
         [],
     )
     .unwrap();
-    // Drift: a tampered label, and a stale catalogue stamp so the fast-path
-    // skip does not mask the reconcile.
+    // Drift: a tampered label, and a stale digest so the fast-path skip does
+    // not mask the reconcile (as it would on a real snapshot refresh).
     conn.execute(
         "UPDATE catalogue_code SET label = 'Tampered' WHERE catalogue_id = 'EFICACIA_TRATAMIENTO' AND code = '1'",
         [],
     )
     .unwrap();
     conn.execute(
-        "UPDATE catalogue SET source_updated_at = '2000-01-01' WHERE id = 'EFICACIA_TRATAMIENTO'",
+        "UPDATE catalogue SET source_digest = 'stale' WHERE id = 'EFICACIA_TRATAMIENTO'",
         [],
     )
     .unwrap();
@@ -310,26 +578,58 @@ fn upsert_never_deletes_and_repairs_drift() {
 }
 
 #[test]
-fn skips_catalogues_already_at_the_vendored_snapshot() {
-    // Fast path: when the stored source_updated_at is at least the vendored
-    // snapshot's, the catalogue is not touched — imported_at proves it.
+fn skips_catalogues_whose_bytes_have_not_changed() {
+    // Fast path: the stored digest matches the vendored file, so nothing is
+    // parsed or written — imported_at proves it. This must hold for EVERY
+    // catalogue, including the ones with no lifecycle dates: under the old
+    // date-based fast path those reconciled on every single startup.
     let mut conn = terrazgo_core::open_in_memory().unwrap();
     catalogue::ensure_catalogues(&mut conn).unwrap();
-    conn.execute(
-        "UPDATE catalogue SET imported_at = 'sentinel' WHERE id = 'EFICACIA_TRATAMIENTO'",
-        [],
-    )
-    .unwrap();
+    conn.execute("UPDATE catalogue SET imported_at = 'sentinel'", [])
+        .unwrap();
     catalogue::ensure_catalogues(&mut conn).unwrap();
-    let imported_at: String = conn
-        .query_row(
-            "SELECT imported_at FROM catalogue WHERE id = 'EFICACIA_TRATAMIENTO'",
-            [],
-            |r| r.get(0),
+    let reimported: Vec<String> = conn
+        .prepare("SELECT id FROM catalogue WHERE imported_at <> 'sentinel' ORDER BY id")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(
+        reimported.is_empty(),
+        "up-to-date catalogues were reimported: {reimported:?}"
+    );
+}
+
+#[test]
+fn a_changed_snapshot_is_detected_even_with_no_lifecycle_dates() {
+    // The reason the fast path hashes bytes instead of comparing dates. Two
+    // real refresh shapes the date comparison could not see: a provider that
+    // corrects a label without touching any date, and a catalogue that ships
+    // no dates at all (USO_SIGPAC, PROVINCIA, TIPO_MAQUINA_UNE, …).
+    let mut conn = terrazgo_core::open_in_memory().unwrap();
+    catalogue::ensure_catalogues(&mut conn).unwrap();
+    for id in ["EFICACIA_TRATAMIENTO", "USO_SIGPAC"] {
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT source_digest FROM catalogue WHERE id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(stored.is_some(), "{id} stored no digest");
+        conn.execute(
+            "UPDATE catalogue_code SET label = 'Tampered' WHERE catalogue_id = ?1",
+            [id],
         )
         .unwrap();
-    assert_eq!(
-        imported_at, "sentinel",
-        "an up-to-date catalogue was reimported"
-    );
+        conn.execute(
+            "UPDATE catalogue SET source_digest = 'stale' WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+    }
+    catalogue::ensure_catalogues(&mut conn).unwrap();
+    assert_eq!(one(&conn, "EFICACIA_TRATAMIENTO", "1").label, "Buena");
+    assert_eq!(one(&conn, "USO_SIGPAC", "TA").label, "TIERRAS ARABLES");
 }

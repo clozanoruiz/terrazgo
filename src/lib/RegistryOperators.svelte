@@ -6,31 +6,39 @@
   // Operators are not farm-scoped (the same applicator may work several farms).
   import { formatDate, t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { lookups, loadLookups } from "./lookups.svelte.js";
   import { notify, run } from "./notifications.svelte.js";
+  import DateInput from "./DateInput.svelte";
+  import TzSelect from "./TzSelect.svelte";
   import Skeleton from "./Skeleton.svelte";
+  import { sortedBy } from "./collate.js";
+  import { codeItems } from "./selectItems.js";
 
   let operators = $state([]);
-  let licenceLevels = $state([]);
+  // Display order is the client's business: SQL orders by BINARY collation,
+  // which puts "Ángel" after "Zubiri".
+  const sortedOperators = $derived(sortedBy(operators, (o) => o.full_name));
+  // Session-wide reference data (lib/lookups.svelte.js).
+  const licenceLevels = $derived(lookups.licenceLevels);
   let loading = $state(true);
 
   // Form; null editingId = the form creates, an id = it edits.
   let formOpen = $state(false);
   let editingId = $state(null);
   let fullName = $state("");
+  let taxId = $state("");
   let licenceNumber = $state("");
   let levelCode = $state("");
   let expiryDate = $state("");
 
   run(async () => {
-    [operators, licenceLevels] = await Promise.all([
-      invoke("list_operators"),
-      invoke("list_licence_levels"),
-    ]);
+    [operators] = await Promise.all([invoke("list_operators"), loadLookups()]);
   }).finally(() => (loading = false));
 
   function showForm(operator = null) {
     editingId = operator?.id ?? null;
     fullName = operator?.full_name ?? "";
+    taxId = operator?.tax_id ?? "";
     licenceNumber = operator?.licence_number ?? "";
     levelCode = operator?.licence_level_code ?? "";
     expiryDate = operator?.licence_expiry_date ?? "";
@@ -46,6 +54,7 @@
     event.preventDefault();
     const payload = {
       full_name: fullName.trim(),
+      tax_id: taxId.trim() || null,
       licence_number: licenceNumber.trim() || null,
       licence_level_code: levelCode || null,
       licence_expiry_date: expiryDate || null,
@@ -74,6 +83,7 @@
 
   function operatorDetail(operator) {
     return [
+      operator.tax_id,
       operator.licence_number,
       operator.licence_level_code ? tCode("licence_level", operator.licence_level_code) : null,
       operator.licence_expiry_date
@@ -94,23 +104,18 @@
   <form onsubmit={submit}>
     <div class="form-grid">
       <label><span>{t("operator.full_name")}</span><input required bind:value={fullName} /></label>
+      <label><span>{t("operator.tax_id")}</span><input bind:value={taxId} /></label>
       <label>
         <span>{t("operator.licence_number")}</span>
         <input bind:value={licenceNumber} />
       </label>
-      <label>
-        <span>{t("operator.licence_level")}</span>
-        <select bind:value={levelCode}>
-          <option value="">—</option>
-          {#each licenceLevels as level (level.code)}
-            <option value={level.code}>{tCode("licence_level", level.code)}</option>
-          {/each}
-        </select>
-      </label>
-      <label>
-        <span>{t("operator.licence_expiry")}</span>
-        <input type="date" bind:value={expiryDate} />
-      </label>
+      <TzSelect
+        label={t("operator.licence_level")}
+        items={codeItems(licenceLevels, "licence_level")}
+        nullable
+        bind:value={levelCode}
+      />
+      <DateInput label={t("operator.licence_expiry")} bind:value={expiryDate} />
     </div>
     <div class="form-actions">
       <button type="submit">{t("form.save")}</button>
@@ -123,7 +128,7 @@
   <Skeleton />
 {:else}
   <ul class="card-list">
-    {#each operators as operator (operator.id)}
+    {#each sortedOperators as operator (operator.id)}
       <li class="card">
         <strong>{operator.full_name}</strong>
         <span class="detail">{operatorDetail(operator)}</span>

@@ -35,6 +35,7 @@ pub struct Season {
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -45,7 +46,24 @@ pub struct Crop {
     pub species_name: String,
     pub variety: Option<String>,
     pub production_system_code: Option<String>,
+    /// Surface this crop occupies on the plot (model 2.1 "Superficie
+    /// cultivada"). `None` prints blank — never assume it fills the plot.
+    pub area_ha: Option<f64>,
+    pub irrigation_code: Option<String>,
+    pub growing_environment_code: Option<String>,
+    /// GIP framework for this crop (model 2.1's per-row column). `None` lets
+    /// the report fall back to what `production_system_code` implies.
+    pub gip_system_code: Option<String>,
     pub sown_on: Option<String>,
+    /// FEGA PRODUCTOS catalogue code for the species, stored verbatim.
+    /// `None` = free-text species with no catalogue match.
+    pub crop_code: Option<String>,
+    /// `"user"` (typed by hand) or `"sigpac"` (from a PAC declaration import).
+    pub source: String,
+    /// Campaign of the declaration this row came from, when imported.
+    pub source_campaign: Option<i64>,
+    /// Surface the declaration stated, beside — never instead of — `area_ha`.
+    pub declared_area_ha: Option<f64>,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -55,6 +73,8 @@ pub struct Crop {
 pub struct Operator {
     pub id: String,
     pub full_name: String,
+    /// Tax/identity number (model 1.2 NIF column, Anexo III A.1.c).
+    pub tax_id: Option<String>,
     pub licence_number: Option<String>,
     pub licence_level_code: Option<String>,
     pub licence_expiry_date: Option<String>,
@@ -76,6 +96,44 @@ pub struct UserProfile {
     pub deleted_at: Option<String>,
 }
 
+/// The advisor, advisory group or entity a holding is attached to (official
+/// model 1.4). A capacity recorded in the book — not an app user, and not a
+/// carné level an applicator holds.
+#[derive(Debug, Clone, Serialize)]
+pub struct Advisor {
+    pub id: String,
+    /// Person's name or razón social.
+    pub name: String,
+    pub tax_id: Option<String>,
+    /// The model's "Nº de identificación" (the ROPO advisor inscription in
+    /// Spain); named generically because core carries no regional identifiers.
+    pub registration_number: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// Farm ↔ advisor, carrying the GIP framework the holding operates under
+/// (model 1.4's "Tipo de explotación").
+#[derive(Debug, Clone, Serialize)]
+pub struct FarmAdvisor {
+    pub id: String,
+    pub farm_id: String,
+    pub advisor_id: String,
+    pub gip_system_code: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// A farm's advisory link with the advisor it points at — what table 1.4 and
+/// the farm's advisory panel need in one round trip.
+#[derive(Debug, Clone, Serialize)]
+pub struct FarmAdvisorDetail {
+    pub link: FarmAdvisor,
+    pub advisor: Advisor,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Machinery {
     pub id: String,
@@ -85,6 +143,9 @@ pub struct Machinery {
     /// makes the audit payload use the real column name.
     #[serde(rename = "type")]
     pub kind: Option<String>,
+    /// Anexo III A.1.h accepts the acquisition date OR the last inspection —
+    /// equipment needing no ITV must still be datable in the book.
+    pub acquired_on: Option<String>,
     pub last_inspection_date: Option<String>,
     pub next_inspection_due_date: Option<String>,
     pub created_at: String,
@@ -112,12 +173,57 @@ pub struct Farm {
     /// exports name the holder with it. Format validation is per-country.
     pub owner_tax_id: Option<String>,
     pub location_text: Option<String>,
+    /// Postal contact of the holding (official model 1.1). Universal, so core.
+    pub address: Option<String>,
+    pub postal_code: Option<String>,
+    pub phone_fixed: Option<String>,
+    pub phone_mobile: Option<String>,
+    pub email: Option<String>,
+    /// "Fecha de apertura del cuaderno" (model 1.1), `YYYY-MM-DD`. The book is
+    /// a continuing document for the holding; `None` prints the model's blank
+    /// rule rather than a date nobody stated.
+    pub opened_on: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub country_code: String,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
+}
+
+/// Who signs the book when that is not the holder (model 1.1 "TITULAR O
+/// REPRESENTANTE"). Logged to `record_change` as its own entity, like
+/// `FarmEsExtension`. A legal capacity in a document — not a `user_profile`.
+#[derive(Debug, Clone, Serialize)]
+pub struct FarmRepresentative {
+    pub farm_id: String,
+    pub full_name: String,
+    pub tax_id: Option<String>,
+    pub representation_kind: Option<String>,
+    pub address: Option<String>,
+    pub locality: Option<String>,
+    /// One line of a postal address, free text — not the coded geography
+    /// `FarmEsExtension::province_code` carries for the holding itself.
+    pub province: Option<String>,
+    pub postal_code: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
+}
+
+/// Representative fields as form input; `None` on the farm means "no
+/// representative" and removes any existing row (the `FarmEsFields` contract).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FarmRepresentativeFields {
+    pub full_name: String,
+    pub tax_id: Option<String>,
+    pub representation_kind: Option<String>,
+    pub address: Option<String>,
+    pub locality: Option<String>,
+    #[serde(default)]
+    pub province: Option<String>,
+    pub postal_code: Option<String>,
+    pub phone: Option<String>,
+    pub email: Option<String>,
 }
 
 /// Spanish extension row for farm. Logged to `record_change` as its own entity
@@ -130,14 +236,19 @@ pub struct FarmEsExtension {
     /// user-entered from the farm's REA papers. REGA is the livestock registry;
     /// the two are different registrations.
     pub rea_code: Option<String>,
+    /// National registry number (model 1.1 "Nº Registro de Explotaciones
+    /// Nacional"), printed beside the autonómico `rea_code`.
+    pub siex_code: Option<String>,
     pub province_code: Option<String>,
 }
 
-/// A farm with its regional extension — what the edit form needs in one round trip.
+/// A farm with its regional extension and representative — what the edit form
+/// needs in one round trip.
 #[derive(Debug, Clone, Serialize)]
 pub struct FarmDetail {
     pub farm: Farm,
     pub es: Option<FarmEsExtension>,
+    pub representative: Option<FarmRepresentative>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -205,6 +316,7 @@ pub struct GeoFeature {
 pub struct FarmEsFields {
     pub rega_code: Option<String>,
     pub rea_code: Option<String>,
+    pub siex_code: Option<String>,
     pub province_code: Option<String>,
 }
 
@@ -235,12 +347,28 @@ pub struct NewCrop {
     pub species_name: String,
     pub variety: Option<String>,
     pub production_system_code: Option<String>,
+    pub area_ha: Option<f64>,
+    pub irrigation_code: Option<String>,
+    pub growing_environment_code: Option<String>,
+    pub gip_system_code: Option<String>,
     pub sown_on: Option<String>,
+    #[serde(default)]
+    pub crop_code: Option<String>,
+    /// Provenance; absent means `"user"`. The manual crop form never sends the
+    /// provenance fields — they describe where a row came from, not what the
+    /// form holds — so they default rather than being required of every caller.
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub source_campaign: Option<i64>,
+    #[serde(default)]
+    pub declared_area_ha: Option<f64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct NewOperator {
     pub full_name: String,
+    pub tax_id: Option<String>,
     pub licence_number: Option<String>,
     pub licence_level_code: Option<String>,
     pub licence_expiry_date: Option<String>,
@@ -257,6 +385,7 @@ pub struct NewMachinery {
     pub farm_id: String,
     pub name: String,
     pub kind: Option<String>, // maps to column `type`
+    pub acquired_on: Option<String>,
     pub last_inspection_date: Option<String>,
     pub next_inspection_due_date: Option<String>,
     /// Spanish registry numbers; an extension row is written when either is present.
@@ -293,10 +422,20 @@ pub struct UpdateFarm {
     pub owner_name: Option<String>,
     pub owner_tax_id: Option<String>,
     pub location_text: Option<String>,
+    pub address: Option<String>,
+    pub postal_code: Option<String>,
+    pub phone_fixed: Option<String>,
+    pub phone_mobile: Option<String>,
+    pub email: Option<String>,
+    #[serde(default)]
+    pub opened_on: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub country_code: String,
     pub es: Option<FarmEsFields>,
+    /// `None` removes the representative row — same reconcile-from-submitted
+    /// contract as `es`.
+    pub representative: Option<FarmRepresentativeFields>,
 }
 
 /// Full-row update for a plot. `farm_id` is deliberately absent: a plot never
@@ -341,6 +480,65 @@ pub struct NewZoneFlag {
     pub detail: Option<String>,
 }
 
+/// An abstraction point for human consumption near a plot — the water half of
+/// the printed model's section 2.2 (Anexo III A.1.f–g).
+///
+/// `inside_plot` and `distance_m` describe the *(plot, point)* pair rather than
+/// the point itself, which is why a point serving two plots is recorded once per
+/// plot: that is the claim the model's per-plot row makes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaterPoint {
+    pub id: String,
+    pub plot_id: String,
+    pub denomination: String,
+    pub inside_plot: bool,
+    /// Metres to the plot. Required when outside, always `None` when inside.
+    pub distance_m: Option<f64>,
+    /// Voluntary, WGS84/ETRS89 decimal degrees. Both or neither.
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// Input for recording a water point; the repository fills id and timestamps.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewWaterPoint {
+    pub plot_id: String,
+    pub denomination: String,
+    pub inside_plot: bool,
+    pub distance_m: Option<f64>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
+/// Full-row update. Carries no `plot_id`: moving a point to another plot would
+/// restate which plot the *original* row was about, so a mis-assigned point is
+/// deleted and re-created (the `UpdateCrop` precedent).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateWaterPoint {
+    pub denomination: String,
+    pub inside_plot: bool,
+    pub distance_m: Option<f64>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+}
+
+/// The stored negative for one plot: "checked, and there is no abstraction
+/// point here". Silence means the question was never asked, which is a
+/// different claim — the `plot_zone_flag` philosophy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaterDeclaration {
+    pub id: String,
+    pub plot_id: String,
+    /// 'YYYY-MM-DD', the day the farmer stated it.
+    pub declared_on: String,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
 /// Input for saving a geometry. The repository fills `id` and timestamps and
 /// replaces (soft-deletes) any active row with the same (subject, role, source).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -362,9 +560,68 @@ pub struct NewGeoFeature {
 #[derive(Debug, Deserialize)]
 pub struct UpdateOperator {
     pub full_name: String,
+    pub tax_id: Option<String>,
     pub licence_number: Option<String>,
     pub licence_level_code: Option<String>,
     pub licence_expiry_date: Option<String>,
+}
+
+/// Full-row update for a season. `status` is deliberately absent: archiving is
+/// a separate lifecycle action, not part of correcting a mistyped label or year.
+#[derive(Debug, Deserialize)]
+pub struct UpdateSeason {
+    pub campaign_year: i64,
+    pub label: String,
+    pub starts_on: Option<String>,
+    pub ends_on: Option<String>,
+}
+
+/// Full-row update for a crop. `plot_id` and `season_id` are deliberately absent,
+/// like `UpdatePlot`'s `farm_id`: re-homing a crop would silently re-home the
+/// treatment history that points at it. Correcting a crop entered on the wrong
+/// plot means deleting it and creating the right one.
+///
+/// The provenance fields break the full-row rule on purpose, and only they:
+/// `species_name` … `crop_code` are form state, so the submitted value replaces
+/// the stored one and `None` clears it, but `source`, `source_campaign` and
+/// `declared_area_ha` say where the row came from. A form that does not know
+/// about them must not erase them, so absent means "keep what is stored".
+/// The consequence is deliberate: once stamped, provenance is a historical fact
+/// this API cannot un-say.
+#[derive(Debug, Deserialize)]
+pub struct UpdateCrop {
+    pub species_name: String,
+    pub variety: Option<String>,
+    pub production_system_code: Option<String>,
+    pub area_ha: Option<f64>,
+    pub irrigation_code: Option<String>,
+    pub growing_environment_code: Option<String>,
+    pub gip_system_code: Option<String>,
+    pub sown_on: Option<String>,
+    #[serde(default)]
+    pub crop_code: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub source_campaign: Option<i64>,
+    #[serde(default)]
+    pub declared_area_ha: Option<f64>,
+}
+
+/// Advisor form input; the repository fills `id` and timestamps.
+#[derive(Debug, Deserialize)]
+pub struct NewAdvisor {
+    pub name: String,
+    pub tax_id: Option<String>,
+    pub registration_number: Option<String>,
+}
+
+/// Full-row update for an advisor: the form submits the complete desired state.
+#[derive(Debug, Deserialize)]
+pub struct UpdateAdvisor {
+    pub name: String,
+    pub tax_id: Option<String>,
+    pub registration_number: Option<String>,
 }
 
 /// Full-row update for a user profile; the submitted state replaces the
@@ -382,6 +639,7 @@ pub struct UpdateUserProfile {
 pub struct UpdateMachinery {
     pub name: String,
     pub kind: Option<String>, // maps to column `type`
+    pub acquired_on: Option<String>,
     pub last_inspection_date: Option<String>,
     pub next_inspection_due_date: Option<String>,
     pub roma_number: Option<String>,
@@ -394,4 +652,125 @@ pub struct UpdateMachinery {
 pub struct MachineryDetail {
     pub machinery: Machinery,
     pub es: Option<MachineryEsExtension>,
+}
+
+// ---------------------------------------------------------------------------
+// Commercialised harvest (model section 5)
+// ---------------------------------------------------------------------------
+
+/// What left the holding, and to whom. In core rather than in the CUE module
+/// because it is whole-farm data the costs and analytics modules will want, and
+/// modules never depend on each other.
+#[derive(Debug, Clone, Serialize)]
+pub struct HarvestRecord {
+    pub id: String,
+    pub season_id: String,
+    pub farm_id: String,
+    pub harvested_on: String,
+    pub product_name: String,
+    /// FEGA PROD_VEGETAL catalogue code — the HARVESTED PRODUCE, a different
+    /// list from the PRODUCTOS crop codes `crop.crop_code` speaks in. Stored
+    /// verbatim. `None` = free-text product with no catalogue match.
+    pub plant_product_code: Option<String>,
+    /// Nullable together with the unit: the printed form leaves the cell to be
+    /// filled by hand, so an unstated quantity is unknown, never zero.
+    pub quantity_value: Option<f64>,
+    /// `kg` or `t`, enforced in the repository — `unit` is a module-cue lookup
+    /// and core may never reference a module's table.
+    pub quantity_unit_code: Option<String>,
+    pub delivery_note_ref: Option<String>,
+    pub lot_number: Option<String>,
+    pub buyer_name: String,
+    pub buyer_tax_id: Option<String>,
+    pub buyer_address: Option<String>,
+    /// The model's "Nº de RGSEAA"; named generically because core carries no
+    /// regional identifiers.
+    pub buyer_registry_number: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// Which parcel the harvest came from, with the crop frozen as it stood.
+#[derive(Debug, Clone, Serialize)]
+pub struct HarvestPlot {
+    pub id: String,
+    pub harvest_record_id: String,
+    pub plot_id: String,
+    pub crop_id: Option<String>,
+    pub crop_name_snapshot: Option<String>,
+    pub variety_snapshot: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HarvestRecordDetail {
+    pub record: HarvestRecord,
+    pub plots: Vec<HarvestPlot>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewHarvestRecord {
+    pub season_id: String,
+    pub farm_id: String,
+    pub harvested_on: String,
+    pub product_name: String,
+    #[serde(default)]
+    pub plant_product_code: Option<String>,
+    #[serde(default)]
+    pub quantity_value: Option<f64>,
+    #[serde(default)]
+    pub quantity_unit_code: Option<String>,
+    #[serde(default)]
+    pub delivery_note_ref: Option<String>,
+    #[serde(default)]
+    pub lot_number: Option<String>,
+    pub buyer_name: String,
+    #[serde(default)]
+    pub buyer_tax_id: Option<String>,
+    #[serde(default)]
+    pub buyer_address: Option<String>,
+    #[serde(default)]
+    pub buyer_registry_number: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    /// Where it came from. At least one, and each plot must be on the farm.
+    pub plots: Vec<NewHarvestPlot>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewHarvestPlot {
+    pub plot_id: String,
+    #[serde(default)]
+    pub crop_id: Option<String>,
+}
+
+/// Full-row update. `season_id` and `farm_id` are deliberately absent: a sale
+/// never moves campaign or holding — correcting that means delete and re-enter,
+/// the `UpdateCrop` precedent. The plots are reconciled from the submitted
+/// state, like an extension table.
+#[derive(Debug, Deserialize)]
+pub struct UpdateHarvestRecord {
+    pub harvested_on: String,
+    pub product_name: String,
+    #[serde(default)]
+    pub plant_product_code: Option<String>,
+    #[serde(default)]
+    pub quantity_value: Option<f64>,
+    #[serde(default)]
+    pub quantity_unit_code: Option<String>,
+    #[serde(default)]
+    pub delivery_note_ref: Option<String>,
+    #[serde(default)]
+    pub lot_number: Option<String>,
+    pub buyer_name: String,
+    #[serde(default)]
+    pub buyer_tax_id: Option<String>,
+    #[serde(default)]
+    pub buyer_address: Option<String>,
+    #[serde(default)]
+    pub buyer_registry_number: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub plots: Vec<NewHarvestPlot>,
 }

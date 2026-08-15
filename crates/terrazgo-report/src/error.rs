@@ -25,4 +25,9 @@ pub enum ReportError {
     /// The compiled document could not be exported as PDF.
     #[error("PDF export failed: {0}")]
     Pdf(String),
+
+    /// The workbook description could not be rendered as .xlsx (no sheets, a
+    /// row wider than its columns, an unusable sheet name, a write failure).
+    #[error("spreadsheet export failed: {0}")]
+    Workbook(String),
 }

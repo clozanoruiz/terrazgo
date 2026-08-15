@@ -111,28 +111,56 @@ fn parse_dictionary(source: &str) -> Dictionary {
     dict
 }
 
-/// Load every dictionary in src/i18n, keyed by locale code.
+/// Every area file of one locale: `src/i18n/<locale>/*.js`, in name order.
+///
+/// The locale's own `src/i18n/<locale>.js` is the entry point i18n.js imports
+/// and holds no entries — since 2026-08-13 the keys live in per-area files, so
+/// a new module adds one file per locale rather than editing three long ones.
+fn locale_parts(locale: &str) -> Vec<(String, Dictionary)> {
+    let dir = repo_root().join("src/i18n").join(locale);
+    let mut parts: Vec<(String, Dictionary)> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("reading {}: {e}", dir.display()))
+        .map(|entry| entry.expect("readable dir entry").path())
+        .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("js"))
+        .map(|path| {
+            let name = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .expect("area file name")
+                .to_string();
+            let dict = parse_dictionary(&fs::read_to_string(&path).expect("readable dictionary"));
+            assert!(
+                !dict.is_empty(),
+                "no entries parsed from {} — did the dictionary format change?",
+                path.display()
+            );
+            (name, dict)
+        })
+        .collect();
+    parts.sort_by(|a, b| a.0.cmp(&b.0));
+    assert!(!parts.is_empty(), "{} holds no area files", dir.display());
+    parts
+}
+
+/// Every locale, merged from its area files and keyed by locale code.
 fn dictionaries() -> BTreeMap<String, Dictionary> {
     let dir = repo_root().join("src/i18n");
     let mut result = BTreeMap::new();
     for entry in fs::read_dir(&dir).expect("src/i18n exists") {
         let path = entry.expect("readable dir entry").path();
-        if path.extension().and_then(|e| e.to_str()) != Some("js") {
+        if !path.is_dir() {
             continue;
         }
         let locale = path
-            .file_stem()
+            .file_name()
             .and_then(|s| s.to_str())
-            .expect("locale file name")
+            .expect("locale dir name")
             .to_string();
-        let source = fs::read_to_string(&path).expect("readable dictionary");
-        let dict = parse_dictionary(&source);
-        assert!(
-            !dict.is_empty(),
-            "no entries parsed from {} — did the dictionary format change?",
-            path.display()
-        );
-        result.insert(locale, dict);
+        let mut merged = Dictionary::new();
+        for (_, part) in locale_parts(&locale) {
+            merged.extend(part);
+        }
+        result.insert(locale, merged);
     }
     assert!(
         result.len() >= 2,
@@ -140,6 +168,27 @@ fn dictionaries() -> BTreeMap<String, Dictionary> {
         dir.display()
     );
     result
+}
+
+/// No key may be defined by two area files of the same locale.
+///
+/// The merge in `<locale>.js` spreads the areas in order, so a duplicate would
+/// be silently overwritten — one area's wording would win and the other's would
+/// vanish with nothing to show for it. This is the hazard the split introduced,
+/// so it is the guard the split owes.
+#[test]
+fn no_key_is_defined_by_two_area_files() {
+    for locale in dictionaries().keys() {
+        let mut seen: BTreeMap<String, String> = BTreeMap::new();
+        for (area, dict) in locale_parts(locale) {
+            for key in dict.keys() {
+                if let Some(first) = seen.get(key) {
+                    panic!("'{locale}': '{key}' is defined in both {first}.js and {area}.js");
+                }
+                seen.insert(key.clone(), area.clone());
+            }
+        }
+    }
 }
 
 /// The `{placeholder}` names used in a translated string.
@@ -286,13 +335,57 @@ fn invalid_reason_codes(dir: &Path, found: &mut BTreeSet<String>) {
     }
 }
 
+/// Every workspace member's `src/`, read from the root manifest's own member
+/// list.
+///
+/// Derived rather than listed, because a hand-maintained list stops covering
+/// whatever someone forgets to add and says nothing about it: until 2026-08-13
+/// this test named five crates, while `module-sigpac` and `src-tauri` were also
+/// emitting `Invalid("…")` codes and going unchecked. Their keys happened to be
+/// present; nothing was making sure.
+fn workspace_src_dirs() -> Vec<PathBuf> {
+    let root = repo_root();
+    let manifest = fs::read_to_string(root.join("Cargo.toml")).expect("workspace manifest");
+    let members = manifest
+        .split_once("members = [")
+        .expect("the workspace manifest lists its members")
+        .1
+        .split_once(']')
+        .expect("the members list is closed")
+        .0;
+    let dirs: Vec<PathBuf> = members
+        .split(',')
+        .filter_map(|entry| {
+            let entry = entry.trim();
+            let start = entry.find('"')? + 1;
+            let end = entry[start..].find('"')? + start;
+            Some(root.join(&entry[start..end]).join("src"))
+        })
+        .filter(|dir| dir.is_dir())
+        .collect();
+
+    // A crate on disk but absent from the manifest would be skipped just as
+    // silently as the hand-written list used to skip one, so the derivation is
+    // checked against the directory it derives from.
+    for entry in fs::read_dir(root.join("crates")).expect("readable crates dir") {
+        let src = entry.expect("readable dir entry").path().join("src");
+        if src.is_dir() {
+            assert!(
+                dirs.contains(&src),
+                "{} exists but is not a workspace member — it would go unscanned",
+                src.display()
+            );
+        }
+    }
+    dirs
+}
+
 #[test]
 fn every_invalid_reason_code_has_a_key_in_every_locale() {
-    let root = repo_root();
     let mut reasons = BTreeSet::new();
-    invalid_reason_codes(&root.join("crates/terrazgo-core/src"), &mut reasons);
-    invalid_reason_codes(&root.join("crates/terrazgo-geo/src"), &mut reasons);
-    invalid_reason_codes(&root.join("crates/module-cue/src"), &mut reasons);
+    for dir in workspace_src_dirs() {
+        invalid_reason_codes(&dir, &mut reasons);
+    }
     assert!(
         !reasons.is_empty(),
         "no Invalid(\"…\") reason codes found — did the validation error convention change?"

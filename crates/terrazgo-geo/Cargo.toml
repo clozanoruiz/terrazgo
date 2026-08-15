@@ -14,17 +14,13 @@ workspace = true
 # Versions live in [workspace.dependencies] at the repo root.
 [dependencies]
 terrazgo-core = { workspace = true }
+# The HTTP agent, its TLS trust policy and the Android bootstrap. Extracted
+# 2026-08-09 when the catalogue refresh became the second in-app consumer; the
+# cache-through semantics around it stayed here.
+terrazgo-net = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-ureq = { workspace = true }
 geozero = { workspace = true }
-
-# Android-only: lazy platform-verifier initialization before the first fetch
-# (see src/android.rs for why it lives at the fetch chokepoint, not startup).
-[target.'cfg(target_os = "android")'.dependencies]
-jni = { workspace = true }
-tao = { workspace = true }
-rustls-platform-verifier = { workspace = true }

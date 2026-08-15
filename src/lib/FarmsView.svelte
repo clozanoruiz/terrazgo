@@ -6,11 +6,19 @@
   // display time (tCode); user-entered names are shown as typed.
   import { t, tCode } from "../i18n.js";
   import { invoke } from "./backend.js";
+  import { lookups, loadLookups } from "./lookups.svelte.js";
   import { notify, run } from "./notifications.svelte.js";
   import Skeleton from "./Skeleton.svelte";
+  import { sortedBy } from "./collate.js";
+  import TzSelect from "./TzSelect.svelte";
+  import { codeItems } from "./selectItems.js";
 
   let farms = $state([]);
-  let countries = $state([]);
+  // Display order is the client's business: SQL orders by BINARY collation,
+  // which puts "Ángel" after "Zubiri".
+  const sortedFarms = $derived(sortedBy(farms, (f) => f.name));
+  // Session-wide reference data (lib/lookups.svelte.js).
+  const countries = $derived(lookups.countries);
   let creating = $state(false);
   let loading = $state(true);
 
@@ -23,7 +31,7 @@
   let provinceCode = $state("");
 
   run(async () => {
-    countries = await invoke("list_countries");
+    await loadLookups();
     countryCode ||= countries[0]?.code ?? "";
     farms = await invoke("list_farms");
   }).finally(() => (loading = false));
@@ -44,7 +52,7 @@
     const rea = reaCode.trim() || null;
     const province = provinceCode.trim() || null;
     return rega || rea || province
-      ? { rega_code: rega, rea_code: rea, province_code: province }
+      ? { rega_code: rega, rea_code: rea, siex_code: null, province_code: province }
       : null;
   }
 
@@ -82,14 +90,11 @@
         <label><span>{t("farm.name")}</span><input required bind:value={name} /></label>
         <label><span>{t("farm.owner")}</span><input bind:value={ownerName} /></label>
         <label><span>{t("farm.owner_tax_id")}</span><input bind:value={ownerTaxId} /></label>
-        <label
-          ><span>{t("farm.country")}</span>
-          <select bind:value={countryCode}>
-            {#each countries as country (country.code)}
-              <option value={country.code}>{tCode("country", country.code)}</option>
-            {/each}
-          </select>
-        </label>
+        <TzSelect
+          label={t("farm.country")}
+          items={codeItems(countries, "country")}
+          bind:value={countryCode}
+        />
       </div>
       {#if countryCode === "es"}
         <fieldset class="es-only">
@@ -114,7 +119,7 @@
     <Skeleton />
   {:else}
     <ul class="card-list">
-      {#each farms as farm (farm.id)}
+      {#each sortedFarms as farm (farm.id)}
         <li class="card">
           <a href={"#/farms/" + farm.id}>
             <strong>{farm.name}</strong>

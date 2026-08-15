@@ -80,14 +80,16 @@ fn applies_cleanly_from_previous_version() {
 fn global_version_accounts_for_core_and_all_modules() {
     let conn = fresh_migrated_db();
 
+    // Derived from the registry, never pinned to a literal: a hardcoded count
+    // beneath this line would assert nothing the derivation does not already
+    // say, and would fail the build every time a migration is added (the
+    // `status.len() == 47` lesson, 2026-08-11).
     let expected: usize = core_migrations().len()
         + registered_modules()
             .iter()
             .map(|m| m.migrations().len())
             .sum::<usize>();
-    // Today: 2 core + 2 cue. If this fails after adding a migration, the
-    // composed sequence and this expectation must move together.
-    assert_eq!(expected, 4);
+    assert!(expected > 0, "the composed sequence cannot be empty");
 
     let user_version: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
@@ -104,7 +106,9 @@ fn demo_seed_is_guarded_and_drives_alerts() {
 
     let first = module_cue::demo::seed_demo(&mut conn).unwrap();
     assert!(first.seeded);
-    assert_eq!(first.treatment_ids.len(), 2);
+    // Three since 2026-08-09: two product applications and one purely
+    // non-chemical actuation (model 3.1 bis).
+    assert_eq!(first.treatment_ids.len(), 3);
 
     // Los Alcores ships with real SIGPAC data (vendored recinfo response for
     // 47:182:0:0:7:14:1): one active sigpac boundary carrying the official

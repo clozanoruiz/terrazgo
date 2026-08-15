@@ -2819,7 +2819,7 @@ dependencies = [
 
 [[package]]
 name = "module-cue"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "jiff",
  "jsonschema",
@@ -2828,14 +2828,26 @@ dependencies = [
  "serde",
  "serde_json",
  "terrazgo-core",
- "terrazgo-report",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
+name = "module-fertilisation"
+version = "0.1.6"
+dependencies = [
+ "rusqlite",
+ "rusqlite_migration",
+ "serde",
+ "serde_json",
+ "terrazgo-core",
  "thiserror 2.0.18",
  "uuid",
 ]
 
 [[package]]
 name = "module-sigpac"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "rusqlite",
  "rusqlite_migration",
@@ -4007,6 +4019,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rust_xlsxwriter"
+version = "0.97.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "282d35898e612c832bd8288c1146085fc0a40ae5aa23bc4667651011cc3eeba9"
+dependencies = [
+ "zip",
+]
+
+[[package]]
 name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5007,6 +5028,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "tauri-plugin-geolocation"
+version = "2.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0366e51823ad001ff1a47f116cd34ddfea3d94ebeb2309caf42e290dec27e0a6"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "tauri-runtime"
 version = "2.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5118,10 +5153,11 @@ dependencies = [
 
 [[package]]
 name = "terrazgo"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "anyhow",
  "module-cue",
+ "module-fertilisation",
  "module-sigpac",
  "rusqlite",
  "rusqlite_migration",
@@ -5131,13 +5167,16 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
+ "tauri-plugin-geolocation",
  "terrazgo-core",
  "terrazgo-geo",
+ "terrazgo-net",
+ "terrazgo-recordbook",
 ]
 
 [[package]]
 name = "terrazgo-core"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "csv",
  "jiff",
@@ -5151,25 +5190,51 @@ dependencies = [
 
 [[package]]
 name = "terrazgo-geo"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "geozero",
- "jni",
  "rusqlite",
  "rusqlite_migration",
- "rustls-platform-verifier",
  "serde",
  "serde_json",
- "tao",
  "terrazgo-core",
+ "terrazgo-net",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "terrazgo-net"
+version = "0.1.6"
+dependencies = [
+ "jni",
+ "rustls-platform-verifier",
+ "tao",
  "thiserror 2.0.18",
  "ureq",
 ]
 
 [[package]]
-name = "terrazgo-report"
-version = "0.1.5"
+name = "terrazgo-recordbook"
+version = "0.1.6"
 dependencies = [
+ "icu_collator",
+ "icu_locale_core",
+ "module-cue",
+ "module-fertilisation",
+ "rusqlite",
+ "rusqlite_migration",
+ "serde",
+ "serde_json",
+ "terrazgo-core",
+ "terrazgo-report",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "terrazgo-report"
+version = "0.1.6"
+dependencies = [
+ "rust_xlsxwriter",
  "serde_json",
  "thiserror 2.0.18",
  "typst",
@@ -5570,6 +5635,12 @@ name = "typed-arena"
 version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
+
+[[package]]
+name = "typed-path"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
 
 [[package]]
 name = "typeid"
@@ -7280,6 +7351,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "zip"
+version = "8.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d04a6b5381502aa6087c94c669499eb1602eb9c5e8198e534de571f7154809b"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap 2.14.0",
+ "memchr",
+ "typed-path",
+ "zopfli",
+]
+
+[[package]]
 name = "zlib-rs"
 version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7290,6 +7375,18 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
+
+[[package]]
+name = "zopfli"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zune-core"

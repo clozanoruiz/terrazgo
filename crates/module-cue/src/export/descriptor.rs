@@ -57,6 +57,12 @@ pub struct TratamFito {
     pub fecha_inicio: String,
     #[serde(rename = "FechaFin")]
     pub fecha_fin: String,
+    /// `HH:MM:SS` (Anexo VI: `string(8)`), from the local wall-clock `HH:MM`
+    /// the record stores — a farmer records no seconds, so the serializer pads
+    /// them, the same shaping the dd/mm/yyyy dates get. Omitted when the hour
+    /// was not stated, which Reglamento (UE) 2023/564 makes the ordinary case.
+    #[serde(rename = "HoraTratamiento", skip_serializing_if = "Option::is_none")]
+    pub hora_tratamiento: Option<String>,
     #[serde(rename = "DGCs")]
     pub dgcs: Vec<Dgc>,
     #[serde(rename = "ProblematicaFito")]
@@ -82,6 +88,13 @@ pub struct Dgc {
     pub codigo_dgc_ajena: Option<i64>,
     #[serde(rename = "Superficie")]
     pub superficie: f64,
+    /// `EST_FENOLOGICO` code as an integer (the schema types it `number(2)` and
+    /// validates it against the catalogue), so this is the catalogue's own code
+    /// and NOT the BBCH stage that the book prints. Hangs off the DGC because
+    /// the growth stage belongs to the treated crop — which is where
+    /// Reglamento (UE) 2023/564's annex puts it too. Omitted when unstated.
+    #[serde(rename = "EstadoFenologico", skip_serializing_if = "Option::is_none")]
+    pub estado_fenologico: Option<i64>,
 }
 
 /// The four coded problem buckets; a bucket is omitted when the record treats
@@ -143,8 +156,15 @@ pub struct ProductoFito {
     #[serde(rename = "MateriaActiva", skip_serializing_if = "Option::is_none")]
     pub materia_activa: Option<i64>,
     /// Dose per surface/volume — Dosis XOR Cantidad per the descriptor
-    /// ("nunca ambas"); our units are rates, so Dosis is what this exporter
-    /// emits, converted by `siex::unit_to_siex`'s exact factor.
+    /// ("nunca ambas"), converted by `siex::unit_to_siex`'s exact factor.
+    ///
+    /// Emitting Dosis is a CHOICE, not the only option: since 2026-08-04
+    /// `treatment_record` also captures a total quantity used (Anexo III B.i,
+    /// `total_quantity_value` + `_unit_code`), which is exactly what `Cantidad`
+    /// is for. The dose is preferred because it is the value every record
+    /// carries, while a total is absent whenever the dose is a concentration.
+    /// If `Cantidad` is ever wanted instead, the data is already stored — see
+    /// the dormant-export inventory in docs/siex-export.md.
     #[serde(rename = "Dosis")]
     pub dosis: f64,
     #[serde(rename = "Unidad")]

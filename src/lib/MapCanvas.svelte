@@ -44,6 +44,12 @@
     onData = null,
     // Bump to force a data reload (after a save/delete).
     refreshToken = 0,
+    // Externally supplied point to ease the camera to (the GPS locate flow):
+    // { longitude, latitude, zoom? }. Each new object triggers the move.
+    focusPoint = null,
+    // Live GPS fix to render as a position marker (dot + accuracy circle):
+    // { longitude, latitude, accuracy } | null. Null removes the marker.
+    gpsPosition = null,
   } = $props();
 
   const palette = mapPalette();
@@ -298,6 +304,92 @@
     if (map && styleReady) map.getCanvas().style.cursor = picking ? "crosshair" : "";
   });
 
+  // Fly to a parent-supplied point; never zoom OUT from where the user is.
+  // Off-screen targets TELEPORT: an ease sweeps the camera across everything
+  // in between at high zoom, and each intermediate frame requests tiles the
+  // geo:// pipeline cannot cancel once dispatched — on a slow connection the
+  // destination tiles then wait behind dozens of junk fetches (found on the
+  // first outdoor GPS test: farm → user's position left the map empty for a
+  // long time). Easing stays for on-screen nudges, where it costs nothing.
+  $effect(() => {
+    if (!focusPoint || !map) return;
+    const center = [focusPoint.longitude, focusPoint.latitude];
+    const zoom = Math.max(map.getZoom(), focusPoint.zoom ?? 16);
+    const zoomDelta = zoom - map.getZoom();
+    if (map.getBounds().contains(center) && zoomDelta < 1.5) {
+      map.easeTo({ center, zoom, duration: 600 });
+    } else {
+      map.jumpTo({ center, zoom });
+    }
+  });
+
+  // --- GPS position marker ------------------------------------------------------
+
+  /// The accuracy radius as a ground-true polygon (a MapLibre circle layer's
+  /// radius is in screen pixels, not meters — it would not scale with zoom).
+  function accuracyCircle({ longitude, latitude, accuracy }) {
+    const dLat = accuracy / 111320;
+    const dLon = accuracy / (111320 * Math.cos((latitude * Math.PI) / 180));
+    const ring = [];
+    for (let i = 0; i <= 64; i++) {
+      const a = (2 * Math.PI * i) / 64;
+      ring.push([longitude + dLon * Math.sin(a), latitude + dLat * Math.cos(a)]);
+    }
+    return { type: "Polygon", coordinates: [ring] };
+  }
+
+  // Upsert the marker on every fix; depends on styleReady so a base-style
+  // switch (setStyle wipes sources) re-adds it. Added after the overlays, so
+  // the dot always draws on top.
+  $effect(() => {
+    const pos = gpsPosition;
+    if (!map || !styleReady) return;
+    const source = map.getSource("gps-position");
+    if (!pos) {
+      if (source) {
+        map.removeLayer("gps-accuracy");
+        map.removeLayer("gps-dot");
+        map.removeSource("gps-position");
+      }
+      return;
+    }
+    const data = {
+      type: "FeatureCollection",
+      features: [
+        { type: "Feature", geometry: accuracyCircle(pos), properties: { kind: "accuracy" } },
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [pos.longitude, pos.latitude] },
+          properties: { kind: "dot" },
+        },
+      ],
+    };
+    if (source) {
+      source.setData(data);
+    } else {
+      map.addSource("gps-position", { type: "geojson", data });
+      map.addLayer({
+        id: "gps-accuracy",
+        type: "fill",
+        source: "gps-position",
+        filter: ["==", ["get", "kind"], "accuracy"],
+        paint: { "fill-color": palette.accent, "fill-opacity": 0.15 },
+      });
+      map.addLayer({
+        id: "gps-dot",
+        type: "circle",
+        source: "gps-position",
+        filter: ["==", ["get", "kind"], "dot"],
+        paint: {
+          "circle-radius": 7,
+          "circle-color": palette.accent,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+        },
+      });
+    }
+  });
+
   /// What do the visible overlays render at this pixel? One group per layer
   /// that answers, one row set per distinct feature (an MVT polygon comes
   /// back once per style spec — fill and line — and tile borders can split
@@ -383,7 +475,7 @@
     height: 100%;
     min-height: 16rem;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     overflow: hidden;
     background: #dfe8dc;
   }
@@ -398,7 +490,7 @@
     display: flex;
     gap: 0;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: var(--radius);
     overflow: hidden;
     background: var(--bg);
   }
@@ -411,6 +503,6 @@
   }
   .map-base-switch button.active {
     background: var(--primary);
-    color: #fff;
+    color: var(--on-primary);
   }
 </style>

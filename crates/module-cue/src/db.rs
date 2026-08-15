@@ -23,6 +23,64 @@ pub fn migration_set() -> Vec<M<'static>> {
     ]
 }
 
+/// The columns a current-version backup must carry for THIS module's tables,
+/// checked by `terrazgo_core::backup::validate_backup` alongside the core
+/// fingerprint. Same reason and same lifetime as the core list: while the
+/// project is pre-release, `0001` is edited in place, so `user_version` cannot
+/// tell a backup taken before an edit from one taken after — and a stale file
+/// would import cleanly and then fail with `no such column`.
+///
+/// It lives here rather than in core because core may never name a module's
+/// tables; the shell composes the two, exactly as it composes the migrations.
+/// Every pre-release edit to `0001` adds its new columns here.
+pub const BACKUP_SHAPE: &[terrazgo_core::backup::TableShape] = &[
+    (
+        "treatment_record",
+        &[
+            "application_end_date",
+            "total_quantity_value",
+            "total_quantity_unit_code",
+        ],
+    ),
+    (
+        "non_field_treatment",
+        &["subject_kind_code", "subject_description", "treated_on"],
+    ),
+    (
+        "register_declaration",
+        &["farm_id", "season_id", "register_code"],
+    ),
+    (
+        "seed_treatment",
+        &[
+            "sown_on",
+            "species_name",
+            "seed_lot",
+            "treatment_kind_code",
+            "product_name",
+        ],
+    ),
+    (
+        "analysis_record",
+        &[
+            "sampled_on",
+            "material_kind_code",
+            "lab_tax_id",
+            "soil_ph",
+            "soil_organic_matter_pct",
+            "soil_clay_pct",
+        ],
+    ),
+    (
+        "analysis_record_type",
+        &["analysis_record_id", "analysis_type_code"],
+    ),
+    (
+        "analysis_substance",
+        &["analysis_record_id", "substance_code"],
+    ),
+];
+
 /// A runnable set for the library's own tests and the demo example: the CORE's
 /// steps followed by this module's, mirroring the shell's composed global
 /// sequence (CUE tables reference core tables — farm, plot, country — so the

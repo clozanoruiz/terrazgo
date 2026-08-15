@@ -4,13 +4,15 @@
 //! Module registry: the seam through which the core sees the feature modules.
 
 use rusqlite_migration::M;
+use terrazgo_core::backup::TableShape;
 
 /// A Terrazgo module as seen by the core.
 ///
-/// Deliberately minimal: today the only thing the core needs from a module is
-/// its migration steps. The shape is expected to grow (setup hooks, exporters)
-/// but is speculative with a single module registered — resist adding methods
-/// until a second module actually needs them.
+/// Deliberately minimal, and grown only when a second module forces it. That
+/// rule has now fired once: `backup_shape` arrived in 2026-08-13 because
+/// module-cue and module-fertilisation both ship a shape constant and the shell
+/// was hand-joining them — exactly the "second consumer" this comment used to
+/// say to wait for. Setup hooks and exporters remain speculative; keep waiting.
 ///
 /// Tauri commands can NOT go through this trait: `tauri::generate_handler!` is
 /// a macro that needs the command function paths at compile time, so commands
@@ -21,6 +23,18 @@ pub trait Module {
 
     /// The ordered migration steps this module contributes to the global sequence.
     fn migrations(&self) -> Vec<M<'static>>;
+
+    /// The tables this module contributes to the backup shape probe.
+    ///
+    /// Core owns the probe but may never name a module's tables, so each module
+    /// declares its own and the shell composes them — the same division as
+    /// `migrations`.
+    ///
+    /// **Deliberately no default.** An empty default would let a module that
+    /// ships tables forget to declare them and still compile, which is the hand-
+    /// joined list's hole moved rather than closed. A module with no tables of
+    /// its own says so explicitly, and the compiler asks every future one.
+    fn backup_shape(&self) -> &'static [TableShape];
 }
 
 /// The CUE / PAC module (phytosanitary treatment records).
@@ -33,6 +47,28 @@ impl Module for CueModule {
 
     fn migrations(&self) -> Vec<M<'static>> {
         module_cue::migration_set()
+    }
+
+    fn backup_shape(&self) -> &'static [TableShape] {
+        module_cue::BACKUP_SHAPE
+    }
+}
+
+/// The fertilisation module (fertilisation, irrigation and soil records —
+/// RD 1051/2022's half of the record book).
+pub struct FertilisationModule;
+
+impl Module for FertilisationModule {
+    fn name(&self) -> &'static str {
+        "fertilisation"
+    }
+
+    fn migrations(&self) -> Vec<M<'static>> {
+        module_fertilisation::migration_set()
+    }
+
+    fn backup_shape(&self) -> &'static [TableShape] {
+        module_fertilisation::BACKUP_SHAPE
     }
 }
 
@@ -49,6 +85,12 @@ impl Module for SigpacModule {
     fn migrations(&self) -> Vec<M<'static>> {
         module_sigpac::migration_set()
     }
+
+    /// None: its lookups are stored in core's `geo_feature` and `plot_zone_flag`,
+    /// which the core half of the probe already covers.
+    fn backup_shape(&self) -> &'static [TableShape] {
+        &[]
+    }
 }
 
 /// Every module compiled into this build, in registration order.
@@ -58,6 +100,13 @@ impl Module for SigpacModule {
 ///
 /// Registration order is load-bearing: it fixes each module's position in the
 /// single global migration version sequence (see `crate::db::composed_migrations`).
+/// Order is load-bearing and append-only in spirit: a module's position fixes
+/// where its steps land in the global version sequence, so new modules join at
+/// the tail rather than between existing ones.
 pub fn registered_modules() -> Vec<Box<dyn Module>> {
-    vec![Box::new(CueModule), Box::new(SigpacModule)]
+    vec![
+        Box::new(CueModule),
+        Box::new(FertilisationModule),
+        Box::new(SigpacModule),
+    ]
 }

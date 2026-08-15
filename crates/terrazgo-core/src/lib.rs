@@ -35,4 +35,4 @@ pub mod repository;
 pub mod settings;
 
 pub use db::{migration_set, migrations, open_in_memory};
-pub use error::{CoreError, Result};
+pub use error::{Classify, CoreError, Result};

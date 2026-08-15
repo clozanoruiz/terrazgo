@@ -7,10 +7,12 @@
   // layers), plot panel with the draw / import / delete boundary workflows.
   // Deep-linkable: #/map?farm=<id>&plot=<id> (FarmView's "open in map").
   import { t, tCode } from "../i18n.js";
-  import { confirmDialog, invoke } from "./backend.js";
+  import { confirmDialog, errorText, invoke } from "./backend.js";
   import MapCanvas from "./MapCanvas.svelte";
   import { MAP_LAYERS, mapPalette } from "./mapLayers.js";
   import { notify, run } from "./notifications.svelte.js";
+  import TzSelect from "./TzSelect.svelte";
+  import { nameItems } from "./selectItems.js";
 
   const params = new URLSearchParams((location.hash.split("?")[1] ?? "").replace(/\?/g, "&"));
 
@@ -37,6 +39,20 @@
   // SIGPAC point lookup (Door B): pick a point, then create or attach.
   let picking = $state(false);
   let sigpacResult = $state(null);
+  // GPS locate (P5): the controls exist exactly where the geolocation
+  // plugin does — mobile builds — asked via is_mobile (compile-time truth).
+  // Never gate on probing a plugin command: check_permissions REJECTS when
+  // the device's location services are off, so a rejection does not mean
+  // the plugin is absent (a phone with GPS off must still see the buttons
+  // and get told, not have the feature silently vanish).
+  // focusPoint eases the canvas to the fix; locating debounces taps.
+  let gpsAvailable = $state(false);
+  let locating = $state(false);
+  let focusPoint = $state(null);
+  // Live tracking: watch_position streams fixes into the canvas marker.
+  let tracking = $state(false);
+  let gpsPosition = $state(null);
+  let watchId = null;
   let refreshToken = $state(0);
   // Boundary rows of the selected plot, derived from the map's loaded data.
   let plotFeatures = $state({});
@@ -71,6 +87,16 @@
     await reloadPlots();
   });
 
+  // Silent platform ask — the catch covers stubbed environments whose
+  // invoke rejects unknown commands: they behave as desktop.
+  (async () => {
+    try {
+      gpsAvailable = await invoke("is_mobile");
+    } catch {
+      gpsAvailable = false;
+    }
+  })();
+
   async function reloadPlots() {
     plots = farmId ? await invoke("list_plots", { farmId }) : [];
     if (selectedPlotId && !plots.some(({ plot }) => plot.id === selectedPlotId)) {
@@ -78,8 +104,8 @@
     }
   }
 
-  function switchFarm(event) {
-    farmId = event.target.value;
+  function switchFarm(id) {
+    farmId = id;
     selectedPlotId = null;
     drawing = false;
     picking = false;
@@ -193,6 +219,90 @@
       sigpacResult = (await invoke("sigpac_lookup_point", { lon, lat })) ?? { notFound: true };
     });
   }
+
+  // The geolocation calls handle their own errors (a denied permission or a
+  // dead GPS is not a backend boundary error); a denial notifies once here.
+  async function ensureLocationPermission() {
+    let perms = await invoke("plugin:geolocation|check_permissions");
+    if (perms.location !== "granted") {
+      perms = await invoke("plugin:geolocation|request_permissions", {
+        permissions: ["location"],
+      });
+    }
+    if (perms.location !== "granted") {
+      notify(t("map.locate_denied"), true);
+      return false;
+    }
+    return true;
+  }
+
+  // P5: the GPS fix substitutes the map click — same lookup, same result card.
+  async function locateMe() {
+    locating = true;
+    try {
+      if (!(await ensureLocationPermission())) return;
+      const position = await invoke("plugin:geolocation|get_current_position", {
+        options: { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 },
+      });
+      const { longitude, latitude } = position.coords;
+      sigpacResult = null;
+      focusPoint = { longitude, latitude, zoom: 16 };
+      onPick({ lon: longitude, lat: latitude });
+    } catch (err) {
+      notify(`${t("map.locate_error")} [${errorText(err)}]`, true);
+    } finally {
+      locating = false;
+    }
+  }
+
+  // Live tracking: fixes stream over a Tauri channel into the canvas marker.
+  // The camera follows only the FIRST fix — after that the dot moves and the
+  // user pans freely (fighting their pan on every fix would be hostile).
+  async function startTracking() {
+    try {
+      if (!(await ensureLocationPermission())) return;
+      // Looked up at call time, not import time: the Channel class only
+      // matters where the plugin exists, and stubbed environments lack it.
+      const { Channel } = window.__TAURI__.core;
+      const channel = new Channel();
+      let firstFix = true;
+      channel.onmessage = (fix) => {
+        // The plugin reports watch errors as strings on the same channel.
+        if (typeof fix === "string") {
+          notify(`${t("map.locate_error")} [${fix}]`, true);
+          stopTracking();
+          return;
+        }
+        const { longitude, latitude, accuracy } = fix.coords;
+        gpsPosition = { longitude, latitude, accuracy };
+        if (firstFix) {
+          firstFix = false;
+          focusPoint = { longitude, latitude, zoom: 16 };
+        }
+      };
+      await invoke("plugin:geolocation|watch_position", {
+        options: { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+        channel,
+      });
+      watchId = channel.id;
+      tracking = true;
+    } catch (err) {
+      notify(`${t("map.locate_error")} [${errorText(err)}]`, true);
+    }
+  }
+
+  function stopTracking() {
+    if (watchId != null) {
+      // Best-effort: the watch dies with the webview anyway.
+      invoke("plugin:geolocation|clear_watch", { channelId: watchId }).catch(() => {});
+      watchId = null;
+    }
+    tracking = false;
+    gpsPosition = null;
+  }
+
+  // Stop the watch when the view unmounts — GPS must never outlive the map.
+  $effect(() => stopTracking);
 
   function sigpacRefPath(reference) {
     return [
@@ -324,14 +434,17 @@
 
 <section class="view map-view">
   <div class="map-toolbar">
-    <label class="map-farm-pick">
-      <span>{t("map.farm")}</span>
-      <select value={farmId} onchange={switchFarm}>
-        {#each farms as farm (farm.id)}
-          <option value={farm.id}>{farm.name}</option>
-        {/each}
-      </select>
-    </label>
+    <!-- `inline-field` rather than a class of our own: a scoped rule cannot
+         reach markup another component renders, so the old `.map-farm-pick`
+         never applied. This one is global and already means "label beside its
+         control". -->
+    <TzSelect
+      class="inline-field"
+      label={t("map.farm")}
+      items={nameItems(farms)}
+      value={farmId}
+      onchange={switchFarm}
+    />
     <div class="map-layer-toggles" role="group" aria-label={t("map.layers")}>
       {#each MAP_LAYERS as layer (layer.id)}
         <label>
@@ -344,6 +457,16 @@
         </label>
       {/each}
     </div>
+    {#if gpsAvailable}
+      <button
+        type="button"
+        class="map-track-toggle"
+        aria-pressed={tracking}
+        onclick={tracking ? stopTracking : startTracking}
+      >
+        {tracking ? t("map.track_stop") : t("map.track")}
+      </button>
+    {/if}
   </div>
 
   {#if visibleLegends.length > 0}
@@ -381,6 +504,8 @@
           {onDrawn}
           {onPick}
           {onInspect}
+          {focusPoint}
+          {gpsPosition}
           onZoom={(z) => (mapZoom = z)}
           onData={onLayerData}
         />
@@ -450,6 +575,11 @@
               >
                 {t("map.sigpac_pick")}
               </button>
+              {#if gpsAvailable}
+                <button type="button" disabled={locating} onclick={locateMe}>
+                  {t("map.locate")}
+                </button>
+              {/if}
             {/if}
             {#if sigpacResult?.notFound}
               <p class="detail">{t("map.sigpac_none")}</p>
@@ -565,11 +695,6 @@
     gap: 1rem;
     align-items: center;
   }
-  .map-farm-pick {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
   .map-layer-toggles {
     display: flex;
     flex-wrap: wrap;
@@ -579,6 +704,9 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
+  }
+  .map-track-toggle[aria-pressed="true"] {
+    outline: 2px solid var(--primary);
   }
   .map-legend {
     display: flex;
@@ -647,7 +775,7 @@
   }
   .map-inspect {
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-lg);
     background: var(--panel);
     padding: 0.6rem 0.7rem;
     margin-bottom: 0.9rem;

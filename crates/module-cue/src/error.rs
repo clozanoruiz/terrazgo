@@ -36,12 +36,12 @@ pub enum CueError {
     #[error("catalogue data error: {0}")]
     Catalogue(String),
 
-    /// PDF rendering failed (template compile, font, export). Always a
-    /// developer error — templates ship inside the binary — so the boundary
-    /// maps it to `internal`.
-    #[error("report error: {0}")]
-    Report(#[from] terrazgo_report::ReportError),
-
+    // A `Report` variant lived here until 2026-08-07. The printed book moved
+    // to terrazgo-recordbook in slice A but kept borrowing this crate's
+    // `Result`, so render failures still had to be expressible as a CueError.
+    // The book now owns `RecordbookError`, and a treatment module has no
+    // business describing a PDF failure — the variant and this crate's
+    // dependency on terrazgo-report went with it.
     #[error("product {product_id} has no authorisation for country '{country}'")]
     AuthorisationMissing { product_id: String, country: String },
 
@@ -77,6 +77,39 @@ impl From<terrazgo_core::CoreError> for CueError {
             CoreError::InvalidDate(d) => CueError::InvalidDate(d),
             CoreError::Invalid(msg) => CueError::Invalid(msg),
             CoreError::Catalogue(msg) => CueError::Catalogue(msg),
+        }
+    }
+}
+
+/// The command boundary's view of this error (`terrazgo_core::Classify`).
+impl terrazgo_core::Classify for CueError {
+    fn classify(&self) -> (String, serde_json::Value) {
+        use serde_json::json;
+        match self {
+            CueError::NotFound => ("not_found".into(), json!({})),
+            CueError::InvalidDate(date) => ("invalid_date".into(), json!({ "date": date })),
+            CueError::Invalid(code) => (format!("invalid.{code}"), json!({})),
+            CueError::AuthorisationMissing {
+                product_id,
+                country,
+            } => (
+                "authorisation_missing".into(),
+                json!({ "product_id": product_id, "country": country }),
+            ),
+            CueError::CountryMismatch { provided, farm } => (
+                "country_mismatch".into(),
+                json!({ "provided": provided, "farm": farm }),
+            ),
+            CueError::PlotNotOnFarm { plot_id, farm_id } => (
+                "plot_not_on_farm".into(),
+                json!({ "plot_id": plot_id, "farm_id": farm_id }),
+            ),
+            CueError::MissingPhiDays => ("missing_phi_days".into(), json!({})),
+            CueError::Sqlite(_)
+            | CueError::Migration(_)
+            | CueError::Json(_)
+            | CueError::Io(_)
+            | CueError::Catalogue(_) => ("internal".into(), json!({})),
         }
     }
 }

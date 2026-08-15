@@ -10,8 +10,10 @@
   import { locale, locales, nativeName, setLocale, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
+  import SettingsCatalogues from "./SettingsCatalogues.svelte";
   import SettingsProfiles from "./SettingsProfiles.svelte";
   import Skeleton from "./Skeleton.svelte";
+  import TzSelect from "./TzSelect.svelte";
 
   // { settings, tile_cache_default_bytes } — the default rides along so an
   // unset cap can display its effective value without the frontend hardcoding
@@ -25,10 +27,15 @@
 
   // setLocale is async (it may lazy-load a dictionary); a rejection means a
   // locale file is missing from the bundle — log it, keep the previous language.
-  function switchLocale(event) {
-    setLocale(event.target.value).catch((err) => {
+  // Mirrors the active locale so a FAILED switch can put the picker back. On
+  // success this component is torn down by the shell remount and rebuilt with
+  // the new locale, so nothing here has to undo itself.
+  let localeChoice = $state(locale());
+
+  function switchLocale(code) {
+    setLocale(code).catch((err) => {
       console.error(err);
-      event.target.value = locale();
+      localeChoice = locale();
     });
   }
 
@@ -45,8 +52,7 @@
     return `${Math.max(1, Math.round(bytes / 1024))} kB`;
   }
 
-  function changeCacheSize(event) {
-    const value = event.target.value;
+  function changeCacheSize(value) {
     run(async () => {
       const settings = {
         ...info.settings,
@@ -106,37 +112,40 @@
   <h2>{t("nav.settings")}</h2>
 
   <h3>{t("settings.general")}</h3>
-  <label
-    ><span>{t("lang.label")}</span>
-    <select aria-label={t("lang.label")} onchange={switchLocale}>
-      {#each locales() as code (code)}
-        <option value={code} selected={code === locale()}>{nativeName(code)}</option>
-      {/each}
-    </select>
-  </label>
+  <!-- The one control whose own change remounts the shell it lives in
+       (App.svelte's {#key localeVersion}), so its portalled listbox is torn
+       down by that remount rather than left orphaned in <body>. -->
+  <TzSelect
+    label={t("lang.label")}
+    items={locales().map((code) => ({ value: code, label: nativeName(code) }))}
+    bind:value={localeChoice}
+    onchange={switchLocale}
+  />
 
   <h3>{t("settings.map")}</h3>
   {#if loading}
     <Skeleton />
   {:else if info}
-    <label
-      ><span>{t("settings.cache_size")}</span>
-      <select onchange={changeCacheSize}>
-        <option value="" selected={info.settings.tile_cache_max_bytes == null}>
-          {t("settings.cache_default", { size: formatSize(info.tile_cache_default_bytes) })}
-        </option>
-        {#each CACHE_PRESETS as bytes (bytes)}
-          <option value={bytes} selected={info.settings.tile_cache_max_bytes === bytes}>
-            {formatSize(bytes)}
-          </option>
-        {/each}
-      </select>
-    </label>
+    <!-- The one select whose option values were numbers. They become strings,
+         which is what the handler already parsed them back from: a native
+         option value is a string too. -->
+    <TzSelect
+      label={t("settings.cache_size")}
+      items={CACHE_PRESETS.map((bytes) => ({ value: String(bytes), label: formatSize(bytes) }))}
+      nullable
+      nullLabel={t("settings.cache_default", { size: formatSize(info.tile_cache_default_bytes) })}
+      value={info.settings.tile_cache_max_bytes == null
+        ? ""
+        : String(info.settings.tile_cache_max_bytes)}
+      onchange={changeCacheSize}
+    />
     <p>{t("settings.cache_hint")}</p>
     <div id="cache-actions" aria-label={t("settings.map")}>
       <button type="button" onclick={clearCache}>{t("settings.clear_cache")}</button>
     </div>
   {/if}
+
+  <SettingsCatalogues />
 
   <SettingsProfiles bind:info />
 

@@ -1,10 +1,24 @@
 # SIEX-aligned export — design notes
 
-> Status: design (2026-07-04; re-diffed against schema v3.11.4 on 2026-07-14);
-> capture schema built 2026-07-15, export module (`module_cue::export`) built
-> 2026-07-16 — see "Export module" below. The user-facing feature name is TBD
-> ("SIEX" is too technical for farmers). This document maps Terrazgo's treatment
-> domain onto the official CUE exchange format and lists what is missing.
+> Status: **PARKED 2026-08-02 — the export has no delivery path.** CUECYL
+> answered the onboarding questions below: connecting an application to the
+> REACYL or CUECYL web services requires being a **company or self-employed
+> professional (autónomo)**, and **CUECYL offers no farmer-facing utility to
+> upload a descriptor JSON file**. So the shipped serializer
+> (`module_cue::export`) stays in the codebase — compiling, schema-validated
+> and tested — as future-proofing for the day that changes (a non-profit entity
+> is not discarded), but it is not extended: `AltaDGC`/`CambioCultivoDGC`
+> (gap 2) and the web-service client are out of scope, and the printable PDF
+> cuaderno becomes the app's compliance artifact instead.
+>
+> Not blocked by that answer: the **national FEGA** services below
+> (`/catalogos/*`, `POST /existeNIF`) are public and no-auth — the barrier is
+> specific to the regional CUE/REA web services.
+>
+> History: design 2026-07-04; re-diffed against schema v3.11.4 on 2026-07-14;
+> capture schema built 2026-07-15, export module built 2026-07-16 — see
+> "Export module" below. This document maps Terrazgo's treatment domain onto
+> the official CUE exchange format and lists what is missing.
 
 ## Sources of truth
 
@@ -46,10 +60,40 @@ REA's own `CodigoDGC` (obtained by importing the REA) or by a client-assigned
 
 ## How farm data reaches the cuaderno — the REA-first rule (checked 2026-07-11)
 
-Under RD 1054/2022 the regional farm registry (the **REA** — REACYL in
-Castilla y León) is the source of truth the cuaderno consumes, not the other
-way around. Verified against the Junta de Castilla y León's CUECYL and REACYL
-pages (agriculturaganaderia.jcyl.es):
+Under RD 1054/2022 the regional farm registry (the **REA**) is the source of
+truth the cuaderno consumes, not the other way around.
+
+### One decree, one system per community (2026-08-03)
+
+RD 1054/2022 creates three things at once: the national **SIEX**, a
+**registro autonómico de explotaciones** and a **cuaderno digital**. Each
+autonomous community runs its own instance of the last two, under its own
+name — so the names below are branding, not different concepts, and the app
+models the concepts:
+
+| Community | Regional registry (REA) | Digital record book |
+| --- | --- | --- |
+| Castilla y León | REACYL | CUECYL |
+| Catalunya | SIDEAC (fed by the DUN declaration) | QIE — *Quadern integrat d'explotacions* |
+| … | one each | one each |
+
+Sources: [CUECYL](https://agriculturaganaderia.jcyl.es/web/es/cuaderno-digital-explotacion-agricola.html)
+/ [REACYL](https://agriculturaganaderia.jcyl.es/web/es/registro-explotaciones-agrarias-castilla.html);
+the DUN 2024 SIDEAC sheet, which states it plainly — *"El SIDEAC … constitueix
+el Registre d'explotacions agràries de Catalunya d'acord amb … el RD
+1054/2022 … pel qual s'estableix el SIEX i el Registre autonòmic
+d'explotacions agrícoles i quadern digital"* (checked 2026-08-03).
+
+**Consequence for the app**: `farm_es_extension.rea_code` is ONE column for
+every community — the concept is national, only the issuing system's name
+varies — and no user-facing string may name a single community's service.
+Labels say "registro autonómico"; the export hint says "el cuaderno digital de
+su comunidad autónoma". Naming the local system would need a province →
+service map, which is the same seam as `terrazgo_recordbook::region`'s
+province → language map; nothing needs it yet, and it would have to be kept
+current for seventeen communities. The rule below is verified against the Junta de Castilla y León's CUECYL and
+REACYL pages (agriculturaganaderia.jcyl.es); it is the decree's mechanism, so
+it holds under whatever name a community gives its own systems:
 
 - **The explotación must be registered in the REA first.** The regional CUE is
   generated automatically from that registration ("Primero debe inscribir su
@@ -132,10 +176,12 @@ be derived from anything else.
 | `IdAjenaTratamFito` (integer) | `export_alias` (minted at first export, keyed (treatment, split)) | ✓ (2026-07-15) |
 | `Borrar` (bool) | soft-deleted records that were previously exported | ok (derive) |
 | `FechaInicio` / `FechaFin` | `application_date` (both = same day) — 3.11.4 enforces `dd/mm/yyyy` (or `-`) via pattern; serializer converts from ISO | ✓ (format at export) |
-| `HoraTratamiento`, `FechaSeca`, `Actividad` | not captured (`Actividad` = cover maintenance/elimination, cubierta treatments only) | optional — omit |
+| `HoraTratamiento` | `treatment_record.application_time` (local `HH:MM`; the serializer pads the seconds Anexo VI's `string(8)` wants) | ✓ (2026-08-12) |
+| `FechaSeca`, `Actividad` | not captured (`Actividad` = cover maintenance/elimination, cubierta treatments only) | optional — omit |
 | `DGCs[].CodigoDGC` / `CodigoDGCAjena` | `CodigoDGCAjena` minted per core `crop` row (a crop IS the plot+crop+season unit) via `export_alias` | ✓ (2026-07-16) — REA `CodigoDGC` + `AltaDGC` generation stay **gap 2** |
 | `DGCs[].CodigoCultivo` (new 3.11.x) | crop of the DGC — "indicar junto con CodigoDGC"; needs PRODUCTOS coding | with gap 2 (omitted for now — optional in schema) |
 | `DGCs[].Superficie` | `treatment_plot.surface_treated_ha` | ✓ |
+| `DGCs[].EstadoFenologico` | `treatment_plot.growth_stage_code` as an integer — the catalogue's code, NOT the BBCH stage the book prints | ✓ (2026-08-12) |
 | **Constraint (descriptor):** all DGCs in one `TratamFito` must share product+variety | `treatment_plot` allows different crops per plot (by design) | serializer **splits** a multi-crop treatment into one `TratamFito` per crop |
 | `ProblematicaFito.*.Tipo*[]` (codes) | `treatment_problem` junction: category + catalogue code, ≥1 per record | ✓ (2026-07-15; bucket = category) |
 | `Justificaciones[].JustAct` (code) | `treatment_justification` junction (≥1 per record), English lookup → SIEX int at export | ✓ (2026-07-15) |
@@ -231,7 +277,7 @@ resolvable forever if imports only ever upsert.
 | `ProblematicaFito.MalasHierbas` | `MALAS_HIERBAS` | 203 | same shape |
 | `ProblematicaFito.ReguladoresOtros` | `REGULADORES_CRECIMIENTO` | 55 | same shape |
 | `ProductosFito[].MateriaActiva` | `AUTORIZACION_EXCP` | 73 | code + substance + product (exceptional authorisations only) |
-| `OtrasActuacionesFito.TipoMedida` | `TIPO_MEDIDA_FITOSANITARIA` | 13 | code + label |
+| `OtrasActuacionesFito.TipoMedida` | `TIPO_MEDIDA_FITOSANITARIA` | 14 | code + label; the codes run 1-12, 14, 15 — there is no 13 |
 | `OtrasActuacionesFito.BuenasPracticas` | `BUENAS_PRACTICAS_AMBITOS` | 97 | code + label + **ámbito** (code repeats per ámbito — composite identity) |
 | `DGCs[].EstadoFenologico` | `EST_FENOLOGICO` | 9 | code + BBCH-style stage + label |
 | `EquipoAplicador.TipoEnergia` | `TIPENERGIA` | 10 | code + label |
@@ -239,11 +285,114 @@ resolvable forever if imports only ever upsert.
 | `DGCs[].CodigoCultivo` | `PRODUCTOS` | 1119 | code + name + Latin + EPPO + ~25 boolean attribute columns |
 | (prefill/validation) | `CULTIVO_USO_SIGPAC` | 2496 | crop code ↔ SIGPAC uso — the natural cross-check for the declared-crops prefill |
 | (variety, `AltaDGC` later) | `VARIEDAD_ESPECIE_TIPO` | ~40k (9.7 MB) | defer until `AltaDGC` is built |
-| (`AltaDGC` later) | `SIST_CULTIVO` | 32 | code + label |
 
 Catalogues move on FEGA's own cadence (fecha probes ranged 2023 → **2026-07-14
 itself** across this list), so a refresh path matters — but snapshot-first:
 the app must work offline with vendored data from first run.
+
+### The catalogues the 2026-07-14 study missed (added 2026-08-05)
+
+That study scoped itself to `TratamFito`, which was right for the SIEX arc and
+wrong as a standing snapshot: seams 2–4 of the cuaderno arc then recorded four
+times that a coded field had "no catalogue in the vendored FEGA set", when what
+was true is that the field was outside `TratamFito`. The
+[registry](maintenance.md) lists **287** catalogues; we now vendor 47.
+
+| Payload field / consumer | idTabla | Rows | Note |
+| --- | --- | --- | --- |
+| `Analitica.MaterialAnalizado` | `MATERIAL_ANALIZADO` | 4 | **four** values — FEGA splits Cultivo from Producto cosechado |
+| `Analitica.TiposAnalisis[]` | `TIPO_ANALISIS` | 6 | incl. 5 "Parámetros del Suelo" |
+| `Analitica.TiposSustancias[]` | `SUST_ACTIVAS` | 283 | substance + **CAS number** + código europeo |
+| `UsoSemillaTratada.Tratamiento` | `TIPO_TRATAMIENTO` | 4 | codes start at 2 |
+| `ComercializacionVD.ProductoVegetal`, `TratamientosPostCosecha.ProductoVegetal`, `Cosecha.ProductoCosechado` | `PROD_VEGETAL` | 692 | harvested **produce**, NOT the crop catalogue; one row per (produce, crop) |
+| `Edificaciones[].IdEdificacion` typing (3.4) | `EDIFICACIONES_INSTALACIONES` | 109 | keyed on `Código SIEX` (col 2); col 0 is the tipología |
+| 3.1 bis `treatment_record.measure_code` (since 2026-08-09) | `TIPO_MEDIDA_FITOSANITARIA` | 14 | the model's "Tipo de medida", per event |
+| ~~3.1 bis~~ — no consumer | `MEDIDA_PREVENTIVA_CULTURAL` | 14 | **not 3.1 bis's list**: a HOLDING-level GIP declaration on `DatosExplotacion`, with no date, plot or intensity and no column in the printed model |
+| Irrigation module (`Riego.OrigenAgua[]`, `Fertirrigacion.OrigenAgua[]`) | `ORIGEN_AGUA_RIEGO` | 6 | procedencia del agua **de riego** — see the gap below: NOT seam 5's consumer |
+| `CAExplotacion` range; report-language offer | `COMUNIDAD_AUTONOMA`, `PROVINCIA` | 17, 53 | CCAA carries **both** catastro and INE codes; we key on INE |
+| `crop.irrigation_code` counterpart | `SIST_EXPLOTACION`, `SIST_RIEGO` | 2, 8 | R/S vs the 8 irrigation methods — see the gap below |
+| `crop.growing_environment_code` counterpart | `SIST_CULTIVO` | 33 | 1–4 are AL/M/BP/INV; the other 29 are crop-system distinctions we do not make |
+| SIGPAC uso resolution | `USO_SIGPAC` | 32 | the uso codes the provider JSON returns |
+| Fertilization module | `MAT_FERTI`, `DETALLE_MATERIAL_FERT`, `MACRONUTRIENTES`, `MICRONUTRIENTES`, `METALES_PESADOS`, `TIPO_FERITILIZACION`, `METODO_APLICACION_FERTILIZANTE`, `TRAT_ESTIERCOLES` | 24, 1243, 16, 7, 7, 3, 7, 9 | section 6 / Anexo III Parte I.C vocabulary |
+| Crop planning, irrigation, harvest | `DESTINO_CULTIVO`, `DEST_COSECHA`, `DEST_RES_VEG`, `TIPO_LABOR`, `TIPO_COBERTURA_SUELO`, `MATERIAL_VEGETAL_REPRODUCCION`, `PROC_VEGETAL`, `REGIMEN_TENENCIA`, `PAIS` | 29, 16, 9, 14, 6, 30, 3, 6, 259 | named future consumers |
+
+Two catalogues named by the spec stay **unvendored**: `VARIEDAD_ESPECIE_TIPO`
+(84,565 rows / 9.9 MB, deferred with `AltaDGC`) and `ROPO` (173,554 rows /
+30 MB) — both are registries, not code lists, and both would dominate the
+binary.
+
+**`ROPO_NIVEL` and `ROPO_CATE` are not fetchable today** (checked 2026-08-11).
+They would be the authority's own vocabulary behind core's `licence_level`
+lookup and table 1.2's carné columns — the natural target for a bidirectional
+contract test under the two-tier rule — but the registry marks both
+`exportable: false` and the data endpoint returns an empty body. That is a dated
+observation, not a verdict: FEGA publishes on its own cadence, so recheck before
+concluding they are unavailable. A third sweep of the 287-entry registry the
+same day also found `ATRIA` and `ENT_ASESORA` exportable — registries of GIP
+groups and advisory entities that could prefill the `advisor` table one day.
+Available, not needed.
+
+### Recorded gaps
+
+- **SIEX has no water-abstraction entity at all.** Model section 2.2 asks for
+  the *puntos de captación de agua para consumo humano* near each plot
+  (Anexo III A.1.f–g), and the seam-5 audit (2026-08-07, against the live
+  3.11.4 schema — confirmed current on FEGA's documentation page) found nothing
+  to mirror it: every `ActividadesExplotacion` and `DatosExplotacion` block was
+  enumerated and no field matches *punto*, *consumo*, *capta*, *distancia*,
+  *coordenada* or *masa*. The single water field, `OrigenAgua[]`, appears only
+  under `Riego[]` and `Fertilizacion[].Fertirrigacion`, and codes the
+  provenance of **irrigation** water — a different question with a different
+  subject. The live registry's four water catalogues (`ORIGEN_AGUA_RIEGO`,
+  `USOS_AGUA` = the water administration's use taxonomy, `REGANTES` and
+  `COMU_REGA` = irrigation-community registries) all belong to that same
+  irrigation vocabulary, so `plot_water_point` carries **no coded field** and
+  nothing new was vendored: a catalogue is vendored when a named part of the
+  app reads it. `plot_water_point` therefore exists for the PRINTED model
+  alone — the third time this has happened, after `seed_treatment_plot` (seam 3)
+  and `harvest_plot` + the buyer block (seam 4), and it is recorded here rather
+  than left to read as an oversight.
+- **Ceuta and Melilla have no `CAExplotacion` LABEL — the code is fine.**
+  `CAExplotacion` is documented "según codificación INE", INE's ciudad-autónoma
+  codes are 18 and 19, and that is exactly what `province_to_ccaa` returns, with
+  a unit test pinning it; the schema bounds the field at two characters with no
+  enum, so it validates. What is missing is only a row to resolve those codes to
+  a name: they are *ciudades* autónomas and FEGA's `COMUNIDAD_AUTONOMA`
+  publishes the seventeen *comunidades* only. Nothing displays a CCAA label
+  today — the printed book never touches one, and §1.1's Provincia resolves from
+  `PROVINCIA`, which does carry `51 CEUTA` and `52 MELILLA` — so a holding there
+  prints a complete book. If something ever needs the label, the standing rule
+  applies (an unresolvable code prints itself) and the Spanish wording would
+  come from INE via the report labels, never invented in a core table.
+  **Never map the two cities onto `00 Comunidad Desconocida` or onto a
+  neighbouring comunidad**: both would make a record assert something false
+  about a holding whose location is perfectly known. The contract test asserts
+  the absence for that reason. Found 2026-08-05 by the province ↔ CCAA
+  domain/range test; re-read and corrected 2026-08-11, the earlier wording
+  ("no value") having overstated it.
+- **`crop.irrigation_code` cannot produce a `SIST_RIEGO` code.** Our four
+  values (`rainfed`, `sprinkler`, `drip`, `gravity`) answer *two* SIEX
+  questions: `SIST_EXPLOTACION` (R/S — total and lossless, mapped) and
+  `SIST_RIEGO` (the method). `sprinkler` sits between "Aspersión fija" and
+  "Aspersión móvil" with nothing in our schema to choose between them, and
+  `rainfed` has no `SIST_RIEGO` code at all. **No mapping is added**, because
+  a lossy one behind a green contract test would bake a statement the farmer
+  never made into a regulatory export. Closing it needs either a fifth and
+  sixth value or splitting the column into `is_irrigated` +
+  `irrigation_method_code`; that belongs to the Irrigation module, whose form
+  is where a farmer would actually be asked.
+- **One-directional mappings need an anchor test.** Where our list is smaller
+  than the catalogue (`growing_environment` → `SIST_CULTIVO` 1–4), "every one
+  of ours maps to an active code" stays green through a provider
+  renumbering that silently redirects every record. Pin the target labels too.
+  *(Done 2026-08-05: `growing_environments_map_to_the_siex_growing_system_they_name`
+  anchors each of the four on a word of the catalogue's own label.)*
+- **`SUST_ACTIVAS` cannot carry every analysis finding.** It codes
+  phytosanitary actives — `TipoAnalisis` 1 — so a heavy-metals, nutrients or
+  soil-parameters bulletin has nothing to code there. `analysis_record` keeps
+  the free `substances_detected` beside the coded `analysis_substance`
+  junction for exactly that reason; a serializer sends the codes and leaves
+  the wording to the farmer's own folder.
 
 ### Other public SIEX services (checked live 2026-07-15)
 
@@ -278,9 +427,18 @@ the same BdcSixWsp guide):
 `catalogue_code`), importer + query API in `terrazgo_core::catalogue`
 (`ensure_catalogues` runs at startup; `active_codes` for pickers,
 `find_code` for resolution), vendored snapshot in
-`crates/terrazgo-core/catalogues/` (16 files, idTabla names), tests against
+`crates/terrazgo-core/catalogues/` (47 files, idTabla names), tests against
 the real FEGA files in `crates/terrazgo-core/tests/catalogue.rs`. The rest
 of this section is the design rationale, kept as decision history.
+
+Two importer changes since (2026-08-05): a per-catalogue **`code_col`**,
+because three files do not lead with their own code (`COMUNIDAD_AUTONOMA`
+leads with the catastro code where SIEX wants INE;
+`EDIFICACIONES_INSTALACIONES` and `DETALLE_MATERIAL_FERT` lead with their
+parent catalogue's), and **`catalogue.source_digest`**, which replaced a
+fast path that compared lifecycle dates — that one had to parse every file
+before deciding to skip it, and could not see a refresh that corrected a
+label without moving a date.
 
 **Two generic tables owned by terrazgo-core.** Reference catalogues serve the
 whole farm domain (treatments now; crop prefill, fertilisation, irrigation
@@ -291,7 +449,8 @@ generic and the Spanish-ness is data: the `geo_feature` pattern.
 - `catalogue` — one row per imported catalogue: `id` TEXT PK (the idTabla),
   `source` TEXT (`'siex'` now; other countries' registries later),
   `source_updated_at` (the fecha value / max row date at import),
-  `imported_at`.
+  `source_digest` (content hash of the vendored bytes — what the startup
+  fast path compares), `imported_at`.
 - `catalogue_code` — INTEGER PK (shipped reference data — the UUID rule
   applies to user data only), `catalogue_id` FK, `code` TEXT (integer codes
   for all but `TIPO_MAQUINA_UNE`), `label` TEXT, `attrs` JSON (category,
@@ -319,11 +478,16 @@ generic and the Spanish-ness is data: the `geo_feature` pattern.
   (shipped reference data; each device imports its own copy). Not migrations:
   post-release migrations are append-only forever — wrong tool for
   third-party data on its own cadence.
-- **Refresh (stage 2, later, optional)**: async command through terrazgo-geo's
-  fetch — `/fecha` staleness probe, then `/catalogos/{idTabla}` — same
-  parser, same upsert. The sanctioned network seam; never required. Staleness
-  in between is mild: new codes can't be picked until an update, existing
-  records stay valid.
+- **Refresh (shipped 2026-08-09)**: a manual Settings button behind an async
+  command — one `GET /catalogos/{idTabla}` per vendored catalogue through the
+  `terrazgo-net` seam, then the same parser and the same upsert. Never
+  automatic and never required; staleness in between is mild (new codes cannot
+  be picked until an update, existing records stay valid). The `/fecha`
+  staleness probe was dropped in favour of the content digest the importer
+  already keeps: identical bytes cost nothing to detect, and a probe cannot
+  see a label corrected without a date moving. Validation runs entirely before
+  the write, because the upsert never deletes — see
+  [maintenance.md](maintenance.md) §1.
 - **Parsing**: the `csv` crate (settled 2026-07-14; delimiter `b';'` — the
   notes columns use RFC quoting with embedded `;`/newlines); decoding
   hand-rolled, no encoding crate — UTF-8 accepted first (fallback for a
@@ -361,6 +525,18 @@ mirrors the codebase's two existing precedents:
   instead of silently under-offering choices.
 - **Provider lists too large to own** (the ~1,400 phytosanitary problems) →
   the catalogue code stored verbatim, no FK (the settled catalogue rule).
+  Size is the usual reason but not the only one: `SUST_ACTIVAS` (283 rows)
+  is tier 2 because it carries **CAS numbers**, the cross-country key a
+  future French or Italian export would match on — owning English names for
+  chemicals with a universal identifier would be inventing a worse key.
+- **Third clause, added 2026-08-05, because both halves were violated at
+  once:** a tier-2 catalogue must have a **named consumer and a display
+  resolver**; a tier-1 lookup must have a **`Labels` accessor and a
+  bidirectional contract test**. Vendoring a catalogue nothing reads is dead
+  weight in the binary; owning a code without a resolver prints a blank cell
+  in a legal document; and *not* vendoring what a seam needs is how the same
+  seam concludes the authority publishes no list (see "The catalogues the
+  2026-07-14 study missed").
 
 What landed where:
 
@@ -474,6 +650,113 @@ The file-export command + UI entry point landed the same day (build-order
 step 4 below). Still not built: the `AltaDGC`/`CambioCultivoDGC` blocks
 (gap 2) and the server-side WS client.
 
+### What the serializer does NOT emit (dormant-export inventory, 2026-08-07)
+
+The 2026-08-02 CUECYL answer parked this module: it stays compiling,
+schema-validated and tested, but is **not extended**. What that park promised
+is that *capture* stays SIEX-shaped so a future un-parking rebuilds the arrays
+from stored columns — **not** that the serializer keeps pace. Slice 8 then
+added five registers, and none of them is serialized. The gap is deliberate;
+this table exists so it is visible rather than implied.
+
+`ActividadesExplotacion` currently carries **one** block, `TratamFito`.
+
+| Captured since | Our tables | The twin it would fill | State |
+| --- | --- | --- | --- |
+| seam 1 (2026-08-04) | `treatment_record.application_end_date` | `TratamFito.FechaFin` | **emitted** — no longer falls back to the start date |
+| seam 1 (2026-08-04) | `treatment_record.total_quantity_value` + `_unit_code` | `ProductosFito.Cantidad` | not emitted, **by choice**: the descriptor allows `Dosis` XOR `Cantidad` and the dose is the value every record carries, while a total is absent whenever the dose is a concentration |
+| seam 2 (2026-08-04) | `non_field_treatment` (subject `postharvest`) | `TratamientosPostCosecha` | not emitted |
+| seam 2 (2026-08-04) | `non_field_treatment` (subjects `premises`, `transport`) | `TratamientosEdifInstalaciones` | not emitted |
+| seam 3 (2026-08-04) | `seed_treatment` | `UsoSemillaTratada` | not emitted |
+| seam 4 (2026-08-04) | `analysis_record` + its junctions | `Analitica` | not emitted |
+| seam 4 (2026-08-04) | `harvest_record` (core) | `ComercializacionVD` | not emitted |
+| seam 5 (2026-08-07) | `plot_water_point`, `plot_water_declaration` | **none exists** | nothing to emit — SIEX has no captación entity at any level (see "Recorded gaps") |
+| slice 8.5 c2 (2026-08-06) | `analysis_type`, `analysis_substance`, `seed_treatment.treatment_kind_code`, `harvest_record.plant_product_code` | fields inside the four blocks above | not emitted, because their blocks are not |
+| slice B seam 1 (2026-08-07) | `irrigation_record` + its junctions | `Riego` | not emitted |
+| slice B seam 2 (2026-08-08) | `fertilisation_record`, `fertiliser_material` + their junctions | `Fertilizacion` | not emitted |
+| slice B seam 3 (2026-08-08) | `fertilisation_plan` + `fertilisation_plan_crop` | `PlanAbonado` | not emitted |
+| slice B seam 4 (2026-08-09) | `analysis_record`'s soil block | `Analitica.ParametrosSuelo` | not emitted, because `Analitica` is not |
+| slice C (2026-08-09) | `treatment_record.measure_code` + intensity + `measure_registration_number` | `TratamFito.OtrasActuacionesFito` | not emitted — **and the precheck says so for every record that carries a measure**, not just the productless ones (widened 2026-08-10). A PURELY non-chemical actuation would serialize as a `TratamFito` with an empty `ProductosFito`, a record asserting that a treatment happened while naming nothing that was done. A MIXED one — a spray and a measure on the same record, which the form allows — would export cleanly while silently losing the measure, and that is the worse of the two: nothing in the output would say anything had been left behind. `records_with_non_chemical_measure` refuses both with a nameable list |
+| slice C (2026-08-09) | `treatment_record.advisor_id` + its snapshots | `TratamFito.AsesorValidacion` | not emitted. `NumROPO` is stored and would fill the one required member; the twin's `Validacion`/`Fecha`/`Confirmacion`/`Contrato` are **not** captured, because model 3.1 bis asks for a handwritten signature and the book has no signature capability by design |
+
+`DatosExplotacion.MedidaPreventivaCultural` joins the same list from the other
+side: the twin's holding-level declaration of which IPM practices the farm
+follows (catalogue `MEDIDA_PREVENTIVA_CULTURAL`, 14 rows, vendored). It is
+optional in the twin, sits beside the parked `AltaDGC`/`CambioCultivoDGC`, and
+the printed model has no column for it anywhere — so nothing captures it, and
+the catalogue stays consumer-less. It is emphatically **not** what model 3.1
+bis's "Tipo de medida" speaks in: that is `TIPO_MEDIDA_FITOSANITARIA`, per
+event, with a date, a plot and an intensity.
+
+Three twin fields are captured by **nothing**, and that is a decision rather
+than an oversight. The line: a field required by the twin is captured even
+when the printed model has no column for it (`Fertilizacion.BuenasPracticas`
+is, in `fertilisation_practice`); a field optional in the twin AND absent from
+the model is recorded here instead.
+
+| The twin's field | Why nothing stores it |
+| --- | --- |
+| `Fertilizacion.Fertirrigacion` (its own `SistemaRiego`, `DosisN`/`DosisP`, `OrigenAgua`, `NumContador`) | the printed §6 has no fertigation columns, `application_method_code` already records *that* it was fertigation (`METODO_APLICACION_FERTILIZANTE` 5 and 6), and the water side is §8's register |
+| `Fertilizacion.GestionSostInsu` | twin-only boolean, optional, no model column and no duty behind it |
+| `BuenasPracticasRiego` (on **both** `Fertilizacion` and `Riego`) | optional in both, and the "Riego" ámbito of `BUENAS_PRACTICAS_AMBITOS` has no column in either printed section |
+
+Bringing the serializer up to the schema is roughly a seam's worth of work
+(five blocks, their precheck rules and schema-validated tests) for a format
+with no delivery path today, so it stays an open decision rather than a
+scheduled slice. Nothing here blocks the printed book, which is the
+compliance artifact.
+
+### Blocks with no capture at all — the eco-scheme registers (2026-08-11)
+
+The table above lists twins we fill from stored columns but do not emit. These
+are the other kind: nothing in the schema feeds them, because the practices they
+describe are not recorded anywhere in the app. They are the SIEX side of the
+printed model's **section 9**, whose annotation duties come from RD 1048/2022
+(the full article-by-article inventory is in `cuaderno-print.md`).
+
+| The twin | The register it serves | The duty behind it |
+| --- | --- | --- |
+| `Pastoreo` (`FechaInicio`/`FechaFin`, `AnimalesPropios`/`Terceros`, `Animales[]` = `{REGA, Numero, Especie}`) | model 9.1, extensive grazing | RD 1048/2022 art. 30.2 ter |
+| `DatosCubierta` (`FecEstablecimientoCub`, `AnchuraCubierta`, `AnchuraLibreProy`, `TipoCobertura`) | model 9.4 and 9.5, plant and inert covers — it matches those pages field for field | arts. 42.1.a/c/e and 43.1.a–b |
+| `LaboresCulturales` (`FechaInicio`/`FechaFin`, `TipoLabor`, `DepositadoSueloDesb`/`Poda`) | model 9.2's maintenance activities and 9.3's levelling and caballones | arts. 31, 31.4.d, 45.2 |
+
+Their vocabularies are already to hand: `TIPO_COBERTURA_SUELO` and `TIPO_LABOR`
+are vendored (and read by nothing today — see `maintenance.md` §1), and
+`ESPECIE_ANIMAL` and `RAZAS` are published in the FEGA registry.
+
+**`EST_FENOLOGICO` → `TratamFito.DGCs[].EstadoFenologico` was the one that
+belonged to a table we already had, and it is BUILT (2026-08-12).** The field
+hangs off the treated crop — our `treatment_plot.growth_stage_code` — and
+Reglamento (UE) 2023/564's annex asks for the growth stage "where relevant", so
+the duty existed whatever the twin's optionality said. Two notes for a reader of
+the payload: the value is the catalogue's own code 1-10 and **not** the BBCH
+stage (the monograph's 0-9 is a separate column, and the book prints that one),
+and an unparseable code is dropped rather than refused — the field is optional in
+the format, so it must not fail an export of everything else. The conditionality
+rules are in `cuaderno-print.md` → "What the EU annex adds".
+
+One alignment note. `SiembraPlantacion` carries `MaterialTratado: boolean` and
+`NumLote`, so the exchange format models our §3.2 as *a sowing that used treated
+material* rather than as a register of its own — which is why
+`UsoSemillaTratada` carries no plots, and why seam 3 had to take the plot
+linkage from the printed model instead. Nothing follows from it; it explains a
+shape already chosen.
+
+### The precheck now has no renderer (2026-08-11)
+
+`export_cuaderno_precheck` and `export_cuaderno` stay registered, compiled,
+schema-validated and tested, but **nothing in the interface calls them**: the
+export panel was removed from the record book's export tab, which now offers the
+PDF and the spreadsheet over the completeness advisory. A button producing a
+file with nowhere to go was the wrong thing to show a farmer.
+
+That is worth recording rather than just doing, because it recreates the exact
+condition that hid `records_with_non_chemical_measure` until the 2026-08-09
+review: a field on a command's response that no scripted check renders. So
+un-parking the export means rebuilding **its UI and its checks**, not merely
+calling the command again — and any field added to the precheck meanwhile is
+unexercised end to end by construction.
+
 ## Gaps found (ordered by design impact)
 
 1. **Integer activity ids.** `IdAjena*` fields are integers (`number(10)`, max
@@ -543,7 +826,26 @@ step 4 below). Still not built: the `AltaDGC`/`CambioCultivoDGC` blocks
 5. Server-side WS client — separate component, after developer authorization
    with the Junta exists. Not in this repo's core.
 
-## Open questions for CUECYL
+## Open questions for CUECYL — ANSWERED 2026-08-02
+
+CUECYL replied to the email. Two answers settle the whole section:
+
+1. **Connecting to REACYL or CUECYL web services requires being a company or an
+   autónomo.** That closes questions 1–3 and 5 for now: no individual, however
+   the software is licensed, gets web-service credentials.
+2. **CUECYL has no farmer-facing file upload** — no manual submission of the
+   descriptor JSON. That answers question 4, the one the shipped export
+   depended on, in the negative.
+
+Consequences recorded in the status banner at the top of this document: the
+serializer is parked, `AltaDGC` (gap 2) and the IUWS client are out of scope,
+and the printable PDF becomes the compliance artifact. Questions 6 (REACYL DGC
+Excel columns) and 7 (`UnidadGestora`) are moot while no submission path
+exists — 6 doubly so, since the REACYL Excel import is dropped in favour of
+the public SIGPAC *cultivos declarados* service (see "Farmer-side data paths"),
+which needs no login at all.
+
+The questions as originally sent, kept for the record:
 
 Contact update (2026-07-11): the commercial-notebook onboarding path in CyL is
 published — a test-environment access form emailed to **comercialcuecyl@jcyl.es**

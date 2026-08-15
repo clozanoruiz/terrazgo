@@ -15,15 +15,22 @@
 
 use crate::error::Result;
 use crate::models::{
-    NewCrop, NewFarm, NewMachinery, NewOperator, NewPlot, NewProduct, NewProductAuthorisation,
-    NewSeason, NewTreatmentPlot, NewTreatmentProblem, NewTreatmentRecord,
+    NewAnalysisPlot, NewAnalysisRecord, NewCrop, NewFarm, NewMachinery, NewNonFieldTreatment,
+    NewOperator, NewPlot, NewProduct, NewProductAuthorisation, NewSeason, NewSeedTreatment,
+    NewSeedTreatmentPlot, NewTreatmentPlot, NewTreatmentProblem, NewTreatmentRecord,
 };
 use crate::repository;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use terrazgo_core::date::now_utc_iso;
-use terrazgo_core::models::{FarmEsFields, NewGeoFeature, PlotEsFields};
-use terrazgo_core::repository::save_geo_feature;
+use terrazgo_core::models::{
+    FarmEsFields, FarmRepresentativeFields, NewAdvisor, NewGeoFeature, NewWaterPoint, PlotEsFields,
+    UpdateFarm,
+};
+use terrazgo_core::repository::{
+    insert_advisor, insert_water_point, save_geo_feature, set_farm_advisor, set_water_declaration,
+    update_farm,
+};
 
 /// Real SIGPAC recinto 47:182:0:0:7:14:1 — the exact `recinfo` response
 /// harvested from sigpac-hubcloud.es on 2026-07-08 (SIGPAC © FEGA, CC BY 4.0).
@@ -95,7 +102,50 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             es: Some(FarmEsFields {
                 rega_code: None, // no livestock on the demo farm
                 rea_code: None,
+                siex_code: None,
                 province_code: Some("47".into()), // Valladolid
+            }),
+        },
+        None,
+    )?;
+
+    // The create form carries identity only; 1.1's full block is the edit
+    // form's, so the demo fills it the way a farmer would — including the two
+    // cells the printed page had no field for until this slice: the book's
+    // opening date and the representative's province.
+    update_farm(
+        conn,
+        &farm.id,
+        UpdateFarm {
+            name: "Finca Los Llanos".into(),
+            owner_name: Some("Carlos Lozano".into()),
+            owner_tax_id: Some("12345678Z".into()),
+            location_text: Some("Medina del Campo".into()),
+            address: Some("Camino de los Llanos, 14".into()),
+            postal_code: Some("47400".into()),
+            phone_fixed: Some("983 000 000".into()),
+            phone_mobile: Some("600 000 000".into()),
+            email: Some("finca@ejemplo.es".into()),
+            opened_on: Some("2026-01-02".into()),
+            latitude: None,
+            longitude: None,
+            country_code: "es".into(),
+            es: Some(FarmEsFields {
+                rega_code: None,
+                rea_code: None,
+                siex_code: None,
+                province_code: Some("47".into()),
+            }),
+            representative: Some(FarmRepresentativeFields {
+                full_name: "Ana Lozano Ruiz".into(),
+                tax_id: Some("87654321X".into()),
+                representation_kind: Some("Administradora única".into()),
+                address: Some("Calle Mayor, 3".into()),
+                locality: Some("Valladolid".into()),
+                province: Some("Valladolid".into()),
+                postal_code: Some("47001".into()),
+                phone: Some("600 111 222".into()),
+                email: Some("ana@ejemplo.es".into()),
             }),
         },
         None,
@@ -194,6 +244,51 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
         None,
     )?;
 
+    // --- water abstraction points (official model 2.2's water half) -----------
+    // All three printed states, so the rendered book shows each on one page:
+    // La Vega carries two points (which join positionally across the four
+    // cells), El Páramo is declared free of them, and the rest stay silent —
+    // and silence is not the same claim as a checked negative.
+    insert_water_point(
+        conn,
+        NewWaterPoint {
+            plot_id: la_vega.id.clone(),
+            denomination: "Pozo de la casa".into(),
+            inside_plot: true,
+            distance_m: None,
+            latitude: Some(41.65234),
+            longitude: Some(-4.72891),
+        },
+        None,
+    )?;
+    insert_water_point(
+        conn,
+        NewWaterPoint {
+            plot_id: la_vega.id.clone(),
+            denomination: "Sondeo municipal de Villanubla".into(),
+            inside_plot: false,
+            distance_m: Some(240.0),
+            latitude: None,
+            longitude: None,
+        },
+        None,
+    )?;
+    set_water_declaration(conn, &el_paramo.id, "2026-04-18", None)?;
+
+    // --- advisory relationship (official model 1.4) ---------------------------
+    // The demo holding belongs to an ATRIA, so table 1.4 prints a real row and
+    // the crops below can state their GIP framework.
+    let advisor = insert_advisor(
+        conn,
+        NewAdvisor {
+            name: "ATRIA Cerealista de Castilla y León".into(),
+            tax_id: Some("G47654321".into()),
+            registration_number: Some("ROPO-AS-47-0912".into()),
+        },
+        None,
+    )?;
+    set_farm_advisor(conn, &farm.id, &advisor.id, Some("atria".into()), None)?;
+
     // --- crops for the campaign ----------------------------------------------
     let wheat_la_vega = repository::insert_crop(
         conn,
@@ -203,7 +298,15 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             species_name: "winter wheat".into(),
             variety: Some("Nogal".into()),
             production_system_code: Some("conventional".into()),
+            area_ha: Some(3.2),
+            irrigation_code: Some("rainfed".into()),
+            growing_environment_code: Some("open_air".into()),
+            gip_system_code: Some("atria".into()),
             sown_on: Some("2025-11-10".into()),
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )?;
@@ -215,7 +318,15 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             species_name: "winter wheat".into(),
             variety: Some("Nogal".into()),
             production_system_code: Some("conventional".into()),
+            area_ha: Some(5.8),
+            irrigation_code: Some("rainfed".into()),
+            growing_environment_code: Some("open_air".into()),
+            gip_system_code: Some("atria".into()),
             sown_on: Some("2025-11-12".into()),
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )?;
@@ -227,7 +338,17 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             species_name: "barley".into(),
             variety: Some("Meseta".into()),
             production_system_code: Some("conventional".into()),
+            area_ha: Some(2.1),
+            irrigation_code: Some("rainfed".into()),
+            growing_environment_code: Some("open_air".into()),
+            // Deliberately unstated: the 2.1 GIP column then prints blank,
+            // which is what "no consta" has to look like.
+            gip_system_code: None,
             sown_on: Some("2025-11-20".into()),
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )?;
@@ -240,7 +361,15 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             species_name: "maize".into(),
             variety: Some("LG 31.479".into()),
             production_system_code: Some("conventional".into()),
+            area_ha: Some(8.75),
+            irrigation_code: Some("sprinkler".into()),
+            growing_environment_code: Some("open_air".into()),
+            gip_system_code: Some("integrated_production".into()),
             sown_on: Some("2026-04-20".into()),
+            crop_code: None,
+            source: None,
+            source_campaign: None,
+            declared_area_ha: None,
         },
         None,
     )?;
@@ -250,6 +379,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
         conn,
         NewOperator {
             full_name: "Carlos Lozano".into(),
+            tax_id: Some("12345678Z".into()),
             licence_number: Some("CYL-2018-04567".into()),
             licence_level_code: Some("qualified".into()),
             licence_expiry_date: Some("2026-08-15".into()),
@@ -263,6 +393,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             farm_id: farm.id.clone(),
             name: "Hardi NK 600 sprayer".into(),
             kind: Some("sprayer".into()),
+            acquired_on: Some("2018-03-15".into()),
             last_inspection_date: Some("2023-07-01".into()),
             next_inspection_due_date: Some("2026-07-01".into()),
             // A mobile sprayer registers in ROMA (REGANIP is aircraft/fixed installations).
@@ -360,10 +491,19 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             season_id: season.id.clone(),
             farm_id: farm.id.clone(),
             application_date: "2026-04-18".into(),
-            product_id: prosaro.id.clone(),
+            // Two plots, two days — the interval Anexo III Parte I B allows.
+            // The plazo de seguridad is counted from the 19th.
+            application_end_date: Some("2026-04-19".into()),
+            // Unstated: a triazole fungicide restricts no hour, so Reglamento
+            // (UE) 2023/564's footnote 4 does not make the hour relevant here.
+            application_time: None,
+            product_id: Some(prosaro.id.clone()),
             country_code: None, // derived from the farm
-            dose_value: 1.0,
-            dose_unit_code: "l_ha".into(),
+            dose_value: Some(1.0),
+            dose_unit_code: Some("l_ha".into()),
+            // 1 l/ha over 3,2 + 5,8 ha (Anexo III B.i).
+            total_quantity_value: Some(9.0),
+            total_quantity_unit_code: Some("l".into()),
             target_organism: Some("Septoria tritici, brown rust".into()),
             // Real SIEX ENFERMEDADES codes: 254 Septoriosis (Septoria spp.),
             // 416 Roya parda del trigo (Puccinia triticina).
@@ -382,19 +522,33 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             efficacy_code: Some("good".into()),
             operator_id: operator.id.clone(),
             machinery_id: Some(sprayer.id.clone()),
+            // Not an advised actuation: the wheat is under ATRIA, but this
+            // pass was the holding's own call, so 3.1 bis does not claim it.
+            advisor_id: None,
+            measure_code: None,
+            measure_intensity_value: None,
+            measure_intensity_unit_code: None,
+            measure_registration_number: None,
             phi_days_used: None, // falls back to the product default (35)
             notes: Some("Flag-leaf fungicide pass on both wheat plots.".into()),
         },
+        // Both plots carry the same species and variety, so the book prints
+        // them as ONE row — and the two days caught them at different growth
+        // stages, which is the case the printed cell has to state honestly
+        // rather than picking one. EST_FENOLOGICO 5 = BBCH 4 (embuchamiento),
+        // 6 = BBCH 5 (espigamiento).
         vec![
             NewTreatmentPlot {
                 plot_id: la_vega.id.clone(),
                 crop_id: Some(wheat_la_vega.id.clone()),
                 surface_treated_ha: 3.2,
+                growth_stage_code: Some("5".into()),
             },
             NewTreatmentPlot {
                 plot_id: el_paramo.id.clone(),
                 crop_id: Some(wheat_el_paramo.id.clone()),
                 surface_treated_ha: 5.8,
+                growth_stage_code: Some("6".into()),
             },
         ],
         None,
@@ -407,10 +561,20 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             season_id: season.id.clone(),
             farm_id: farm.id.clone(),
             application_date: "2026-05-25".into(),
-            product_id: karate.id.clone(),
+            // A single-day pass, and the total left unstated — the honest
+            // everyday state, and what a blank cell looks like in the book.
+            application_end_date: None,
+            // Stated, and this is the case Reglamento (UE) 2023/564's footnote
+            // 4 is about: a pyrethroid's label restricts application to outside
+            // bee flight hours, so the hour is part of what makes the record
+            // lawful and not just informative.
+            application_time: Some("20:30".into()),
+            product_id: Some(karate.id.clone()),
             country_code: None,
-            dose_value: 75.0,
-            dose_unit_code: "ml_ha".into(),
+            dose_value: Some(75.0),
+            dose_unit_code: Some("ml_ha".into()),
+            total_quantity_value: None,
+            total_quantity_unit_code: None,
             target_organism: Some("aphids (Sitobion avenae)".into()),
             // Real SIEX PLAGAS code: 135 Pulgón de la espiga (Sitobion avenae).
             problems: vec![NewTreatmentProblem {
@@ -422,14 +586,226 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             efficacy_code: None,
             operator_id: operator.id.clone(),
             machinery_id: Some(sprayer.id.clone()),
+            // Advised: the ATRIA technician called this one, so it carries the
+            // asesor of Anexo III Parte I B.d and prints in 3.1 bis.
+            advisor_id: Some(advisor.id.clone()),
+            measure_code: None,
+            measure_intensity_value: None,
+            measure_intensity_unit_code: None,
+            measure_registration_number: None,
             phi_days_used: None, // product default (30)
             notes: Some("Aphid threshold exceeded on ear emergence.".into()),
+        },
+        // EST_FENOLOGICO 6 = BBCH 5, espigamiento — which is what the note
+        // beneath this record says the aphids were found at.
+        vec![NewTreatmentPlot {
+            plot_id: carrascal.id.clone(),
+            crop_id: Some(barley_carrascal.id.clone()),
+            surface_treated_ha: 2.1,
+            growth_stage_code: Some("6".into()),
+        }],
+        None,
+    )?;
+
+    // --- treatment 3: a purely NON-CHEMICAL actuation (model 3.1 bis) ------
+    // RD 1311/2012 art. 10.1 asks professionals to prefer non-chemical methods,
+    // and the record book has to be able to say one was taken: this is a
+    // treatment with no product, no dose and no plazo de seguridad. The SIEX
+    // twin agrees — TratamFito does not require ProductosFito.
+    let t3 = repository::insert_treatment_record(
+        conn,
+        NewTreatmentRecord {
+            season_id: season.id.clone(),
+            farm_id: farm.id.clone(),
+            application_date: "2026-05-04".into(),
+            application_end_date: None,
+            // Neither field stated: hanging diffusers is restricted to no hour
+            // and to no growth stage, so both of the annex's conditional cells
+            // print blank — which is the ordinary case.
+            application_time: None,
+            product_id: None,
+            country_code: None,
+            dose_value: None,
+            dose_unit_code: None,
+            total_quantity_value: None,
+            total_quantity_unit_code: None,
+            target_organism: Some("Sitobion avenae — confusión sexual".into()),
+            problems: vec![NewTreatmentProblem {
+                reason_category_code: "pest".into(),
+                problem_code: "135".into(),
+            }],
+            justifications: vec!["monitoring".into()],
+            efficacy_code: Some("fair".into()),
+            operator_id: operator.id.clone(),
+            machinery_id: None,
+            advisor_id: Some(advisor.id.clone()),
+            // TIPO_MEDIDA_FITOSANITARIA 15: feromonas y atrayentes para
+            // monitoreo, at 4 diffusers per hectare over the barley.
+            measure_code: Some("15".into()),
+            measure_intensity_value: Some(4.0),
+            measure_intensity_unit_code: Some("diffusers_ha".into()),
+            measure_registration_number: None,
+            phi_days_used: None,
+            notes: Some("Difusores instalados antes del umbral de tratamiento.".into()),
         },
         vec![NewTreatmentPlot {
             plot_id: carrascal.id.clone(),
             crop_id: Some(barley_carrascal.id.clone()),
             surface_treated_ha: 2.1,
+            growth_stage_code: None,
         }],
+        None,
+    )?;
+
+    // --- a sowing with treated seed (model 3.2) ----------------------------
+    // The product is captured off the sack's label: treated seed names a
+    // product the farmer never bought as such, so there is no registry row.
+    repository::insert_seed_treatment(
+        conn,
+        NewSeedTreatment {
+            season_id: season.id.clone(),
+            farm_id: farm.id.clone(),
+            sown_on: "2025-11-10".into(),
+            species_name: "trigo blando".into(),
+            variety: Some("Nogal".into()),
+            crop_code: Some("1".into()), // PRODUCTOS: 1 = TRIGO BLANDO
+            seed_quantity_kg: Some(680.0),
+            seed_lot: Some("L-2025-4471".into()),
+            // TIPO_TRATAMIENTO 4: bought already treated, in Spain.
+            treatment_kind_code: Some("purchased_es".into()),
+            product_name: "Celest Trio".into(),
+            product_registration_number: Some("ES-24.876".into()),
+            product_active_substance: Some("fludioxonil + difenoconazol".into()),
+            product_id: None,
+            efficacy_code: Some("good".into()),
+            notes: Some("Semilla certificada tratada en origen.".into()),
+            plots: vec![
+                NewSeedTreatmentPlot {
+                    plot_id: la_vega.id.clone(),
+                    surface_sown_ha: 3.2,
+                },
+                NewSeedTreatmentPlot {
+                    plot_id: el_paramo.id.clone(),
+                    surface_sown_ha: 5.8,
+                },
+            ],
+        },
+        None,
+    )?;
+
+    // --- a postharvest treatment (model 3.3) + a declared-empty register ---
+    // Between them the four conditional registers show all three states the
+    // "APLICA TRATAMIENTO" boxes can take: SÍ (rows), NO (declared empty) and
+    // neither (nobody has been near it yet).
+    repository::insert_non_field_treatment(
+        conn,
+        NewNonFieldTreatment {
+            season_id: season.id.clone(),
+            farm_id: farm.id.clone(),
+            country_code: None,
+            subject_kind_code: "postharvest".into(),
+            treated_on: "2026-08-20".into(),
+            subject_description: "Trigo blando de la cosecha 2026, silo 2".into(),
+            // PROD_VEGETAL 85 = Granos de trigo (the harvested produce, not
+            // the crop: PRODUCTOS 1 is TRIGO BLANDO).
+            subject_product_code: Some("85".into()),
+            // Produce is measured in tonnes; the product used, in kilograms.
+            treated_quantity_value: Some(120.0),
+            treated_quantity_unit_code: Some("t".into()),
+            product_id: karate.id.clone(),
+            product_quantity_value: Some(2.4),
+            product_quantity_unit_code: Some("kg".into()),
+            operator_id: operator.id.clone(),
+            machinery_id: None,
+            // Anexo III B.d reaches the postharvest register through B.b, so
+            // the advised case is worth seeding here too.
+            advisor_id: Some(advisor.id.clone()),
+            // Real SIEX PLAGAS code: 135 Pulgón de la espiga; stored grain
+            // pests share the catalogue.
+            problems: vec![NewTreatmentProblem {
+                reason_category_code: "pest".into(),
+                problem_code: "135".into(),
+            }],
+            justifications: vec!["monitoring".into()],
+            efficacy_code: Some("good".into()),
+            notes: Some("Fumigación preventiva del grano almacenado.".into()),
+        },
+        None,
+    )?;
+
+    repository::set_register_declaration(
+        conn,
+        &farm.id,
+        &season.id,
+        "transport",
+        "2026-09-01",
+        None,
+    )?;
+
+    // --- an analysis (model 4) and a sale (model 5) -----------------------
+    // Metadata only: the register says where the bulletin is, never holds it.
+    repository::insert_analysis_record(
+        conn,
+        NewAnalysisRecord {
+            season_id: season.id.clone(),
+            farm_id: farm.id.clone(),
+            sampled_on: "2026-06-18".into(),
+            material_kind_code: "harvested_produce".into(),
+            bulletin_number: Some("B-2026/1187".into()),
+            lab_name: Some("Laboratorio Agroalimentario de Castilla y León".into()),
+            lab_address: Some("Ctra. Burgos km 118, 47071 Valladolid".into()),
+            lab_tax_id: Some("Q4700123B".into()),
+            substances_detected: Some("Lambda cihalotrín 0,01 mg/kg (LMR 0,05)".into()),
+            soil: Default::default(),
+            notes: Some("Muestreo previo a la cosecha.".into()),
+            plots: vec![
+                NewAnalysisPlot {
+                    plot_id: la_vega.id.clone(),
+                    crop_id: Some(wheat_la_vega.id.clone()),
+                },
+                NewAnalysisPlot {
+                    plot_id: el_paramo.id.clone(),
+                    crop_id: Some(wheat_el_paramo.id.clone()),
+                },
+            ],
+            analysis_type_codes: vec!["pesticide_residues".into()],
+            // SUST_ACTIVAS 170 = LAMBDA CIHALOTRINA, the substance the free
+            // text above quantifies — the code and the wording answer
+            // different questions, so the register keeps both.
+            substance_codes: vec!["170".into()],
+        },
+        None,
+    )?;
+
+    // Section 5 is core-owned: what leaves the holding is whole-farm data.
+    terrazgo_core::repository::insert_harvest_record(
+        conn,
+        terrazgo_core::models::NewHarvestRecord {
+            season_id: season.id.clone(),
+            farm_id: farm.id.clone(),
+            harvested_on: "2026-07-24".into(),
+            product_name: "Trigo blando".into(),
+            plant_product_code: Some("85".into()), // PROD_VEGETAL: Granos de trigo
+            quantity_value: Some(42.5),
+            quantity_unit_code: Some("t".into()),
+            delivery_note_ref: Some("ALB-2026/318".into()),
+            lot_number: Some("L-26-07".into()),
+            buyer_name: "Cooperativa Cerealista del Duero S. Coop.".into(),
+            buyer_tax_id: Some("F47008123".into()),
+            buyer_address: Some("Ctra. Palencia km 4, 47009 Valladolid".into()),
+            buyer_registry_number: Some("21.0012345/VA".into()),
+            notes: None,
+            plots: vec![
+                terrazgo_core::models::NewHarvestPlot {
+                    plot_id: la_vega.id.clone(),
+                    crop_id: Some(wheat_la_vega.id.clone()),
+                },
+                terrazgo_core::models::NewHarvestPlot {
+                    plot_id: el_paramo.id.clone(),
+                    crop_id: Some(wheat_el_paramo.id.clone()),
+                },
+            ],
+        },
         None,
     )?;
 
@@ -437,6 +813,6 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
         seeded: true,
         farm_name: Some(farm.name),
         season_label: Some(season.label),
-        treatment_ids: vec![t1.id, t2.id],
+        treatment_ids: vec![t1.id, t2.id, t3.id],
     })
 }
