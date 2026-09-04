@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Política de privacidad — Terrazgo</title>
+    <meta
+      name="description"
+      content="Política de privacidad de Terrazgo: la aplicación no recoge datos personales; toda tu información vive en tu dispositivo."
+    />
+    <link rel="icon" href="assets/favicon.png" />
+    <!-- Applied before the stylesheet loads so a saved choice never flashes. -->
+    <script>
+      const savedTheme = localStorage.getItem("terrazgo.theme");
+      if (savedTheme === "light" || savedTheme === "dark") {
+        document.documentElement.dataset.theme = savedTheme;
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <a href="./" class="brand-link">
+          <img src="assets/logo.png" alt="" width="32" height="32" />
+          <span>Terrazgo</span>
+        </a>
+      </div>
+      <nav>
+        <a href="./#descargas">Descargas</a>
+        <a href="https://github.com/clozanoruiz/terrazgo">GitHub</a>
+        <button id="theme-toggle" type="button" aria-label="Cambiar entre tema claro y oscuro">
+          🌙
+        </button>
+      </nav>
+    </header>
+
+    <main class="prose">
+      <h1>Política de privacidad</h1>
+      <p class="policy-date">Última actualización: 21 de julio de 2026</p>
+
+      <p>
+        Terrazgo es una aplicación libre y gratuita para la gestión de la explotación agrícola,
+        diseñada desde el principio para que tus datos sean tuyos.
+        <strong>La aplicación no recoge, transmite ni vende ningún dato personal.</strong> Esta
+        página explica, sin letra pequeña, qué hace la aplicación con tu información y qué
+        conexiones de red realiza.
+      </p>
+
+      <h2>Responsable</h2>
+      <p>
+        Terrazgo es un proyecto de software libre desarrollado por Carlos Lozano Ruiz. Para
+        cualquier consulta sobre privacidad puedes escribir a
+        <a href="mailto:clozanoruiz.dev@outlook.com">clozanoruiz.dev@outlook.com</a> o abrir una
+        incidencia en
+        <a href="https://github.com/clozanoruiz/terrazgo/issues">el repositorio del proyecto</a>.
+      </p>
+
+      <h2>Qué datos recoge la aplicación</h2>
+      <p>Ninguno. En concreto, la aplicación:</p>
+      <ul>
+        <li>No requiere crear cuentas ni registrarse.</li>
+        <li>No incluye telemetría, estadísticas de uso ni herramientas de análisis.</li>
+        <li>No muestra publicidad ni incorpora identificadores publicitarios.</li>
+        <li>No envía tus datos a ningún servidor del proyecto (no existen tales servidores).</li>
+      </ul>
+      <p>
+        Todo lo que introduces — explotaciones, parcelas, cultivos, tratamientos, operadores,
+        maquinaria — se guarda únicamente en una base de datos local dentro de tu dispositivo. Ni el
+        desarrollador ni terceros tienen acceso a ella.
+      </p>
+
+      <h2>Copias de seguridad</h2>
+      <p>
+        Las copias de seguridad las creas tú desde la aplicación y se guardan donde tú elijas (un
+        archivo en tu dispositivo, una memoria USB…). La aplicación nunca las sube a ningún
+        servicio: mover o custodiar ese archivo queda bajo tu control.
+      </p>
+
+      <h2>Conexiones de red</h2>
+      <p>
+        La aplicación funciona sin conexión. Cuando hay red disponible, realiza únicamente estas
+        conexiones, todas dirigidas a servicios cartográficos y registros públicos:
+      </p>
+      <ul>
+        <li>
+          <strong>Mapas base</strong>: descarga de teselas de mapa de OpenFreeMap y de la
+          ortofotografía PNOA del Instituto Geográfico Nacional.
+        </li>
+        <li>
+          <strong>SIGPAC</strong>: consultas al servicio público de la FEGA para verificar
+          referencias de parcela, obtener sus límites y comprobar zonas (nitratos, Natura 2000,
+          restricciones fitosanitarias). Estas consultas envían al servicio la referencia SIGPAC o
+          las coordenadas de la parcela consultada — es la información imprescindible para que el
+          servicio pueda responder.
+        </li>
+      </ul>
+      <p>
+        Como en cualquier conexión a internet, esos proveedores pueden ver la dirección IP desde la
+        que se realiza la petición y registrarla en sus servidores, conforme a sus propias
+        políticas. Las respuestas se guardan en una caché local para que el mapa siga funcionando
+        sin cobertura; puedes vaciar esa caché desde los ajustes de la aplicación.
+      </p>
+
+      <h2>Permisos en Android</h2>
+      <p>
+        La aplicación no solicita acceso a tu ubicación, cámara, contactos ni almacenamiento
+        general. Solo accede a los archivos que tú eliges explícitamente mediante el selector de
+        archivos del sistema (por ejemplo, al exportar un PDF o al importar una copia de seguridad).
+      </p>
+
+      <h2>Este sitio web</h2>
+      <p>
+        terrazgo.com es una página estática alojada en GitHub Pages (GitHub, Inc.), que como
+        proveedor de alojamiento puede registrar direcciones IP en sus registros de servidor según
+        su
+        <a
+          href="https://docs.github.com/es/site-policy/privacy-policies/github-general-privacy-statement"
+          >política de privacidad</a
+        >. La página no usa cookies ni analítica. Tu preferencia de tema claro u oscuro se guarda
+        solo en tu navegador y no se transmite. Los enlaces de descarga se rellenan consultando la
+        API pública de GitHub desde tu navegador.
+      </p>
+
+      <h2>Menores</h2>
+      <p>
+        La aplicación es una herramienta profesional de gestión agraria y no está dirigida a
+        menores. En cualquier caso, no recoge datos de ningún usuario, sea cual sea su edad.
+      </p>
+
+      <h2>Tus derechos</h2>
+      <p>
+        Los derechos de acceso, rectificación y supresión que reconoce el Reglamento General de
+        Protección de Datos se ejercen aquí de la forma más directa posible: todos tus datos están
+        en tu dispositivo y solo en él. Puedes consultarlos, exportarlos o eliminarlos en cualquier
+        momento desde la propia aplicación, o desinstalarla para borrarlos por completo. Para
+        cualquier duda, utiliza el contacto indicado arriba.
+      </p>
+
+      <h2>Cambios en esta política</h2>
+      <p>
+        Si la aplicación incorporase en el futuro alguna función que afecte a la privacidad (por
+        ejemplo, una sincronización opcional entre dispositivos), esta página se actualizará antes
+        de publicarla, con la fecha de revisión indicada al principio.
+      </p>
+    </main>
+
+    <footer>
+      <p>
+        Software libre bajo licencia
+        <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0-or-later</a>.
+      </p>
+      <p>
+        <a href="https://github.com/clozanoruiz/terrazgo">Código fuente</a> ·
+        <a href="https://github.com/clozanoruiz/terrazgo/issues/new/choose"
+          >Incidencias y sugerencias</a
+        >
+        · <a href="privacidad.html">Política de privacidad</a>
+      </p>
+    </footer>
+
+    <script>
+      const themeButton = document.getElementById("theme-toggle");
+      const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+      const effectiveTheme = () =>
+        document.documentElement.dataset.theme || (systemDark.matches ? "dark" : "light");
+      const paintButton = () => {
+        themeButton.textContent = effectiveTheme() === "dark" ? "☀️" : "🌙";
+      };
+      themeButton.addEventListener("click", () => {
+        const next = effectiveTheme() === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem("terrazgo.theme", next);
+        paintButton();
+      });
+      systemDark.addEventListener("change", paintButton);
+      paintButton();
+    </script>
+  </body>
+</html>
