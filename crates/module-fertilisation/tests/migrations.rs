@@ -69,7 +69,7 @@ fn the_module_runs_on_core_alone() {
 
     let treatment_tables: i64 = conn
         .query_row(
-            "SELECT count(*) FROM sqlite_master
+            "SELECT count(*) FROM sqlite_schema
              WHERE type = 'table' AND name = 'treatment_record'",
             [],
             |r| r.get(0),

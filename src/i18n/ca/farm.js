@@ -53,6 +53,7 @@ export default {
     "Punts de captació d'aigua per a consum humà a la parcel·la o a prop (apartat 2.2 del quadern). Marqueu «sense captacions» a les parcel·les on ho hàgiu comprovat i no n'hi hagi: en blanc vol dir que encara no s'ha comprovat.",
   "water_points.empty": "Encara no hi ha captacions registrades.",
   "water_points.none_on": "Sense captacions a «{plot}» (comprovat)",
+  "water_points.none_column": "Sense captacions (comprovat)",
   "water_point.denomination": "Denominació",
   "water_point.inside_plot": "Inclosa a la parcel·la",
   "water_point.distance": "Distància (m)",
@@ -81,8 +82,6 @@ export default {
   "crop.species": "Espècie",
   "crop.variety": "Varietat",
   "crop.production_system": "Sistema de producció",
-  "crop.sown_on": "Data de sembra",
-  "crop.sown_detail": "sembrat el {date}",
   "crop.delete_confirm":
     "Voleu suprimir el cultiu «{species}»? Els tractaments ja registrats conserven les seves dades.",
   "operators.title": "Operadors",
@@ -110,6 +109,37 @@ export default {
   "machinery.itv_detail": "propera ITV el {date}",
   "machinery.delete_confirm":
     "Voleu suprimir la màquina «{name}»? S'ocultarà de l'aplicació, però els seus registres es conserven.",
+  "premises.title": "Locals i mitjans de transport",
+  "premises.intro":
+    "Els locals i vehicles que es tracten als apartats 3.4 i 3.5. Registrar-los una vegada permet identificar-los a cada tractament, en lloc de tornar a descriure'ls.",
+  "premises.new": "Nou local o vehicle",
+  "premises.empty": "Encara no hi ha locals ni vehicles en aquesta explotació.",
+  "premises.no_farms": "Creeu primer una explotació:",
+  "premises.farm": "Explotació",
+  "premises.kind": "Tipus de registre",
+  "premises.name": "Nom",
+  "premises.name_hint": "Com l'anomeneu a l'explotació; és el que s'imprimeix com a «tipus».",
+  "premises.address": "Adreça",
+  "premises.vehicle_model": "Model",
+  "premises.plate": "Matrícula",
+  "premises.cadastral_reference": "Referència cadastral",
+  "premises.es_section": "Dades registrals (Espanya)",
+  "premises.rea_installation_code": "Codi de l'edificació al REA",
+  "premises.rea_hint":
+    "L'identificador que el REA assigna a aquesta edificació; consta a la seva inscripció. Necessari per a l'exportació oficial.",
+  "premises.rea_detail": "REA {code}",
+  "premises.cadastral_hint":
+    "De l'edificació o, si no en té, de la parcel·la on s'ubica. Necessària per a l'exportació oficial.",
+  "premises.class": "Classe d'edificació o instal·lació",
+  "premises.class_hint": "Catàleg oficial d'edificacions i instal·lacions.",
+  "premises.volume": "Capacitat (m³)",
+  "premises.volume_hint": "Capacitat total; el volum tractat s'anota a cada tractament.",
+  "premises.volume_detail": "{volume} m³",
+  "premises.notes": "Observacions",
+  "premises.delete_confirm":
+    "Voleu suprimir «{name}»? S'ocultarà de l'aplicació, però els tractaments que l'anomenen es conserven.",
+  "premises_kind.building": "Local o instal·lació",
+  "premises_kind.vehicle": "Mitjà de transport",
   "production_system.conventional": "Convencional",
   "production_system.organic": "Ecològica",
   "production_system.integrated": "Producció integrada",
@@ -124,7 +154,6 @@ export default {
   "profiles.empty": "Encara no hi ha perfils.",
   "profile.display_name": "Nom",
   "profile.operator_link": "Operador vinculat (aplicador)",
-  "profile.operator_detail": "Aplicador: {name}",
   "profile.delete_confirm": "Voleu suprimir el perfil «{name}»? Deixarà d'aparèixer a les llistes.",
 
   // Slice 5: the fields the official model asks for.
@@ -198,6 +227,8 @@ export default {
   "crops.proposals_title": "Cultius declarats al SIGPAC",
   "crops.proposals_campaign": "Declaració PAC campanya {campaign} → temporada {season}",
   "crops.proposals_refresh": "Actualitza des del SIGPAC",
+  "crops.proposals_accept": "Accepta",
+  "crops.proposals_effect": "Efecte",
   "crops.proposal_insert": "Afegeix com a cultiu nou",
   "crops.proposal_secondary": "Afegeix com a cultiu secundari",
   "crops.proposal_update": "Actualitza el cultiu «{name}» amb el que s'ha declarat",
@@ -214,7 +245,9 @@ export default {
   "crops.proposal_declared_area": "Superfície declarada: {area} ha",
   "crops.proposal_none": "Sense cultius declarats a les campanyes {current} i {previous}: {plots}",
   "crops.proposal_no_ref": "Sense referència SIGPAC completa: {plots}",
-  "crops.proposal_unreachable":
+  "crops.proposal_unreachable.one":
+    "No s'ha pogut consultar el SIGPAC per a aquesta parcel·la ({reason}): {plots}",
+  "crops.proposal_unreachable.other":
     "No s'ha pogut consultar el SIGPAC per a aquestes parcel·les ({reason}): {plots}",
   "crops.proposal_confirm":
     "Desa els cultius seleccionats ({count}) — declaració campanya {campaigns}",

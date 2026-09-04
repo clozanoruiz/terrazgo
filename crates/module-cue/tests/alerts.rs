@@ -136,6 +136,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
             farm_id,
             application_date: "2026-06-01".into(),
             application_end_date: None,
+            drying_date: None,
             application_time: None,
             product_id: Some(product_id),
             country_code: None,
@@ -192,7 +193,7 @@ fn refresh_creates_alerts_for_all_three_conditions() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     assert_eq!(alerts.len(), 3);
 
@@ -231,8 +232,94 @@ fn conditions_outside_their_window_produce_no_alerts() {
 
     // On 2026-01-15 nothing is live yet: the treatment hasn't happened and both
     // expiry dates are far beyond their lead windows.
-    repo::refresh_alerts(&mut conn, "2026-01-15", &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, "2026-01-15", &AlertConfig::defaults()).unwrap();
     assert!(repo::list_active_alerts(&conn).unwrap().is_empty());
+}
+
+/// The lead times became a user setting on 2026-08-26, and every other test
+/// here passes the defaults — so nothing proved `refresh_alerts` actually READS
+/// the config rather than reaching for module-cue's own numbers. It would have
+/// passed all of them while silently ignoring the farmer's choice.
+///
+/// Fixture dates against `TODAY` (2026-06-11): the licence expires 2026-07-15
+/// (34 days out) and the ITV falls due 2026-07-01 (20 days out). So a 10-day
+/// lead is too short to reach either, and the defaults are long enough for both.
+#[test]
+fn a_narrower_lead_time_closes_the_window_the_defaults_leave_open() {
+    let mut conn = open_in_memory().unwrap();
+    fixture(&mut conn);
+
+    let short = AlertConfig {
+        licence_lead_days: 10,
+        itv_lead_days: 10,
+    };
+    repo::refresh_alerts(&mut conn, TODAY, &short).unwrap();
+    assert!(
+        repo::list_active_alerts(&conn)
+            .unwrap()
+            .iter()
+            .all(|a| a.alert_type_code == "phi_window"),
+        "a 10-day lead cannot reach either expiry, so only the PHI alert should stand"
+    );
+
+    // The same day with the defaults raises both — so the difference is the
+    // config and nothing else.
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
+    let alerts = repo::list_active_alerts(&conn).unwrap();
+    assert_eq!(alerts.len(), 3);
+}
+
+#[test]
+fn the_configured_lead_time_is_the_one_recorded_on_the_alert() {
+    // `lead_days_used` is stored on the row, so it is the most direct evidence
+    // that the config reached the rule rather than a constant standing in.
+    let mut conn = open_in_memory().unwrap();
+    fixture(&mut conn);
+
+    repo::refresh_alerts(
+        &mut conn,
+        TODAY,
+        &AlertConfig {
+            licence_lead_days: 90,
+            itv_lead_days: 45,
+        },
+    )
+    .unwrap();
+
+    let alerts = repo::list_active_alerts(&conn).unwrap();
+    assert_eq!(
+        alert_for(&alerts, "licence_expiry").lead_days_used,
+        Some(90)
+    );
+    assert_eq!(alert_for(&alerts, "itv_expiry").lead_days_used, Some(45));
+}
+
+#[test]
+fn each_lead_time_governs_only_its_own_alert() {
+    // Two knobs, not one: shortening the licence lead must not disturb the ITV.
+    let mut conn = open_in_memory().unwrap();
+    fixture(&mut conn);
+
+    repo::refresh_alerts(
+        &mut conn,
+        TODAY,
+        &AlertConfig {
+            licence_lead_days: 10,
+            ..AlertConfig::defaults()
+        },
+    )
+    .unwrap();
+
+    let alerts = repo::list_active_alerts(&conn).unwrap();
+    assert!(
+        !alerts.iter().any(|a| a.alert_type_code == "licence_expiry"),
+        "the shortened licence lead should have closed its window"
+    );
+    assert_eq!(
+        alert_for(&alerts, "itv_expiry").lead_days_used,
+        Some(30),
+        "the ITV lead was left at its default and must still alert at 30"
+    );
 }
 
 #[test]
@@ -251,7 +338,7 @@ fn operator_without_expiry_date_produces_no_alert() {
     )
     .unwrap();
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert!(repo::list_active_alerts(&conn).unwrap().is_empty());
 }
 
@@ -307,6 +394,7 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
             farm_id,
             application_date: "2026-06-05".into(),
             application_end_date: None,
+            drying_date: None,
             application_time: None,
             product_id: Some(product_id),
             country_code: None,
@@ -349,7 +437,7 @@ fn multi_plot_treatment_yields_a_single_phi_alert() {
     )
     .unwrap();
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let phi_alerts: i64 = conn
         .query_row(
             "SELECT count(*) FROM alert WHERE alert_type_code = 'phi_window'",
@@ -370,9 +458,9 @@ fn refresh_is_idempotent() {
     let mut conn = open_in_memory().unwrap();
     fixture(&mut conn);
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let first = repo::list_active_alerts(&conn).unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let second = repo::list_active_alerts(&conn).unwrap();
 
     assert_eq!(first.len(), second.len());
@@ -390,14 +478,14 @@ fn refresh_is_idempotent() {
 fn dismissed_alert_survives_refresh_and_stays_hidden() {
     let mut conn = open_in_memory().unwrap();
     fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     let alerts = repo::list_active_alerts(&conn).unwrap();
     let licence_id = alert_for(&alerts, "licence_expiry").id.clone();
     repo::dismiss_alert(&mut conn, &licence_id).unwrap();
 
     // Condition still holds → the row survives, status untouched by the refresh.
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     let visible = repo::list_active_alerts(&conn).unwrap();
     assert!(
@@ -421,11 +509,11 @@ fn dismissed_alert_survives_refresh_and_stays_hidden() {
 fn lapsed_phi_window_removes_the_alert() {
     let mut conn = open_in_memory().unwrap();
     fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert_eq!(repo::list_active_alerts(&conn).unwrap().len(), 3);
 
     // On the PHI end date (2026-06-22) harvest is allowed again: the alert lapses.
-    repo::refresh_alerts(&mut conn, "2026-06-22", &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, "2026-06-22", &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     assert!(alerts.iter().all(|a| a.alert_type_code != "phi_window"));
     assert_eq!(alerts.len(), 2, "the expiry alerts are still live");
@@ -435,7 +523,7 @@ fn lapsed_phi_window_removes_the_alert() {
 fn licence_renewal_removes_the_alert() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     // Renewal: the expiry date moves out beyond the lead window. (Direct SQL — there is
     // no update_operator yet; the reconciliation must react to the data, not the API.)
@@ -445,7 +533,7 @@ fn licence_renewal_removes_the_alert() {
     )
     .unwrap();
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     assert!(alerts.iter().all(|a| a.alert_type_code != "licence_expiry"));
 }
@@ -454,7 +542,7 @@ fn licence_renewal_removes_the_alert() {
 fn soft_deleted_subject_removes_the_alert() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     conn.execute(
         "UPDATE machinery SET deleted_at = '2026-06-11T08:00:00Z' WHERE id = ?1",
@@ -462,7 +550,7 @@ fn soft_deleted_subject_removes_the_alert() {
     )
     .unwrap();
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     assert!(alerts.iter().all(|a| a.alert_type_code != "itv_expiry"));
 }
@@ -471,7 +559,7 @@ fn soft_deleted_subject_removes_the_alert() {
 fn drifted_due_date_is_corrected_in_place() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     let alerts = repo::list_active_alerts(&conn).unwrap();
     let itv = alert_for(&alerts, "itv_expiry");
@@ -485,7 +573,7 @@ fn drifted_due_date_is_corrected_in_place() {
     )
     .unwrap();
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let refreshed = repo::list_active_alerts(&conn).unwrap();
     let itv = alert_for(&refreshed, "itv_expiry");
     assert_eq!(itv.id, itv_id, "the same row is corrected, not replaced");
@@ -507,7 +595,7 @@ fn drifted_due_date_is_corrected_in_place() {
 fn acknowledge_marks_the_alert_but_keeps_it_listed() {
     let mut conn = open_in_memory().unwrap();
     fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     let phi_id = alert_for(&repo::list_active_alerts(&conn).unwrap(), "phi_window")
         .id
@@ -541,7 +629,7 @@ fn acknowledge_and_dismiss_unknown_alert_fail_with_not_found() {
 fn alert_rows_are_not_audit_logged() {
     let mut conn = open_in_memory().unwrap();
     fixture(&mut conn);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
 
     // Derived state is excluded from the audit/sync log by design (2026-06-11 decision).
     let logged: i64 = conn
@@ -619,7 +707,7 @@ fn inside_flags_alert_per_zone_type_and_outside_ones_do_not() {
     )
     .unwrap();
 
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     assert_eq!(alerts.len(), 2);
 
@@ -646,7 +734,7 @@ fn only_the_latest_campaign_counts() {
         None,
     )
     .unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert_eq!(repo::list_active_alerts(&conn).unwrap().len(), 1);
 
     replace_zone_flags(
@@ -658,7 +746,7 @@ fn only_the_latest_campaign_counts() {
         None,
     )
     .unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert!(repo::list_active_alerts(&conn).unwrap().is_empty());
 
     // Flagged again in 2028: the alert returns with the new campaign's date.
@@ -671,7 +759,7 @@ fn only_the_latest_campaign_counts() {
         None,
     )
     .unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     assert_eq!(
         alert_for(&alerts, "nitrate_zone").due_date.as_deref(),
@@ -692,7 +780,7 @@ fn dismissed_zone_alert_survives_rechecks_and_rollover() {
         None,
     )
     .unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let alerts = repo::list_active_alerts(&conn).unwrap();
     repo::dismiss_alert(&mut conn, &alert_for(&alerts, "nitrate_zone").id).unwrap();
 
@@ -707,7 +795,7 @@ fn dismissed_zone_alert_survives_rechecks_and_rollover() {
         None,
     )
     .unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert!(
         !repo::list_active_alerts(&conn)
             .unwrap()
@@ -729,11 +817,11 @@ fn zone_alerts_lapse_with_the_plot() {
         None,
     )
     .unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert_eq!(repo::list_active_alerts(&conn).unwrap().len(), 1);
 
     soft_delete_plot(&mut conn, &plot_id, None).unwrap();
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     assert!(repo::list_active_alerts(&conn).unwrap().is_empty());
 }
 
@@ -776,6 +864,7 @@ fn insert_non_chemical(conn: &mut Connection, fx: &Fixture) -> String {
             // see it.
             application_date: "2026-06-01".into(),
             application_end_date: None,
+            drying_date: None,
             application_time: None,
             product_id: None,
             country_code: None,
@@ -844,7 +933,7 @@ fn a_non_chemical_actuation_raises_no_phi_alert_and_leaves_the_others_alone() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
     // Baseline: the chemical fixture's PHI window is live on TODAY.
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let before = repo::list_active_alerts(&conn).unwrap();
     let phi_before: Vec<&str> = before
         .iter()
@@ -858,7 +947,7 @@ fn a_non_chemical_actuation_raises_no_phi_alert_and_leaves_the_others_alone() {
     );
 
     let non_chemical = insert_non_chemical(&mut conn, &fx);
-    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::default()).unwrap();
+    repo::refresh_alerts(&mut conn, TODAY, &AlertConfig::defaults()).unwrap();
     let after = repo::list_active_alerts(&conn).unwrap();
 
     // The measure raises nothing of its own...
@@ -899,7 +988,9 @@ fn phi_status_ignores_actuations_with_no_product() {
     // The map overlay reads the same windows. The plot is in PHI because of
     // the CHEMICAL treatment; the measure neither adds a window nor breaks the
     // query that finds them.
-    let status = repo::phi_status_for_farm(&conn, &farm_id, TODAY).unwrap();
+    let status =
+        repo::phi_status_for_farm(&conn, &farm_id, TODAY, repo::default_phi_horizon_days())
+            .unwrap();
     let plot = status.iter().find(|s| s.plot_id == plot_id).unwrap();
     assert!(plot.in_phi);
     assert_eq!(plot.phi_until.as_deref(), Some("2026-06-22"));

@@ -92,6 +92,20 @@ impl From<module_fertilisation::FertilisationError> for RecordbookError {
     }
 }
 
+impl From<module_ecoscheme::EcoschemeError> for RecordbookError {
+    fn from(e: module_ecoscheme::EcoschemeError) -> Self {
+        use module_ecoscheme::EcoschemeError;
+        match e {
+            EcoschemeError::Sqlite(e) => RecordbookError::Sqlite(e),
+            EcoschemeError::Json(e) => RecordbookError::Json(e),
+            EcoschemeError::NotFound => RecordbookError::NotFound,
+            EcoschemeError::InvalidDate(d) => RecordbookError::InvalidDate(d),
+            EcoschemeError::Invalid(msg) => RecordbookError::Invalid(msg),
+            other => RecordbookError::Internal(other.to_string()),
+        }
+    }
+}
+
 impl From<module_cue::CueError> for RecordbookError {
     fn from(e: module_cue::CueError) -> Self {
         use module_cue::CueError;

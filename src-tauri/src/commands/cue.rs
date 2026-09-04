@@ -8,10 +8,9 @@
 //! Split out of `commands.rs` (2026-08-13); the boundary machinery and the
 //! re-exports stay in the parent file.
 
-use super::{CmdResult, active_actor, lock_conn};
+use super::{CmdResult, active_actor, alert_config, phi_horizon};
 use crate::state;
 use crate::state::AppState;
-use module_cue::alerts::AlertConfig;
 use module_cue::demo::DemoSeedSummary;
 use module_cue::models::ActiveSubstance;
 use module_cue::models::Alert;
@@ -37,29 +36,37 @@ use terrazgo_core::models::Lookup;
 
 #[tauri::command]
 pub fn list_alerts(state: State<'_, AppState>) -> CmdResult<Vec<Alert>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_active_alerts(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_active_alerts(conn)?)
 }
 
 /// Reconcile alerts against today, then return the fresh list (one round-trip
 /// for the UI). Idempotent by design; never touches acknowledged/dismissed status.
 #[tauri::command]
-pub fn refresh_alerts(state: State<'_, AppState>) -> CmdResult<Vec<Alert>> {
-    let mut conn = lock_conn(&state)?;
-    repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
-    Ok(repository::list_active_alerts(&conn)?)
+pub fn refresh_alerts(
+    state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<Vec<Alert>> {
+    let config = alert_config(&settings_state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    repository::refresh_alerts(conn, &today_utc(), &config)?;
+    Ok(repository::list_active_alerts(conn)?)
 }
 
 #[tauri::command]
 pub fn acknowledge_alert(state: State<'_, AppState>, alert_id: String) -> CmdResult<()> {
-    let mut conn = lock_conn(&state)?;
-    Ok(repository::acknowledge_alert(&mut conn, &alert_id)?)
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    Ok(repository::acknowledge_alert(conn, &alert_id)?)
 }
 
 #[tauri::command]
 pub fn dismiss_alert(state: State<'_, AppState>, alert_id: String) -> CmdResult<()> {
-    let mut conn = lock_conn(&state)?;
-    Ok(repository::dismiss_alert(&mut conn, &alert_id)?)
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    Ok(repository::dismiss_alert(conn, &alert_id)?)
 }
 
 #[tauri::command]
@@ -67,26 +74,30 @@ pub fn get_treatment_record(
     state: State<'_, AppState>,
     id: String,
 ) -> CmdResult<TreatmentRecordWithPlots> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::get_treatment_record(&conn, &id)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::get_treatment_record(conn, &id)?)
 }
 
 #[tauri::command]
 pub fn list_reason_categories(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_reason_categories(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_reason_categories(conn)?)
 }
 
 #[tauri::command]
 pub fn list_efficacies(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_efficacies(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_efficacies(conn)?)
 }
 
 #[tauri::command]
 pub fn list_justifications(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_justifications(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_justifications(conn)?)
 }
 
 /// Active codes of the reference catalogue that problems of one category
@@ -99,9 +110,10 @@ pub fn list_problem_codes(
     country_code: String,
     reason_category_code: String,
 ) -> CmdResult<Vec<terrazgo_core::catalogue::CatalogueCode>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     match module_cue::siex::problem_catalogue(&country_code, &reason_category_code) {
-        Some(catalogue_id) => Ok(terrazgo_core::catalogue::active_codes(&conn, catalogue_id)?),
+        Some(catalogue_id) => Ok(terrazgo_core::catalogue::active_codes(conn, catalogue_id)?),
         None => Ok(Vec::new()),
     }
 }
@@ -114,8 +126,9 @@ pub fn list_measures(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<module_cue::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_cue::catalogue::measures(&conn, &country_code)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_cue::catalogue::measures(conn, &country_code)?)
 }
 
 /// Growth stages the treatment form may offer per treated crop (Reglamento (UE)
@@ -126,16 +139,18 @@ pub fn list_growth_stages(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<module_cue::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_cue::catalogue::growth_stages(&conn, &country_code)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_cue::catalogue::growth_stages(conn, &country_code)?)
 }
 
 /// Products the treatment form may offer: only those authorised in the given
 /// country (the farm's), because the insert rejects any other.
 #[tauri::command]
 pub fn list_products(state: State<'_, AppState>, country_code: String) -> CmdResult<Vec<Product>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_products_authorised(&conn, &country_code)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_products_authorised(conn, &country_code)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -144,14 +159,16 @@ pub fn list_products(state: State<'_, AppState>, country_code: String) -> CmdRes
 
 #[tauri::command]
 pub fn list_formulation_types(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_formulation_types(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_formulation_types(conn)?)
 }
 
 #[tauri::command]
 pub fn list_authorisation_kinds(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_authorisation_kinds(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_authorisation_kinds(conn)?)
 }
 
 /// Active exceptional-authorisation codes (substance + product per code) for
@@ -161,9 +178,10 @@ pub fn list_exceptional_substances(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<terrazgo_core::catalogue::CatalogueCode>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     match module_cue::siex::exceptional_substance_catalogue(&country_code) {
-        Some(catalogue_id) => Ok(terrazgo_core::catalogue::active_codes(&conn, catalogue_id)?),
+        Some(catalogue_id) => Ok(terrazgo_core::catalogue::active_codes(conn, catalogue_id)?),
         None => Ok(Vec::new()),
     }
 }
@@ -172,8 +190,9 @@ pub fn list_exceptional_substances(
 /// authorisations (country-agnostic, unlike `list_products`).
 #[tauri::command]
 pub fn list_product_details(state: State<'_, AppState>) -> CmdResult<Vec<ProductDetail>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_product_details(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_product_details(conn)?)
 }
 
 /// Create a product with its first authorisation in one transaction — a
@@ -187,9 +206,10 @@ pub fn create_product(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ProductDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::insert_product_with_authorisation(
-        &mut conn,
+        conn,
         product,
         authorisation,
         actor.as_deref(),
@@ -205,9 +225,10 @@ pub fn update_product(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Product> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::update_product(
-        &mut conn,
+        conn,
         &product_id,
         update,
         actor.as_deref(),
@@ -221,9 +242,10 @@ pub fn delete_product(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::soft_delete_product(
-        &mut conn,
+        conn,
         &product_id,
         actor.as_deref(),
     )?)
@@ -238,9 +260,10 @@ pub fn add_product_authorisation(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ProductAuthorisation> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::add_product_authorisation(
-        &mut conn,
+        conn,
         NewProductAuthorisation {
             product_id,
             country_code: authorisation.country_code,
@@ -263,9 +286,10 @@ pub fn remove_product_authorisation(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::remove_product_authorisation(
-        &mut conn,
+        conn,
         &authorisation_id,
         actor.as_deref(),
     )?)
@@ -273,8 +297,9 @@ pub fn remove_product_authorisation(
 
 #[tauri::command]
 pub fn list_active_substances(state: State<'_, AppState>) -> CmdResult<Vec<ActiveSubstance>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_active_substances(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_active_substances(conn)?)
 }
 
 #[tauri::command]
@@ -286,9 +311,10 @@ pub fn create_active_substance(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ActiveSubstance> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::insert_active_substance(
-        &mut conn,
+        conn,
         &name,
         cas_number.as_deref(),
         actor.as_deref(),
@@ -306,9 +332,10 @@ pub fn add_product_substance(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<ProductActiveSubstance> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::add_product_active_substance(
-        &mut conn,
+        conn,
         &product_id,
         &active_substance_id,
         concentration_value,
@@ -324,9 +351,10 @@ pub fn remove_product_substance(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::remove_product_active_substance(
-        &mut conn,
+        conn,
         &link_id,
         actor.as_deref(),
     )?)
@@ -343,9 +371,11 @@ pub fn create_treatment_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<TreatmentRecord> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    let record = repository::insert_treatment_record(&mut conn, record, plots, actor.as_deref())?;
-    repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
+    let config = alert_config(&settings_state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    let record = repository::insert_treatment_record(conn, record, plots, actor.as_deref())?;
+    repository::refresh_alerts(conn, &today_utc(), &config)?;
     Ok(record)
 }
 
@@ -361,10 +391,12 @@ pub fn update_treatment_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<TreatmentRecordWithPlots> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let config = alert_config(&settings_state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     let record =
-        repository::update_treatment_record(&mut conn, &treatment_id, update, actor.as_deref())?;
-    repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
+        repository::update_treatment_record(conn, &treatment_id, update, actor.as_deref())?;
+    repository::refresh_alerts(conn, &today_utc(), &config)?;
     Ok(record)
 }
 
@@ -374,9 +406,10 @@ pub fn list_treatment_records(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<TreatmentRecordWithPlots>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(repository::list_treatment_records(
-        &conn, &season_id, &farm_id,
+        conn, &season_id, &farm_id,
     )?)
 }
 
@@ -391,9 +424,10 @@ pub fn set_treatment_efficacy(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<TreatmentRecord> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::set_treatment_efficacy(
-        &mut conn,
+        conn,
         &treatment_id,
         efficacy_code,
         actor.as_deref(),
@@ -409,9 +443,11 @@ pub fn delete_treatment_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    repository::soft_delete_treatment_record(&mut conn, &treatment_id, actor.as_deref())?;
-    repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
+    let config = alert_config(&settings_state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    repository::soft_delete_treatment_record(conn, &treatment_id, actor.as_deref())?;
+    repository::refresh_alerts(conn, &today_utc(), &config)?;
     Ok(())
 }
 
@@ -426,11 +462,10 @@ pub fn export_cuaderno_precheck(
     state: State<'_, AppState>,
     season_id: String,
     farm_id: String,
-) -> CmdResult<module_cue::export::ExportPrecheck> {
-    let conn = lock_conn(&state)?;
-    Ok(module_cue::export::export_precheck(
-        &conn, &season_id, &farm_id,
-    )?)
+) -> CmdResult<terrazgo_siex::ExportPrecheck> {
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(terrazgo_siex::export_precheck(conn, &season_id, &farm_id)?)
 }
 
 #[derive(Serialize)]
@@ -460,9 +495,9 @@ pub async fn export_cuaderno(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<CuadernoExportSummary> {
     let actor = active_actor(&settings_state)?;
-    let mut guard = lock_conn(&state)?;
-    let cuaderno =
-        module_cue::export::build_cuaderno(&mut guard, &season_id, &farm_id, actor.as_deref())?;
+    let mut db = state.db.lock()?;
+    let guard = db.conn_mut()?;
+    let cuaderno = terrazgo_siex::build_cuaderno(guard, &season_id, &farm_id, actor.as_deref())?;
     let json = serde_json::to_string_pretty(&cuaderno)?;
     crate::user_files::write_user_file(&app, &dest_path, json.as_bytes())?;
     let entries = cuaderno
@@ -482,13 +517,20 @@ pub async fn export_cuaderno(
 #[tauri::command]
 pub fn list_phi_status(
     state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
     farm_id: String,
 ) -> CmdResult<Vec<PlotPhiStatus>> {
-    let conn = lock_conn(&state)?;
+    // Resolved per call, before the database lock — so a horizon changed in
+    // Settings applies the next time the map loads, with no restart, and the
+    // settings-before-database lock order is kept.
+    let horizon = phi_horizon(&settings_state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(repository::phi_status_for_farm(
-        &conn,
+        conn,
         &farm_id,
         &today_utc(),
+        horizon,
     )?)
 }
 
@@ -501,10 +543,15 @@ pub fn list_phi_status(
 /// this must be revisited: re-guard with `cfg!(not(debug_assertions))` or
 /// drop the command outright.
 #[tauri::command]
-pub fn seed_demo_data(state: State<'_, AppState>) -> CmdResult<DemoSeedSummary> {
-    let mut conn = lock_conn(&state)?;
-    let summary = module_cue::demo::seed_demo(&mut conn)?;
-    repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
+pub fn seed_demo_data(
+    state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<DemoSeedSummary> {
+    let config = alert_config(&settings_state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    let summary = module_cue::demo::seed_demo(conn)?;
+    repository::refresh_alerts(conn, &today_utc(), &config)?;
     Ok(summary)
 }
 
@@ -512,14 +559,16 @@ pub fn seed_demo_data(state: State<'_, AppState>) -> CmdResult<DemoSeedSummary> 
 
 #[tauri::command]
 pub fn list_non_field_subject_kinds(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_non_field_subject_kinds(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_non_field_subject_kinds(conn)?)
 }
 
 #[tauri::command]
 pub fn list_register_kinds(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_register_kinds(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_register_kinds(conn)?)
 }
 
 #[tauri::command]
@@ -528,9 +577,10 @@ pub fn list_non_field_treatments(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<module_cue::models::NonFieldTreatmentDetail>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(repository::list_non_field_treatments(
-        &conn, &season_id, &farm_id,
+        conn, &season_id, &farm_id,
     )?)
 }
 
@@ -541,9 +591,10 @@ pub fn create_non_field_treatment(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::NonFieldTreatmentDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::insert_non_field_treatment(
-        &mut conn,
+        conn,
         record,
         actor.as_deref(),
     )?)
@@ -559,9 +610,10 @@ pub fn update_non_field_treatment(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::NonFieldTreatmentDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::update_non_field_treatment(
-        &mut conn,
+        conn,
         &treatment_id,
         update,
         actor.as_deref(),
@@ -576,9 +628,10 @@ pub fn set_non_field_efficacy(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::NonFieldTreatment> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::set_non_field_efficacy(
-        &mut conn,
+        conn,
         &treatment_id,
         efficacy_code,
         actor.as_deref(),
@@ -592,8 +645,9 @@ pub fn delete_non_field_treatment(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    repository::soft_delete_non_field_treatment(&mut conn, &treatment_id, actor.as_deref())?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    repository::soft_delete_non_field_treatment(conn, &treatment_id, actor.as_deref())?;
     Ok(())
 }
 
@@ -605,9 +659,10 @@ pub fn list_register_declarations(
     farm_id: String,
     season_id: String,
 ) -> CmdResult<Vec<module_cue::models::RegisterDeclaration>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(repository::list_register_declarations(
-        &conn, &farm_id, &season_id,
+        conn, &farm_id, &season_id,
     )?)
 }
 
@@ -620,9 +675,10 @@ pub fn set_register_declaration(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::RegisterDeclaration> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::set_register_declaration(
-        &mut conn,
+        conn,
         &farm_id,
         &season_id,
         &register_code,
@@ -640,9 +696,10 @@ pub fn clear_register_declaration(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     repository::clear_register_declaration(
-        &mut conn,
+        conn,
         &farm_id,
         &season_id,
         &register_code,
@@ -659,9 +716,10 @@ pub fn list_seed_treatments(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<module_cue::models::SeedTreatmentDetail>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(repository::list_seed_treatments(
-        &conn, &season_id, &farm_id,
+        conn, &season_id, &farm_id,
     )?)
 }
 
@@ -672,9 +730,10 @@ pub fn create_seed_treatment(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::SeedTreatmentDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::insert_seed_treatment(
-        &mut conn,
+        conn,
         record,
         actor.as_deref(),
     )?)
@@ -688,9 +747,10 @@ pub fn update_seed_treatment(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::SeedTreatmentDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::update_seed_treatment(
-        &mut conn,
+        conn,
         &seed_treatment_id,
         update,
         actor.as_deref(),
@@ -705,9 +765,10 @@ pub fn set_seed_treatment_efficacy(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::SeedTreatment> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::set_seed_treatment_efficacy(
-        &mut conn,
+        conn,
         &seed_treatment_id,
         efficacy_code,
         actor.as_deref(),
@@ -721,8 +782,9 @@ pub fn delete_seed_treatment(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    repository::soft_delete_seed_treatment(&mut conn, &seed_treatment_id, actor.as_deref())?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    repository::soft_delete_seed_treatment(conn, &seed_treatment_id, actor.as_deref())?;
     Ok(())
 }
 
@@ -730,23 +792,26 @@ pub fn delete_seed_treatment(
 
 #[tauri::command]
 pub fn list_analysis_materials(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_analysis_materials(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_analysis_materials(conn)?)
 }
 
 /// What the laboratory looked for (model section 4). Its own list because the
 /// model prints no column for it — the book folds it into the material cell.
 #[tauri::command]
 pub fn list_analysis_types(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_analysis_types(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_analysis_types(conn)?)
 }
 
 /// Where treated seed was treated (model section 3.2).
 #[tauri::command]
 pub fn list_seed_treatment_kinds(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(repository::list_seed_treatment_kinds(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(repository::list_seed_treatment_kinds(conn)?)
 }
 
 /// The harvested produce a sale (section 5) or a postharvest treatment (3.3)
@@ -757,8 +822,9 @@ pub fn list_plant_products(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<module_cue::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_cue::catalogue::plant_products(&conn, &country_code)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_cue::catalogue::plant_products(conn, &country_code)?)
 }
 
 /// The active substances an analysis can report (FEGA `SUST_ACTIVAS`), for the
@@ -768,8 +834,9 @@ pub fn list_substance_codes(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<module_cue::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_cue::catalogue::substances(&conn, &country_code)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_cue::catalogue::substances(conn, &country_code)?)
 }
 
 #[tauri::command]
@@ -778,9 +845,10 @@ pub fn list_analysis_records(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<module_cue::models::AnalysisRecordDetail>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(repository::list_analysis_records(
-        &conn, &season_id, &farm_id,
+        conn, &season_id, &farm_id,
     )?)
 }
 
@@ -791,9 +859,10 @@ pub fn create_analysis_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::AnalysisRecordDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::insert_analysis_record(
-        &mut conn,
+        conn,
         record,
         actor.as_deref(),
     )?)
@@ -807,9 +876,10 @@ pub fn update_analysis_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_cue::models::AnalysisRecordDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(repository::update_analysis_record(
-        &mut conn,
+        conn,
         &analysis_record_id,
         update,
         actor.as_deref(),
@@ -823,7 +893,8 @@ pub fn delete_analysis_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    repository::soft_delete_analysis_record(&mut conn, &analysis_record_id, actor.as_deref())?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    repository::soft_delete_analysis_record(conn, &analysis_record_id, actor.as_deref())?;
     Ok(())
 }

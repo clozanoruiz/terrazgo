@@ -150,3 +150,74 @@ fn a_sheet_with_no_rows_still_renders() {
         1
     );
 }
+
+/// The number half of the same contract, and the reason the date half needed
+/// arranging at all: a number carries NO format, so every spreadsheet renders
+/// it with the reader's own separators. Nothing in the app may pin it — the
+/// UI's region setting stops at the screen, and the PDF's decimal comma is the
+/// PDF's.
+#[test]
+fn numbers_carry_no_format_so_the_reader_localises_them() {
+    let mut book = Workbook::new();
+    book.push(sample_sheet());
+    let out = render_xlsx(&book).expect("workbook must render");
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(out.bytes)).unwrap();
+    let mut sheet = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("xl/worksheets/sheet1.xml").unwrap(),
+        &mut sheet,
+    )
+    .unwrap();
+
+    // B2 is Cell::Number(2.5). It must hold the raw value and reference no
+    // style, so it inherits General — the format that defers to the reader.
+    assert!(
+        sheet.contains(r#"<c r="B2"><v>2.5</v></c>"#),
+        "the number cell must be unstyled and hold its raw value: {sheet}"
+    );
+    // The decimal in the FILE is a dot because that is the OOXML storage form,
+    // not a display choice — a comma here would be a corrupt document.
+    assert!(
+        !sheet.contains("2,5"),
+        "a decimal comma must never reach the stored value: {sheet}"
+    );
+}
+
+/// The one place unzipping the output IS the test.
+///
+/// A date needs *some* number format — with none it renders as its raw serial
+/// number — so it cannot simply be left unformatted the way numbers are. The
+/// locale-free equivalent is Excel's built-in short date, stored as a bare
+/// `numFmtId="14"` reference that each reader renders from their own regional
+/// settings. Writing `set_num_format("dd/mm/yyyy")` instead mints a
+/// user-defined id (164+) with the pattern baked in, pinning every reader in
+/// every locale to day-first.
+///
+/// The two are one line apart and produce byte-identical *cells*; only
+/// `xl/styles.xml` tells them apart, which is why the file's usual rule
+/// against unzipping does not apply here. Confirmed by rendering both and
+/// exporting through LibreOffice: the built-in shows 01/05/2026 under es_ES
+/// and 5/1/2026 under en_US, while the custom one shows 01/05/2026 in both.
+#[test]
+fn dates_use_the_locale_free_builtin_format() {
+    let mut book = Workbook::new();
+    book.push(sample_sheet());
+    let out = render_xlsx(&book).expect("workbook must render");
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(out.bytes)).unwrap();
+    let mut styles = String::new();
+    std::io::Read::read_to_string(&mut archive.by_name("xl/styles.xml").unwrap(), &mut styles)
+        .unwrap();
+
+    assert!(
+        !styles.contains("<numFmt "),
+        "no custom number format may be written — a formatCode pins every \
+         reader to one locale's date order; found: {styles}"
+    );
+    assert!(
+        styles.contains(r#"numFmtId="14""#),
+        "dates must reference built-in format 14, the locale-dependent short \
+         date; found: {styles}"
+    );
+}

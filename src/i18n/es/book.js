@@ -55,7 +55,8 @@ export default {
   "treatment.machinery": "Maquinaria",
   "treatment.machinery_none": "— ninguna —",
   "treatment.phi_days": "Plazo de seguridad (días)",
-  "treatment.phi_default": "Valor del producto: {days} días",
+  "treatment.phi_default.one": "Valor del producto: 1 día",
+  "treatment.phi_default.other": "Valor del producto: {count} días",
   "treatment.notes": "Observaciones",
   "treatment.plots_section": "Parcelas tratadas",
   "treatment.crop": "Cultivo",
@@ -85,8 +86,24 @@ export default {
     "La obligación es aplicable: {surface} ha de cultivos permanentes y tierras de cultivo, {irrigated} ha de regadío.",
   "advisory.duty_possibly_exempt":
     "Con {surface} ha de cultivos permanentes y tierras de cultivo y {irrigated} ha de regadío, la explotación podría estar exceptuada (RD 1051/2022 art. 4.1); compruébelo, la excepción tiene condiciones que la aplicación no conoce.",
-  "advisory.duty_undetermined":
-    "No se puede comprobar la excepción: {plots} parcela(s) sin uso SIGPAC o sin superficie.",
+  "advisory.duty_undetermined.one":
+    "No se puede comprobar la excepción: 1 parcela sin uso SIGPAC o sin superficie.",
+  "advisory.duty_undetermined.other":
+    "No se puede comprobar la excepción: {count} parcelas sin uso SIGPAC o sin superficie.",
+  "advisory.covers_missing_widths":
+    "Cubiertas sin anchuras anotadas (RD 1048/2022 art. 42.1.e y 43.1.b)",
+  "advisory.covers_missing_widths_hint":
+    "La anchura de la cubierta y la anchura libre de proyección de copa se anotan en un plazo posterior al de la fecha de establecimiento, así que la cubierta está bien registrada: lo que falta es esa segunda anotación.",
+  "advisory.inert_covers_established_late":
+    "Cubiertas inertes establecidas después del 15 de abril (RD 1048/2022 art. 43.1.a)",
+  "advisory.inert_covers_established_late_hint":
+    "El artículo fija el 15 de abril como fecha límite de establecimiento. El cuaderno registra lo ocurrido; si eso afecta a la ayuda es cosa aparte.",
+  "advisory.covers_missing_maintenance":
+    "Cubiertas vegetales sin mantenimiento anotado (RD 1048/2022 art. 42.1.c)",
+  "advisory.grazing_records_without_end":
+    "Pastoreos sin fecha de fin, con la campaña ya cerrada (RD 1048/2022 art. 30.2 ter)",
+  "advisory.grazing_records_without_end_hint":
+    "El plazo de un mes cuenta desde el fin del pastoreo, así que un registro abierto no va con retraso: simplemente el cuaderno no puede darlo por terminado.",
   "export.pdf_title": "Cuaderno imprimible (PDF)",
   "export.pdf_run": "Generar PDF…",
   "export.pdf_hint":
@@ -105,7 +122,8 @@ export default {
   "product.holder": "Titular / fabricante",
   "product.formulation": "Formulación",
   "product.phi_days": "Plazo de seguridad por defecto (días)",
-  "product.phi_detail": "plazo de seguridad {days} días",
+  "product.phi_detail.one": "plazo de seguridad 1 día",
+  "product.phi_detail.other": "plazo de seguridad {count} días",
   "product.auth_section": "Autorización",
   "product.auth_country": "País",
   "product.auth_number": "Nº de registro",
@@ -173,6 +191,13 @@ export default {
   "non_field.subject_postharvest": "Producto vegetal tratado",
   "non_field.subject_storage_premises": "Local tratado (tipo y direcci\u00f3n)",
   "non_field.subject_transport": "Veh\u00edculo tratado (tipo, modelo y matr\u00edcula)",
+  "non_field.premises": "Local o veh\u00edculo del cat\u00e1logo",
+  "non_field.premises_hint":
+    "Anexo III B.b pide identificar el local o medio de transporte tratado.",
+  "non_field.premises_none": "Sin registrar \u2014 describirlo aqu\u00ed",
+  "non_field.premises_composed": "Se anota a partir de la ficha del cat\u00e1logo.",
+  "non_field.premises_missing":
+    "A\u00fan no hay ninguno registrado; puede a\u00f1adirlo en el cat\u00e1logo:",
   "non_field.quantity_t": "Cantidad tratada (t)",
   "non_field.quantity_m3": "Volumen tratado (m\u00b3)",
   "non_field.advisor_hint": "Anexo III B.d: se indica el aplicador y, en su caso, el asesor.",
@@ -183,6 +208,10 @@ export default {
 
   // Registro 3.2: uso de semilla tratada.
   "seed.title": "Semilla tratada",
+  "seed.tab": "Semilla tratada",
+  "non_field.tab_postharvest": "Postcosecha",
+  "non_field.tab_storage_premises": "Locales",
+  "non_field.tab_transport": "Transporte",
   "seed.new": "Nueva siembra",
   "seed.sown_on": "Fecha de siembra",
   "seed.quantity": "Cantidad de semilla (kg)",
@@ -199,6 +228,13 @@ export default {
   "seed_treatment_kind.processing_centre": "Tratada en un centro de acondicionamiento",
   "seed_treatment_kind.purchased_es": "Adquirida tratada en Espa\u00f1a",
   "seed_treatment_kind.purchased_abroad": "Adquirida tratada fuera de Espa\u00f1a",
+  "seed.acquired_on": "Fecha de adquisici\u00f3n",
+  "seed.acquired_on_hint":
+    "Cu\u00e1ndo se compr\u00f3 la semilla. El modelo impreso no lo pide; se registra para poder exportar el cuaderno.",
+  "seed.sowing_link": "Siembra en la que se emple\u00f3",
+  "seed.sowing_link_hint":
+    "Enl\u00e1cela con el registro de siembra de la pesta\u00f1a Cultivos, si lo ha anotado.",
+  "seed.sowing_link_none": "Sin enlazar",
   "seed.plots_section": "Parcelas sembradas",
   "seed.surface": "Superficie sembrada (ha)",
   "seed.lot_detail": "lote {lot}",

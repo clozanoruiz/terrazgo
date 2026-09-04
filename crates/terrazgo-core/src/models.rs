@@ -54,7 +54,6 @@ pub struct Crop {
     /// GIP framework for this crop (model 2.1's per-row column). `None` lets
     /// the report fall back to what `production_system_code` implies.
     pub gip_system_code: Option<String>,
-    pub sown_on: Option<String>,
     /// FEGA PRODUCTOS catalogue code for the species, stored verbatim.
     /// `None` = free-text species with no catalogue match.
     pub crop_code: Option<String>,
@@ -148,6 +147,41 @@ pub struct Machinery {
     pub acquired_on: Option<String>,
     pub last_inspection_date: Option<String>,
     pub next_inspection_due_date: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// A place or vehicle on the holding that a treatment can be applied to:
+/// model 3.4's "local tratado" and model 3.5's "vehículo tratado".
+///
+/// A registry rather than free text because RD 1311/2012 Anexo III Parte I B.b
+/// requires the local or vehicle to be IDENTIFIED, and a description retyped
+/// per record identifies nothing (docs/data-model.md → the premises registry).
+#[derive(Debug, Clone, Serialize)]
+pub struct Premises {
+    pub id: String,
+    pub farm_id: String,
+    /// `building` | `vehicle`.
+    pub kind_code: String,
+    /// The farmer's own name for it, which is also what prints as the model's
+    /// "tipo".
+    pub name: String,
+    /// Buildings only (model 3.4's "dirección").
+    pub address: Option<String>,
+    /// Vehicles only (model 3.5's "modelo" and "matrícula").
+    pub vehicle_model: Option<String>,
+    pub plate: Option<String>,
+    /// FEGA's `EDIFICACIONES_INSTALACIONES` code, verbatim and unconstrained by
+    /// a foreign key. Never composed into a record's printed subject cell.
+    ///
+    /// A catalogue code and therefore country-neutral by construction (the
+    /// `crop.crop_code` precedent — which catalogue it speaks is configuration).
+    /// The Spanish REGISTRY identifiers live in `premises_es_extension`.
+    pub class_code: Option<String>,
+    /// Capacity. The volume actually TREATED is B.f's, and stays on the record.
+    pub volume_m3: Option<f64>,
+    pub notes: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -351,7 +385,6 @@ pub struct NewCrop {
     pub irrigation_code: Option<String>,
     pub growing_environment_code: Option<String>,
     pub gip_system_code: Option<String>,
-    pub sown_on: Option<String>,
     #[serde(default)]
     pub crop_code: Option<String>,
     /// Provenance; absent means `"user"`. The manual crop form never sends the
@@ -391,6 +424,50 @@ pub struct NewMachinery {
     /// Spanish registry numbers; an extension row is written when either is present.
     pub roma_number: Option<String>,
     pub reganip_number: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewPremises {
+    pub farm_id: String,
+    pub kind_code: String,
+    pub name: String,
+    pub address: Option<String>,
+    pub vehicle_model: Option<String>,
+    pub plate: Option<String>,
+    #[serde(default)]
+    pub class_code: Option<String>,
+    pub volume_m3: Option<f64>,
+    pub notes: Option<String>,
+    /// Spanish registry fields; an extension row is written when either is
+    /// present (the `NewMachinery` shape, flat rather than nested).
+    #[serde(default)]
+    pub cadastral_reference: Option<String>,
+    #[serde(default)]
+    pub rea_installation_code: Option<String>,
+}
+
+/// Full-row correction. Carries no `farm_id`: re-homing a premises would take
+/// every treatment that names it to another holding — the `plot.farm_id`
+/// precedent. `kind_code` IS correctable, because a mistyped kind is a typo
+/// like any other; the module refuses the change if a record of the wrong
+/// register already names it.
+#[derive(Debug, Deserialize)]
+pub struct UpdatePremises {
+    pub kind_code: String,
+    pub name: String,
+    pub address: Option<String>,
+    pub vehicle_model: Option<String>,
+    pub plate: Option<String>,
+    #[serde(default)]
+    pub class_code: Option<String>,
+    pub volume_m3: Option<f64>,
+    pub notes: Option<String>,
+    /// Spanish registry fields; an extension row is written when either is
+    /// present (the `NewMachinery` shape, flat rather than nested).
+    #[serde(default)]
+    pub cadastral_reference: Option<String>,
+    #[serde(default)]
+    pub rea_installation_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -597,7 +674,6 @@ pub struct UpdateCrop {
     pub irrigation_code: Option<String>,
     pub growing_environment_code: Option<String>,
     pub gip_system_code: Option<String>,
-    pub sown_on: Option<String>,
     #[serde(default)]
     pub crop_code: Option<String>,
     #[serde(default)]
@@ -652,6 +728,124 @@ pub struct UpdateMachinery {
 pub struct MachineryDetail {
     pub machinery: Machinery,
     pub es: Option<MachineryEsExtension>,
+}
+
+/// Spanish extension row for a premises. Logged to `record_change` as its own
+/// entity (`entity_id` = `premises_id`), like machinery's.
+///
+/// Both fields are what the SPANISH registries say about this building and are
+/// read off the same REA page. `rea_installation_code` is the authority's own
+/// key for an installation registered in REA — what
+/// `Edificaciones[].IdEdificacion` wants, and never ours to mint.
+#[derive(Debug, Clone, Serialize)]
+pub struct PremisesEsExtension {
+    pub premises_id: String,
+    pub cadastral_reference: Option<String>,
+    pub rea_installation_code: Option<String>,
+}
+
+/// A premises with its Spanish extension — the registry list and edit form in
+/// one round trip.
+#[derive(Debug, Clone, Serialize)]
+pub struct PremisesDetail {
+    pub premises: Premises,
+    pub es: Option<PremisesEsExtension>,
+}
+
+// ---------------------------------------------------------------------------
+// Sowing and planting (feeds model sections 9.2 and 9.3)
+// ---------------------------------------------------------------------------
+
+/// How a crop began. Harvest's mirror image, and in core for the same reason:
+/// the two bracket a crop, and crop planning, costs and analytics will want it.
+///
+/// Carries no eco-scheme practice code — core may not reference a module's
+/// lookup, and a sowing is a farm event under no decree in particular. What
+/// makes one evidence of RD 1048/2022 art. 45.2 is [`Self::flooded_on`].
+#[derive(Debug, Clone, Serialize)]
+pub struct SowingRecord {
+    pub id: String,
+    pub season_id: String,
+    pub farm_id: String,
+    /// `sowing` | `planting` — how the crop began, and SIEX
+    /// `SiembraPlantacion`'s required 1/0. The register's form is titled
+    /// "Siembra y plantación", so both are its documented use.
+    pub kind_code: String,
+    /// Model 9.3's "Fecha de siembra en seco", and the date 9.2's "Siembra"
+    /// column prints. `SiembraPlantacion.FechaInicio`.
+    pub sown_on: String,
+    /// `None` = one day's work, never "unknown".
+    pub sowing_end_date: Option<String>,
+    /// `FechaInundacion`; model 9.3's second column, and the marker that this
+    /// sowing is a cultivo bajo agua. `None` = not flooded (yet) — it is filled
+    /// by correction weeks after a dry sowing.
+    pub flooded_on: Option<String>,
+    /// `Cantidad`, kilograms of seed. Required by the twin, printed by no page
+    /// of section 9.
+    pub seed_quantity_kg: Option<f64>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// Which parcel was sown, with the crop frozen as it stood — `HarvestPlot`'s
+/// mirror, including the absence of a surface column.
+#[derive(Debug, Clone, Serialize)]
+pub struct SowingPlot {
+    pub id: String,
+    pub sowing_record_id: String,
+    pub plot_id: String,
+    pub crop_id: Option<String>,
+    pub crop_name_snapshot: Option<String>,
+    pub variety_snapshot: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SowingRecordDetail {
+    pub record: SowingRecord,
+    pub plots: Vec<SowingPlot>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewSowingRecord {
+    pub season_id: String,
+    pub farm_id: String,
+    pub kind_code: String,
+    pub sown_on: String,
+    #[serde(default)]
+    pub sowing_end_date: Option<String>,
+    #[serde(default)]
+    pub flooded_on: Option<String>,
+    #[serde(default)]
+    pub seed_quantity_kg: Option<f64>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub plots: Vec<NewSowingPlot>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NewSowingPlot {
+    pub plot_id: String,
+    #[serde(default)]
+    pub crop_id: Option<String>,
+}
+
+/// Full-row update, on the `UpdateHarvestRecord` terms: no `season_id` or
+/// `farm_id`, plots reconciled from the submitted state.
+#[derive(Debug, Deserialize)]
+pub struct UpdateSowingRecord {
+    pub kind_code: String,
+    pub sown_on: String,
+    #[serde(default)]
+    pub sowing_end_date: Option<String>,
+    #[serde(default)]
+    pub flooded_on: Option<String>,
+    #[serde(default)]
+    pub seed_quantity_kg: Option<f64>,
+    #[serde(default)]
+    pub notes: Option<String>,
+    pub plots: Vec<NewSowingPlot>,
 }
 
 // ---------------------------------------------------------------------------
@@ -773,4 +967,22 @@ pub struct UpdateHarvestRecord {
     #[serde(default)]
     pub notes: Option<String>,
     pub plots: Vec<NewHarvestPlot>,
+}
+
+/// Integer alias a regulatory export assigns to an activity record the first
+/// time it is exported (SIEX's `IdAjena*` keys are integers, our ids UUIDs).
+/// Never updated, never deleted: the alias is the edit/delete key on the
+/// authority's side, and the row's existence marks the record as previously
+/// exported. `split_key` discriminates when one record maps to several export
+/// entries (a multi-crop treatment splits into one `TratamFito` per crop);
+/// its value is serializer-defined, opaque here ('' for a 1:1 record).
+#[derive(Debug, Clone, Serialize)]
+pub struct ExportAlias {
+    pub id: String,
+    pub target: String,
+    pub entity_table: String,
+    pub entity_id: String,
+    pub split_key: String,
+    pub alias: i64,
+    pub created_at: String,
 }

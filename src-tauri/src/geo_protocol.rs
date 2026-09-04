@@ -80,10 +80,10 @@ fn serve(geo: &GeoState, path: &str) -> terrazgo_geo::Result<terrazgo_geo::fetch
             if parts.next().is_some() {
                 return Err(terrazgo_geo::GeoError::NotFound);
             }
-            terrazgo_geo::fetch::tile(&geo.conn, source, z, x, y)
+            terrazgo_geo::fetch::tile(&geo.cache, source, z, x, y)
         }
-        ["res", prefix, rest] => terrazgo_geo::fetch::resource(&geo.conn, prefix, rest),
-        ["res", prefix] => terrazgo_geo::fetch::resource(&geo.conn, prefix, ""),
+        ["res", prefix, rest] => terrazgo_geo::fetch::resource(&geo.cache, prefix, rest),
+        ["res", prefix] => terrazgo_geo::fetch::resource(&geo.cache, prefix, ""),
         _ => Err(terrazgo_geo::GeoError::NotFound),
     }
 }

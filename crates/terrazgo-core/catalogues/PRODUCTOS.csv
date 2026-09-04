@@ -264,7 +264,7 @@
 "263";"TOMILLO";"Thymus spp.";"1THYG";"THYMU_VUL";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";30/06/2023;23/06/2026;
 "264";"ALBAHACA";"Ocimum basilicum";"OCIBA";"OCIMU_BAS";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;
 "265";"MELISA O TORONJIL";"Melissa officinalis";"MLSOF";"MELIS_OFF";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;
-"266";"MENTA";"Mentha spp.";"1MENG";"MENTH_PIP";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"SI";30/06/2023;23/06/2026;
+"266";"MENTA";"Mentha × piperita L.";"MENPI";"MENTH_PIP";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"SI";30/06/2023;02/09/2026;
 "267";"ORÉGANO";"Origanum vulgare";"ORIVU";"ORIGA_VUL";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"SI";30/06/2023;23/06/2026;
 "268";"SALVIA";"Salvia officinalis";"SALOF";"SALVI_OFF";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";30/06/2023;23/06/2026;
 "269";"PERIFOLLO";"Anthriscus cerefolium";"ANRCE";"ANTHR_CER";"SI";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;
@@ -279,7 +279,7 @@
 "278";"FRUTOS DEL BOSQUE";;;;"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;
 "279";"ESPÁRRAGO";"Asparagus officinalis";"ASPOF";"ASPAR_OFF";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"SI";30/06/2023;23/06/2026;
 "280";"TRUFA";"Tuber spp. P. Micheli ex F.H. Wiggers";"1TUERG";;"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;
-"281";"LAVANDA";"Lavandula spp.";"1LAVG";"LAVAN";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";30/06/2023;23/06/2026;
+"281";"LAVANDA";"Lavandula angustifolia Mill.";"LAVAN";"LAVAN_ANG";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/09/2026;
 "282";"LAVANDÍN";"Lavandula x intermedia";"LAVIN";"LAVAN_INT";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"SI";30/06/2023;23/06/2026;
 "283";"ALCAPARRA";"Capparis spinosa";"CPPSP";"CAPPA_SPI";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;
 "284";"AJENJO";"Artemisia absinthium";"ARTAB";"ARTEM_ABS";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"SI";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"NO";"SI";30/06/2023;02/12/2025;

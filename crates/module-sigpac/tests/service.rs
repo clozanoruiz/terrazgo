@@ -8,22 +8,19 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::{
+    CAMPAIGNS, FITOSANITARIOS, NITRATOS, RECINFO, RECINFO_BY_POINT, RECINFO_NOT_FOUND, RED_NATURA,
+    app_db, seeded_cache,
+};
+
 use module_sigpac::service::{lookup_point, lookup_reference, verify_plot};
 use module_sigpac::storage::SOURCE;
 use rusqlite::Connection;
-use std::sync::Mutex;
 use terrazgo_core::models::{NewFarm, NewPlot, PlotEsFields};
 use terrazgo_core::repository::{insert_farm, insert_plot};
 use terrazgo_geo::GeoError;
-use terrazgo_geo::db::open_cache_in_memory;
-
-const RECINFO: &[u8] = include_bytes!("fixtures/recinfo.geojson");
-const RECINFO_NOT_FOUND: &[u8] = include_bytes!("fixtures/recinfo-notfound.geojson");
-const RECINFO_BY_POINT: &[u8] = include_bytes!("fixtures/recinfobypoint.geojson");
-const NITRATOS: &[u8] = include_bytes!("fixtures/intersection-nitratos.json");
-const FITOSANITARIOS: &[u8] = include_bytes!("fixtures/intersection-fitosanitarios.json");
-const RED_NATURA: &[u8] = include_bytes!("fixtures/intersection-red-natura.json");
-const CAMPAIGNS: &[u8] = include_bytes!("fixtures/geopackages-listing.html");
 
 const PALENCIA_KEY: &str = "sigpac/recinfo/34/10/0/0/604/5021/13";
 const PALENCIA_PATH: &str = "34/10/0/0/604/5021/13";
@@ -48,24 +45,6 @@ fn full_palencia_entries() -> Vec<(String, &'static [u8])> {
             RED_NATURA,
         ),
     ]
-}
-
-fn app_db() -> Connection {
-    terrazgo_core::db::open_in_memory().unwrap()
-}
-
-fn seeded_cache<K: AsRef<str>>(entries: &[(K, &[u8])]) -> Mutex<Connection> {
-    let cache = open_cache_in_memory().unwrap();
-    for (key, data) in entries {
-        cache
-            .execute(
-                "INSERT INTO resource (key, data, content_type, fetched_at)
-                 VALUES (?1, ?2, 'application/json', '2026-07-08T00:00:00Z')",
-                rusqlite::params![key.as_ref(), data],
-            )
-            .unwrap();
-    }
-    Mutex::new(cache)
 }
 
 /// Farm + plot carrying the fixture recinto's reference. `parts` lets tests

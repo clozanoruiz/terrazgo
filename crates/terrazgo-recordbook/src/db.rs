@@ -21,13 +21,20 @@ use rusqlite::Connection;
 use rusqlite_migration::Migrations;
 
 /// Core's migration steps followed by those of every module the book reads, in
-/// the shell's registration order. Kept in step with
-/// `src-tauri/src/registry.rs`; a contract test in that crate pins the two
-/// together by comparing the resulting schema.
+/// the shell's registration order. Kept in step with `src-tauri/src/registry.rs`
+/// by `the_record_book_composes_the_same_schema_the_shell_does` in that crate's
+/// `tests/migration_composition.rs`, which migrates a database each way and
+/// compares `sqlite_schema`.
+///
+/// That test is younger than this comment, which asserted it from 2026-08-07
+/// while nothing of the sort existed — a module forgotten here would have shown
+/// up as "no such table" in whichever seam first read it. Verified by breaking
+/// it when the third module joined.
 pub fn migrations() -> Migrations<'static> {
     let mut steps = terrazgo_core::migration_set();
     steps.extend(module_cue::migration_set());
     steps.extend(module_fertilisation::migration_set());
+    steps.extend(module_ecoscheme::migration_set());
     Migrations::new(steps)
 }
 
@@ -37,6 +44,8 @@ pub fn migrations() -> Migrations<'static> {
 pub fn open_in_memory() -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     conn.pragma_update(None, "foreign_keys", true)?;
+    // Tests run on the same connection configuration the app does.
+    terrazgo_core::db::harden(&conn)?;
     migrations()
         .to_latest(&mut conn)
         .map_err(|e| crate::error::RecordbookError::Internal(e.to_string()))?;

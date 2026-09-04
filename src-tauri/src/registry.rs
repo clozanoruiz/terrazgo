@@ -93,6 +93,24 @@ impl Module for SigpacModule {
     }
 }
 
+/// The eco-scheme module (grazing, cultural operations and soil covers —
+/// RD 1048/2022's annotation duties, the printed model's section 9).
+pub struct EcoschemeModule;
+
+impl Module for EcoschemeModule {
+    fn name(&self) -> &'static str {
+        "ecoscheme"
+    }
+
+    fn migrations(&self) -> Vec<M<'static>> {
+        module_ecoscheme::migration_set()
+    }
+
+    fn backup_shape(&self) -> &'static [TableShape] {
+        module_ecoscheme::BACKUP_SHAPE
+    }
+}
+
 /// Every module compiled into this build, in registration order.
 ///
 /// `Box<dyn Module>` is a trait object: the Vec holds modules of different
@@ -108,5 +126,10 @@ pub fn registered_modules() -> Vec<Box<dyn Module>> {
         Box::new(CueModule),
         Box::new(FertilisationModule),
         Box::new(SigpacModule),
+        // At the tail, per the rule above — not beside the other two record-book
+        // modules, however much it would read better there. SigpacModule
+        // contributes no migrations today, so the two placements are equivalent
+        // in effect; the rule exists so nobody has to verify that each time.
+        Box::new(EcoschemeModule),
     ]
 }

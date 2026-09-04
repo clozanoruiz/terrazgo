@@ -8,7 +8,7 @@
 //! Split out of `commands.rs` (2026-08-13); the boundary machinery and the
 //! re-exports stay in the parent file.
 
-use super::{CmdResult, active_actor, lock_conn};
+use super::{CmdResult, active_actor};
 use crate::state;
 use crate::state::AppState;
 use tauri::State;
@@ -22,16 +22,18 @@ use terrazgo_core::models::Lookup;
 
 #[tauri::command]
 pub fn list_irrigation_methods(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_irrigation_methods(
-        &conn,
+        conn,
     )?)
 }
 
 #[tauri::command]
 pub fn list_water_origins(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_fertilisation::repository::list_water_origins(&conn)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_fertilisation::repository::list_water_origins(conn)?)
 }
 
 #[tauri::command]
@@ -40,9 +42,10 @@ pub fn list_irrigation_records(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<module_fertilisation::models::IrrigationRecordDetail>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_irrigation_records(
-        &conn, &season_id, &farm_id,
+        conn, &season_id, &farm_id,
     )?)
 }
 
@@ -53,9 +56,10 @@ pub fn create_irrigation_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::IrrigationRecordDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(module_fertilisation::repository::insert_irrigation_record(
-        &mut conn,
+        conn,
         record,
         actor.as_deref(),
     )?)
@@ -69,9 +73,10 @@ pub fn update_irrigation_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::IrrigationRecordDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(module_fertilisation::repository::update_irrigation_record(
-        &mut conn,
+        conn,
         &irrigation_record_id,
         update,
         actor.as_deref(),
@@ -85,9 +90,10 @@ pub fn delete_irrigation_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     module_fertilisation::repository::soft_delete_irrigation_record(
-        &mut conn,
+        conn,
         &irrigation_record_id,
         actor.as_deref(),
     )?;
@@ -105,18 +111,22 @@ pub fn delete_irrigation_record(
 /// "(F)/(AF)/(AC)" list: fertigation is a method, not a type.
 #[tauri::command]
 pub fn list_fertilisation_types(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_fertilisation_types(
-        &conn,
+        conn,
     )?)
 }
 
 /// Anexo III C.f — how it was applied, fertigation included.
 #[tauri::command]
-pub fn list_application_methods(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
+pub fn list_application_methods(
+    state: State<'_, AppState>,
+) -> CmdResult<Vec<module_fertilisation::models::ApplicationMethod>> {
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_application_methods(
-        &conn,
+        conn,
     )?)
 }
 
@@ -124,19 +134,19 @@ pub fn list_application_methods(state: State<'_, AppState>) -> CmdResult<Vec<Loo
 /// so it fills a field on the registry form.
 #[tauri::command]
 pub fn list_manure_treatments(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_manure_treatments(
-        &conn,
+        conn,
     )?)
 }
 
 /// Which of the three FEGA nutrient catalogues a composition line indexes.
 #[tauri::command]
 pub fn list_nutrient_kinds(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_fertilisation::repository::list_nutrient_kinds(
-        &conn,
-    )?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_fertilisation::repository::list_nutrient_kinds(conn)?)
 }
 
 /// Anexo III C.d's first level: the kind of material (FEGA `MAT_FERTI`).
@@ -145,9 +155,10 @@ pub fn list_fertiliser_material_kinds(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<module_fertilisation::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::catalogue::fertiliser_materials(
-        &conn,
+        conn,
         &country_code,
     )?)
 }
@@ -161,10 +172,11 @@ pub fn list_fertiliser_material_details(
     country_code: String,
     material_code: Option<String>,
 ) -> CmdResult<Vec<module_fertilisation::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(
         module_fertilisation::catalogue::fertiliser_material_details(
-            &conn,
+            conn,
             &country_code,
             material_code.as_deref(),
         )?,
@@ -185,9 +197,10 @@ pub fn fertiliser_material_composition(
     country_code: String,
     detail_code: String,
 ) -> CmdResult<Vec<module_fertilisation::catalogue::CompositionLine>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::catalogue::material_composition(
-        &conn,
+        conn,
         &country_code,
         &detail_code,
     )?)
@@ -202,9 +215,10 @@ pub fn list_nutrient_codes(
     country_code: String,
     kind_code: String,
 ) -> CmdResult<Vec<module_fertilisation::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::catalogue::nutrients(
-        &conn,
+        conn,
         &country_code,
         &kind_code,
     )?)
@@ -218,9 +232,10 @@ pub fn list_fertilisation_practices(
     state: State<'_, AppState>,
     country_code: String,
 ) -> CmdResult<Vec<module_fertilisation::catalogue::CataloguePick>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::catalogue::fertilisation_practices(
-        &conn,
+        conn,
         &country_code,
     )?)
 }
@@ -229,9 +244,10 @@ pub fn list_fertilisation_practices(
 pub fn list_fertiliser_materials(
     state: State<'_, AppState>,
 ) -> CmdResult<Vec<module_fertilisation::models::FertiliserMaterialDetail>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_fertiliser_materials(
-        &conn,
+        conn,
     )?)
 }
 
@@ -242,10 +258,11 @@ pub fn create_fertiliser_material(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::FertiliserMaterialDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(
         module_fertilisation::repository::insert_fertiliser_material(
-            &mut conn,
+            conn,
             material,
             actor.as_deref(),
         )?,
@@ -260,10 +277,11 @@ pub fn update_fertiliser_material(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::FertiliserMaterialDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(
         module_fertilisation::repository::update_fertiliser_material(
-            &mut conn,
+            conn,
             &material_id,
             update,
             actor.as_deref(),
@@ -278,9 +296,10 @@ pub fn delete_fertiliser_material(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     module_fertilisation::repository::soft_delete_fertiliser_material(
-        &mut conn,
+        conn,
         &material_id,
         actor.as_deref(),
     )?;
@@ -293,8 +312,9 @@ pub fn list_fertilisation_records(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<module_fertilisation::models::FertilisationRecordDetail>> {
-    let conn = lock_conn(&state)?;
-    Ok(module_fertilisation::repository::list_fertilisation_records(&conn, &season_id, &farm_id)?)
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_fertilisation::repository::list_fertilisation_records(conn, &season_id, &farm_id)?)
 }
 
 #[tauri::command]
@@ -304,10 +324,11 @@ pub fn create_fertilisation_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::FertilisationRecordDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(
         module_fertilisation::repository::insert_fertilisation_record(
-            &mut conn,
+            conn,
             record,
             actor.as_deref(),
         )?,
@@ -322,10 +343,11 @@ pub fn update_fertilisation_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::FertilisationRecordDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(
         module_fertilisation::repository::update_fertilisation_record(
-            &mut conn,
+            conn,
             &fertilisation_record_id,
             update,
             actor.as_deref(),
@@ -340,9 +362,10 @@ pub fn delete_fertilisation_record(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     module_fertilisation::repository::soft_delete_fertilisation_record(
-        &mut conn,
+        conn,
         &fertilisation_record_id,
         actor.as_deref(),
     )?;
@@ -361,9 +384,10 @@ pub fn list_fertilisation_plans(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<Vec<module_fertilisation::models::FertilisationPlanDetail>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_fertilisation::repository::list_fertilisation_plans(
-        &conn, &season_id, &farm_id,
+        conn, &season_id, &farm_id,
     )?)
 }
 
@@ -374,9 +398,10 @@ pub fn create_fertilisation_plan(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::FertilisationPlanDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(module_fertilisation::repository::insert_fertilisation_plan(
-        &mut conn,
+        conn,
         plan,
         actor.as_deref(),
     )?)
@@ -390,9 +415,10 @@ pub fn update_fertilisation_plan(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<module_fertilisation::models::FertilisationPlanDetail> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     Ok(module_fertilisation::repository::update_fertilisation_plan(
-        &mut conn,
+        conn,
         &plan_id,
         update,
         actor.as_deref(),
@@ -406,9 +432,10 @@ pub fn delete_fertilisation_plan(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
     module_fertilisation::repository::soft_delete_fertilisation_plan(
-        &mut conn,
+        conn,
         &plan_id,
         actor.as_deref(),
     )?;

@@ -6,10 +6,13 @@
   // layer panel (data-driven from mapLayers.js, ready for future module
   // layers), plot panel with the draw / import / delete boundary workflows.
   // Deep-linkable: #/map?farm=<id>&plot=<id> (FarmView's "open in map").
+  import TzTooltip from "./TzTooltip.svelte";
+  import { LandPlot, X } from "@lucide/svelte";
   import { t, tCode } from "../i18n.js";
   import { confirmDialog, errorText, invoke } from "./backend.js";
+  import TzCheckbox from "./TzCheckbox.svelte";
   import MapCanvas from "./MapCanvas.svelte";
-  import { MAP_LAYERS, mapPalette } from "./mapLayers.js";
+  import { MAP_LAYERS, m2ToHa, mapPalette } from "./mapLayers.js";
   import { notify, run } from "./notifications.svelte.js";
   import TzSelect from "./TzSelect.svelte";
   import { nameItems } from "./selectItems.js";
@@ -258,6 +261,10 @@
   // Live tracking: fixes stream over a Tauri channel into the canvas marker.
   // The camera follows only the FIRST fix — after that the dot moves and the
   // user pans freely (fighting their pan on every fix would be hostile).
+  //
+  // MapLibre ships a GeolocateControl that would do much of this; it is not
+  // used because it reads `navigator.geolocation`, a second permission path
+  // outside the plugin and outside the Tauri ACL.
   async function startTracking() {
     try {
       if (!(await ensureLocationPermission())) return;
@@ -329,8 +336,7 @@
     };
   }
 
-  async function afterPlotCreated(plotId, name) {
-    notify(t("message.plot_saved", { name }));
+  async function afterPlotCreated(plotId) {
     await reloadPlots();
     refreshToken += 1;
     selectedPlotId = plotId;
@@ -362,7 +368,7 @@
       const verified = await invoke("sigpac_verify_plot", { plotId: plot.id, refresh: false });
       if (verified?.zone_check_error) notify(t("plot.zones_unchecked"), true);
       sigpacResult = null;
-      await afterPlotCreated(plot.id, name);
+      await afterPlotCreated(plot.id);
     });
   }
 
@@ -408,16 +414,18 @@
         path: importPath,
         entryId: entry.id,
       });
-      // SIGPAC GPKGs carry dn_surface in m²; suggest it as hectares.
+      // SIGPAC GPKGs carry dn_surface in m²; suggest it as hectares, through
+      // the same conversion the map's inspect panel uses so the figure offered
+      // here and the figure shown there cannot disagree.
       const surface = Number(entry.properties?.dn_surface);
-      const areaHa = Number.isFinite(surface) ? Math.round(surface / 100) / 100 : null;
+      const areaHa = Number.isFinite(surface) ? m2ToHa(surface) : null;
       const name = `SIGPAC ${parts[4]}-${parts[5]}-${parts[6]}`;
       const plot = await invoke("create_plot", {
         plot: { farm_id: farmId, name, area_ha: areaHa, es: esFieldsFromParts(parts) },
       });
       await invoke("save_plot_boundary", { plotId: plot.id, geometry, source: "import" });
       cancelImport();
-      await afterPlotCreated(plot.id, name);
+      await afterPlotCreated(plot.id);
     });
   }
 
@@ -447,14 +455,11 @@
     />
     <div class="map-layer-toggles" role="group" aria-label={t("map.layers")}>
       {#each MAP_LAYERS as layer (layer.id)}
-        <label>
-          <input
-            type="checkbox"
-            checked={visibleLayers.includes(layer.id)}
-            onchange={() => toggleLayer(layer.id)}
-          />
-          {t(layer.labelKey)}
-        </label>
+        <TzCheckbox
+          label={t(layer.labelKey)}
+          checked={visibleLayers.includes(layer.id)}
+          onchange={() => toggleLayer(layer.id)}
+        />
       {/each}
     </div>
     {#if gpsAvailable}
@@ -517,7 +522,7 @@
             <div class="map-inspect-head">
               <h4>{t("map.inspect.title")}</h4>
               <button type="button" class="btn-cancel" onclick={() => (inspectGroups = null)}>
-                ✕
+                <X />
               </button>
             </div>
             {#each inspectGroups as group (group.layerId)}
@@ -550,7 +555,11 @@
               >
                 {plot.name}
                 {#if (plotFeatures.plots?.features ?? []).some((f) => f.properties.plotId === plot.id)}
-                  <span class="has-boundary" title={t("map.has_boundary")}>▰</span>
+                  <TzTooltip label={t("map.has_boundary")}>
+                    {#snippet trigger(props)}
+                      <span {...props} class="has-boundary"><LandPlot /></span>
+                    {/snippet}
+                  </TzTooltip>
                 {/if}
               </button>
             </li>
@@ -655,27 +664,45 @@
             bind:value={importFilter}
           />
         {/if}
-        <ul class="card-list">
-          {#each filteredImportEntries.slice(0, 200) as entry (entry.id)}
-            <li class="card">
-              <strong>{entry.name ?? entry.id}</strong>
-              <span class="detail">{entrySummary(entry)}</span>
-              {#if selectedPlot}
-                <button type="button" onclick={() => importEntry(entry)}>
-                  {t("map.import_use")}
-                </button>
-              {/if}
-              {#if selectedFarm?.country_code === "es" && sigpacPartsFromProps(entry.properties)}
-                <button type="button" onclick={() => importEntryAsPlot(entry)}>
-                  {t("map.sigpac_create")}
-                </button>
-              {/if}
-            </li>
-          {/each}
-        </ul>
+        <!-- `rows-static`: a file entry is not a record with a page of its
+             own, and what there is to do with one — bring it in as this plot's
+             boundary, or make a plot out of it — is the whole of the row.
+             A table because the file can hold thousands of recintos, and the
+             one thing a reader does here is scan a column for the right one. -->
+        <div class="table-wrap">
+          <table class="data-table rows-static">
+            <thead>
+              <tr>
+                <th>{t("column.name")}</th>
+                <th>{t("column.detail")}</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each filteredImportEntries.slice(0, 200) as entry (entry.id)}
+                <tr>
+                  <td class="col-name">{entry.name ?? entry.id}</td>
+                  <td class="col-muted">{entrySummary(entry)}</td>
+                  <td class="col-actions">
+                    {#if selectedPlot}
+                      <button type="button" onclick={() => importEntry(entry)}>
+                        {t("map.import_use")}
+                      </button>
+                    {/if}
+                    {#if selectedFarm?.country_code === "es" && sigpacPartsFromProps(entry.properties)}
+                      <button type="button" onclick={() => importEntryAsPlot(entry)}>
+                        {t("map.sigpac_create")}
+                      </button>
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
         {#if filteredImportEntries.length > 200}
           <p class="detail">
-            {t("map.import_more", { count: filteredImportEntries.length - 200 })}
+            {t("map.import_more", { n: filteredImportEntries.length - 200 })}
           </p>
         {/if}
       </div>
@@ -687,7 +714,12 @@
   .map-view {
     display: flex;
     flex-direction: column;
-    gap: 0.9rem;
+    gap: var(--space-3);
+    /* The map is the one view that fills its frame rather than scrolling: on
+       wide screens <main> is a flex column that does not scroll, so the view
+       claims what is left of it. min-height:0 is what allows the workspace
+       below to shrink instead of pushing the frame open. */
+    min-height: 0;
   }
   .map-toolbar {
     display: flex;
@@ -699,11 +731,6 @@
     display: flex;
     flex-wrap: wrap;
     gap: 0.35rem 0.9rem;
-  }
-  .map-layer-toggles label {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
   }
   .map-track-toggle[aria-pressed="true"] {
     outline: 2px solid var(--primary);
@@ -729,10 +756,13 @@
   }
   .map-workspace {
     display: flex;
-    gap: 0.9rem;
-    /* Fill the viewport under the toolbar/head; the tabbar media query
-       below reserves space on narrow screens. */
-    height: calc(100dvh - 12rem);
+    gap: var(--space-3);
+    /* Fills whatever the view frame leaves under the toolbar and legend. This
+       used to be `height: calc(100dvh - 12rem)`, which encoded the shell's
+       padding as a magic number and went wrong the moment that padding moved;
+       the narrow-screen override below still reserves room for the tab bar,
+       where <main> is a document scroller and there is no frame to fill. */
+    flex: 1;
     min-height: 22rem;
   }
   .map-area {
@@ -793,6 +823,19 @@
   .map-inspect-head button {
     padding: 0 0.4rem;
   }
+  .map-inspect-head button :global(svg) {
+    width: 1rem;
+    height: 1rem;
+    display: block;
+  }
+  /* The marker beside a plot that has a boundary drawn. It sits inside the
+     plot's own button, so it takes the button's colour and rides the text
+     baseline rather than sitting above it. */
+  .has-boundary :global(svg) {
+    width: 0.85rem;
+    height: 0.85rem;
+    vertical-align: -0.1em;
+  }
   .map-inspect-rows {
     list-style: none;
     margin: 0 0 0.4rem;
@@ -835,6 +878,9 @@
   @media (max-width: 700px) {
     .map-workspace {
       flex-direction: column;
+      /* No frame to fill here — <main> is the document scroller, so the
+         workspace sizes to its own content instead of claiming free space. */
+      flex: none;
       height: auto;
     }
     .map-area {

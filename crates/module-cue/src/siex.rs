@@ -260,6 +260,88 @@ pub fn unit_to_siex(code: &str) -> Option<(i64, f64)> {
     }
 }
 
+/// SIEX `Unidad` code for a unit of AMOUNT — how much was used or how much was
+/// treated — as against [`unit_to_siex`]'s rates and concentrations.
+///
+/// Every one of ours is in UNIDADES_MEDIDA verbatim, so unlike the dose units
+/// there is no conversion factor to carry: kg is kg. A `dose_rate` code has no
+/// answer here and vice versa, which is what keeps a rate out of a field that
+/// asks for a quantity.
+pub fn quantity_unit_to_siex(code: &str) -> Option<i64> {
+    match code {
+        "m2" => Some(1),
+        "m3" => Some(3),
+        "l" => Some(4),
+        "kg" => Some(5),
+        "t" => Some(6),
+        _ => None,
+    }
+}
+
+/// SIEX `OtrasActuacionesFito.Unidad` code for the INTENSITY of a non-chemical
+/// measure — the official model's "Intensidad de la medida (Nº de trampas, nº
+/// de difusores, etc.)".
+///
+/// A third list beside [`unit_to_siex`]'s rates and [`quantity_unit_to_siex`]'s
+/// amounts, because a count is neither: every one of ours is in
+/// `UNIDADES_MEDIDA` verbatim, so there is no factor to carry, and a dose code
+/// has no answer here or vice versa.
+///
+/// **The count's own unit is sent, not the generic one.** Anexo V's field 18
+/// narrows the "unidades válidas" per measure kind to Unidades, uds./m², uds./ha,
+/// m², m² malla/ha, kg and kg/ha — a list that omits Trampas and Difusores even
+/// though the catalogue publishes both and the JSON Schema asks only that the
+/// code be in the catalogue. Answering "12 trampas" with code 11 (Unidades)
+/// would drop *what was counted*, which is the one thing the model asks for by
+/// name; so the exact code goes out and the narrowing is left to the receiver.
+pub fn intensity_unit_to_siex(code: &str) -> Option<i64> {
+    match code {
+        "traps" => Some(27),        // Trampas
+        "traps_ha" => Some(24),     // Trampas/ha
+        "diffusers" => Some(25),    // Difusores
+        "diffusers_ha" => Some(22), // Difusores/ha
+        "units" => Some(11),        // Unidades
+        "units_ha" => Some(16),     // Unidades/ha
+        _ => None,
+    }
+}
+
+/// Whether `TIPO_MEDIDA_FITOSANITARIA` code `measure` is one the authority
+/// demands an MDF registration number for.
+///
+/// Anexo V field 19 grades `Registro MDF` **Obligatorio** and scopes it: *"Solo
+/// se muestra en caso en que la alternativa no química sea: suelta de OCB,
+/// trampas y otros y feromonas y atrayentes para monitoreo"* — codes 1, 14 and
+/// 15. The Anexo VI descriptor sheet names a *different* set (OCB, plantas
+/// banker, trampas cromotrópicas) and no decree names the field at all, RD
+/// 1311/2012 Anexo III Parte I B having no non-chemical member of any kind. So
+/// this reads Anexo V, which is the definition-of-variables document and the
+/// one published as a corrección de errores (docs/siex-export.md → "Seam 5").
+///
+/// Only the *demand* is enforced. Anexo V's other half — "en caso contrario el
+/// campo debe ir vacío" — is not, because the two documents disagree about which
+/// kinds are in scope and honouring either would silently discard a number the
+/// farmer recorded.
+pub fn measure_requires_mdf_number(measure: i64) -> bool {
+    matches!(measure, 1 | 14 | 15)
+}
+
+/// A stored mass converted to kilograms, for the fields SIEX fixes the unit of
+/// instead of carrying one.
+///
+/// `TratamientosPostCosecha.Cantidad` is the case: Anexo V defines it as "peso
+/// en kg del producto vegetal tratado" with "UNIDADES VÁLIDAS: kg" and the
+/// block has no unit member — while the printed model asks for tonnes, which is
+/// what the register stores. Emitting the stored number unconverted would
+/// understate a 120 t lot as 120 kg.
+pub fn mass_in_kg(value: f64, unit_code: &str) -> Option<f64> {
+    match unit_code {
+        "kg" => Some(value),
+        "t" => Some(value * 1000.0),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

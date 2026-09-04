@@ -39,7 +39,8 @@ export default {
   "map.drawing_hint": "Click the map to add points; click the first point to finish.",
   "map.draw_cancel": "Cancel drawing",
   "map.import": "Import from file…",
-  "map.import_pick": "Choose a boundary ({count} found)",
+  "map.import_pick.one": "Choose a boundary (1 found)",
+  "map.import_pick.other": "Choose a boundary ({count} found)",
   "map.import_filter": "Filter by name or attributes…",
   "map.import_use": "Use",
   "map.sigpac_pick": "Find SIGPAC parcel",
@@ -52,7 +53,7 @@ export default {
   "map.track_stop": "Stop following",
   "map.sigpac_attach": "Store boundary on {plot}",
   "map.sigpac_create": "Create plot from this parcel",
-  "map.import_more": "…and {count} more — narrow the filter.",
+  "map.import_more": "…and {n} more — narrow the filter.",
   "map.boundaries": "Stored boundaries",
   "map.no_boundary": "No boundary stored yet.",
   "map.delete_boundary": "Remove",
@@ -65,4 +66,6 @@ export default {
   "map.base_ortho": "Ortho",
   "map.basemap_unavailable":
     "Base map unavailable offline (not cached yet) — boundaries still shown.",
+  "map.engine_unavailable": "The map could not be loaded. Restart the app to try again.",
+  "map.drawing_unavailable": "The drawing tool could not be loaded. Restart the app to try again.",
 };

@@ -17,6 +17,7 @@ use crate::siex;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
 use std::collections::HashSet;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 /// The chemical half of an actuation, resolved as a unit. It exists so the
@@ -383,6 +384,7 @@ pub fn insert_treatment_record(
         application_date: new.application_date.clone(),
         application_end_date: new.application_end_date.clone(),
         application_time: new.application_time,
+        drying_date: new.drying_date,
         product_id: new.product_id.clone(),
         country_code,
         dose_value: chemical.as_ref().map(|c| c.dose_value),
@@ -430,7 +432,7 @@ pub fn insert_treatment_record(
     tx.execute(
         "INSERT INTO treatment_record (
             id, season_id, farm_id, application_date, application_end_date, application_time,
-            product_id, country_code,
+            drying_date, product_id, country_code,
             dose_value, dose_unit_code, total_quantity_value, total_quantity_unit_code,
             target_organism, efficacy_code, operator_id, machinery_id,
             advisor_id, advisor_name_snapshot, advisor_registration_snapshot,
@@ -442,7 +444,7 @@ pub fn insert_treatment_record(
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-            ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35
+            ?28, ?29, ?30, ?31, ?32, ?33, ?34, ?35, ?36
          )",
         params![
             record.id,
@@ -451,6 +453,7 @@ pub fn insert_treatment_record(
             record.application_date,
             record.application_end_date,
             record.application_time,
+            record.drying_date,
             record.product_id,
             record.country_code,
             record.dose_value,
@@ -587,6 +590,7 @@ pub fn update_treatment_record(
     after.application_date = update.application_date;
     after.application_end_date = update.application_end_date;
     after.application_time = update.application_time;
+    after.drying_date = update.drying_date;
     after.total_quantity_value = update.total_quantity_value;
     after.total_quantity_unit_code = update.total_quantity_unit_code;
     after.target_organism = update.target_organism;
@@ -707,7 +711,7 @@ pub fn update_treatment_record(
             active_substances_snapshot = ?23, operator_name_snapshot = ?24,
             operator_licence_snapshot = ?25, machinery_roma_snapshot = ?26,
             machinery_reganip_snapshot = ?27, notes = ?28, updated_at = ?29,
-            application_time = ?30
+            application_time = ?30, drying_date = ?31
          WHERE id = ?1",
         params![
             id,
@@ -739,7 +743,8 @@ pub fn update_treatment_record(
             after.machinery_reganip_snapshot,
             after.notes,
             after.updated_at,
-            after.application_time
+            after.application_time,
+            after.drying_date
         ],
     )?;
     log_update(
@@ -1066,6 +1071,55 @@ fn with_details(conn: &Connection, record: TreatmentRecord) -> Result<TreatmentR
     })
 }
 
+/// [`with_details`] for a whole list, in three child statements rather than
+/// three per record.
+///
+/// The single-record path above keeps its point queries: there is nothing to
+/// hoist, and a `WHERE id = ?` is already the cheapest thing the database can
+/// do. This one exists because a season is read as a whole — by the list view,
+/// by the book and by the exporter — and 400 records used to mean 1 200
+/// statements.
+fn all_with_details(
+    conn: &Connection,
+    records: Vec<TreatmentRecord>,
+) -> Result<Vec<TreatmentRecordWithPlots>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut plots = children_by_parent(
+        conn,
+        "SELECT * FROM treatment_plot WHERE treatment_record_id IN ({ids})
+         ORDER BY treatment_record_id, id",
+        &ids,
+        map_treatment_plot,
+        |p| p.treatment_record_id.clone(),
+    )?;
+    let mut problems = children_by_parent(
+        conn,
+        "SELECT * FROM treatment_problem WHERE treatment_record_id IN ({ids})
+         ORDER BY treatment_record_id, id",
+        &ids,
+        map_treatment_problem,
+        |p| p.treatment_record_id.clone(),
+    )?;
+    let mut justifications = children_by_parent(
+        conn,
+        "SELECT * FROM treatment_justification WHERE treatment_record_id IN ({ids})
+         ORDER BY treatment_record_id, id",
+        &ids,
+        map_treatment_justification,
+        |j| j.treatment_record_id.clone(),
+    )?;
+
+    Ok(records
+        .into_iter()
+        .map(|record| TreatmentRecordWithPlots {
+            plots: plots.remove(&record.id).unwrap_or_default(),
+            problems: problems.remove(&record.id).unwrap_or_default(),
+            justifications: justifications.remove(&record.id).unwrap_or_default(),
+            record,
+        })
+        .collect())
+}
+
 /// Active treatment records of one farm in one season, newest application
 /// first, each with its treated plots — the record-book list view.
 pub fn list_treatment_records(
@@ -1081,17 +1135,19 @@ pub fn list_treatment_records(
     let records = stmt
         .query_map(params![season_id, farm_id], map_treatment_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| with_details(conn, record))
-        .collect()
+    all_with_details(conn, records)
 }
 
 /// Every record of one farm+season in application order, soft-deleted ones
 /// INCLUDED — the SIEX exporter emits deletion entries (`Borrar`) for records
 /// that were exported before being deleted, so it must see them. Everything
 /// else reads through `list_treatment_records`, which filters them out.
-pub(crate) fn list_treatment_records_for_export(
+///
+/// `pub` since 2026-08-20, when the exporter moved to `terrazgo-siex`; it was
+/// crate-visible while that caller lived here. The name still states the one
+/// legitimate use, because a caller that is not building an export and reads
+/// deleted rows is almost certainly making a mistake.
+pub fn list_treatment_records_for_export(
     conn: &Connection,
     season_id: &str,
     farm_id: &str,
@@ -1104,10 +1160,7 @@ pub(crate) fn list_treatment_records_for_export(
     let records = stmt
         .query_map(params![season_id, farm_id], map_treatment_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| with_details(conn, record))
-        .collect()
+    all_with_details(conn, records)
 }
 
 fn plots_of(conn: &Connection, treatment_record_id: &str) -> Result<Vec<TreatmentPlot>> {
@@ -1123,16 +1176,18 @@ fn problems_of(conn: &Connection, treatment_record_id: &str) -> Result<Vec<Treat
     let mut stmt =
         conn.prepare("SELECT * FROM treatment_problem WHERE treatment_record_id = ?1 ORDER BY id")?;
     let problems = stmt
-        .query_map([treatment_record_id], |row| {
-            Ok(TreatmentProblem {
-                id: row.get("id")?,
-                treatment_record_id: row.get("treatment_record_id")?,
-                reason_category_code: row.get("reason_category_code")?,
-                problem_code: row.get("problem_code")?,
-            })
-        })?
+        .query_map([treatment_record_id], map_treatment_problem)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(problems)
+}
+
+fn map_treatment_problem(row: &Row) -> rusqlite::Result<TreatmentProblem> {
+    Ok(TreatmentProblem {
+        id: row.get("id")?,
+        treatment_record_id: row.get("treatment_record_id")?,
+        reason_category_code: row.get("reason_category_code")?,
+        problem_code: row.get("problem_code")?,
+    })
 }
 
 fn justifications_of(
@@ -1143,15 +1198,17 @@ fn justifications_of(
         "SELECT * FROM treatment_justification WHERE treatment_record_id = ?1 ORDER BY id",
     )?;
     let justifications = stmt
-        .query_map([treatment_record_id], |row| {
-            Ok(TreatmentJustification {
-                id: row.get("id")?,
-                treatment_record_id: row.get("treatment_record_id")?,
-                justification_code: row.get("justification_code")?,
-            })
-        })?
+        .query_map([treatment_record_id], map_treatment_justification)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(justifications)
+}
+
+fn map_treatment_justification(row: &Row) -> rusqlite::Result<TreatmentJustification> {
+    Ok(TreatmentJustification {
+        id: row.get("id")?,
+        treatment_record_id: row.get("treatment_record_id")?,
+        justification_code: row.get("justification_code")?,
+    })
 }
 
 /// The one edit a stored treatment record allows: recording (or correcting)
@@ -1216,28 +1273,98 @@ pub(super) fn validate_problem_code(
     }
 }
 
-/// Per-plot PHI standing across one farm's active treatment records, every
-/// season included — the PHI binds the plot physically, not the campaign the
-/// record was filed under. Plots with no active treatments (or soft-deleted
-/// plots) are absent. Window rule per `alerts::phi_window_is_active`:
-/// `[application_date, phi_end_date)`, the end date being the first day
-/// harvest is allowed again.
+/// How far back the map's PHI tint keeps looking by default. A window that
+/// closed longer ago than the horizon stops tinting its plot.
+///
+/// **Not a regulatory figure**: no decree says when a past treatment stops
+/// being worth showing, and the plazo de seguridad itself is unaffected — this
+/// bounds a *display*, not a duty.
+///
+/// The alternative was no horizon at all, which is what this replaced. "Treated
+/// at some point and currently clear" is true of every plot on a holding that
+/// has been farmed for a decade, so the green tint was on its way to meaning
+/// nothing while costing a scan of the whole record book to compute.
+///
+/// Private since 2026-08-26, when the horizon became a device setting. Reach it
+/// through [`default_phi_horizon_days`] — a caller that grabbed the constant
+/// would compile and silently ignore the farmer's choice, which is the same
+/// trap `AlertConfig` closed by dropping its `Default`.
+const PHI_RECENT_DAYS: i64 = 90;
+
+/// Shortest and longest horizon a user may choose.
+///
+/// The ceiling is load-bearing, not decoration: the horizon IS the `WHERE`
+/// clause that keeps the tint from reading the whole record book, so the
+/// query-scope guarantee is "bounded", not "bounded at 90". Two campaigns is
+/// past any plausible "let me see last season too" while still leaving the
+/// read a small fraction of a decade's history. Below a week the tint would
+/// forget a treatment before its own plazo de seguridad ended.
+pub const MIN_PHI_HORIZON_DAYS: i64 = 7;
+pub const MAX_PHI_HORIZON_DAYS: i64 = 730;
+
+/// module-cue's own horizon. **The shell must not call this** — it resolves
+/// from device settings via [`phi_horizon_days`]; this exists so the settings
+/// UI can label an unset field, and so tests have a value to pass.
+pub fn default_phi_horizon_days() -> i64 {
+    PHI_RECENT_DAYS
+}
+
+/// Resolve the horizon from a device setting, `None` following the default.
+pub fn phi_horizon_days(setting: Option<i64>) -> i64 {
+    setting.unwrap_or(PHI_RECENT_DAYS)
+}
+
+/// Range-check a user-supplied horizon — the rule's owner owns its validation.
+pub fn validate_phi_horizon_days(days: i64) -> Result<()> {
+    if !(MIN_PHI_HORIZON_DAYS..=MAX_PHI_HORIZON_DAYS).contains(&days) {
+        return Err(CueError::Invalid("phi_horizon_out_of_range"));
+    }
+    Ok(())
+}
+
+/// Per-plot PHI standing across one farm's RECENT treatment records — the map's
+/// tint. Two states reach the caller and each has to be read precisely:
+///
+/// * `in_phi` — a window contains `today`, so harvest is restricted. Scoped by
+///   date and **never by campaign**, nor by `horizon_days`: the PHI binds the
+///   plot physically, and a record filed under last year's campaign can still
+///   restrict today.
+/// * clear — the plot was treated within `horizon_days` and its windows have
+///   all closed.
+///
+/// A plot whose last window closed longer ago than that is absent, exactly like
+/// one never treated. Soft-deleted plots and records are absent too.
+///
+/// `horizon_days` is a parameter rather than read from the constant for the
+/// reason `refresh_alerts` takes an `AlertConfig`: the rule stays testable at
+/// any value, and the caller is the one that knows what this device is set to.
+///
+/// The window rule itself stays in `alerts::phi_window_is_active`
+/// (`[application_date, phi_end_date)`, the end date being the first day
+/// harvest is allowed again). The SQL below only *narrows the candidates* —
+/// it is a superset of what the rule accepts, so the two can never disagree.
 pub fn phi_status_for_farm(
     conn: &Connection,
     farm_id: &str,
     today: &str,
+    horizon_days: i64,
 ) -> Result<Vec<PlotPhiStatus>> {
+    let horizon = add_days(today, -horizon_days)?;
+    // `plot` is JOINed rather than tested with `IN (SELECT …)`: the subquery
+    // form never materialises into a lookup, so the planner drives
+    // `treatment_plot` through its covering index once per candidate row.
     let mut stmt = conn.prepare(
         "SELECT tp.plot_id, tr.application_date, tr.phi_end_date
          FROM treatment_plot tp
          JOIN treatment_record tr ON tr.id = tp.treatment_record_id
+         JOIN plot p ON p.id = tp.plot_id AND p.deleted_at IS NULL
          WHERE tr.farm_id = ?1 AND tr.deleted_at IS NULL
            AND tr.phi_end_date IS NOT NULL
-           AND tp.plot_id IN (SELECT id FROM plot WHERE deleted_at IS NULL)
+           AND tr.phi_end_date >= ?2
          ORDER BY tp.plot_id",
     )?;
     let windows = stmt
-        .query_map([farm_id], |r| {
+        .query_map(params![farm_id, horizon], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
@@ -1276,12 +1403,15 @@ pub fn phi_status_for_farm(
 /// may never reference `treatment_record`, so it checks the crop half itself and
 /// the shell chains this call for the module half.
 pub fn season_has_treatments(conn: &Connection, season_id: &str) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM treatment_record WHERE season_id = ?1",
+    // EXISTS rather than COUNT(*), the shape the other registers' guards already
+    // use: it stops at the first row instead of counting a whole campaign to
+    // answer a yes/no, and `idx_treatment_record_book` makes it one seek.
+    let held: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM treatment_record WHERE season_id = ?1)",
         [season_id],
         |row| row.get(0),
     )?;
-    Ok(count > 0)
+    Ok(held)
 }
 
 /// Crops this farm's treatment records already point at, in one season.
@@ -1389,6 +1519,7 @@ fn map_treatment_record(row: &Row) -> rusqlite::Result<TreatmentRecord> {
         application_date: row.get("application_date")?,
         application_end_date: row.get("application_end_date")?,
         application_time: row.get("application_time")?,
+        drying_date: row.get("drying_date")?,
         product_id: row.get("product_id")?,
         country_code: row.get("country_code")?,
         dose_value: row.get("dose_value")?,

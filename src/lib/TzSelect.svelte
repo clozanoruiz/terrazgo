@@ -12,8 +12,10 @@
   // The contract is the string the call sites already bound: a code or an id in
   // and out, "" for unset. Every value in the app is already a string (ids are
   // String in Rust, codes are strings), so no coercion layer exists here.
+  import { Check, ChevronDown } from "@lucide/svelte";
   import { Select } from "bits-ui";
   import { t } from "../i18n.js";
+  import { refusalStore } from "./formRefusal.js";
 
   let {
     /// [{ value, label, disabled? }] — build with lib/selectItems.js.
@@ -30,6 +32,8 @@
     required = false,
     disabled = false,
     class: klass = "",
+    /// Names this field inside its form, for TzForm's `anchors`.
+    name = "",
     /// Called with the new value. Present for the uncontrolled call sites,
     /// which pass `value` unbound, and for the cascading pairs that clear a
     /// dependent field.
@@ -66,6 +70,18 @@
   let proxy = $state(null);
   let showError = $state(false);
 
+  // A backend refusal the form chose to hang on this field. Display only — it
+  // never becomes a validity, so it cannot wedge the next submit.
+  const refusals = refusalStore();
+  const refusal = $derived(name && refusals ? (refusals.byName[name] ?? "") : "");
+
+  // Through setCustomValidity rather than a `required` attribute, so
+  // validationMessage is OUR string and not the browser's OS-language one —
+  // see DateInput for the measurement.
+  const error = $derived(required && !value ? t("form.required") : "");
+
+  $effect(() => proxy?.setCustomValidity(error));
+
   function commit(next) {
     value = next ?? "";
     showError = false;
@@ -86,15 +102,7 @@
       aria-label={label ? undefined : emptyText || undefined}
     >
       <Select.Value placeholder={emptyText} />
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        aria-hidden="true"
-      >
-        <path d="M6 9l6 6 6-6" />
-      </svg>
+      <ChevronDown />
     </Select.Trigger>
 
     <!-- Portalled so <main>'s overflow-y: auto cannot clip it, and
@@ -116,16 +124,7 @@
               {#snippet children({ selected })}
                 <span>{item.label}</span>
                 {#if selected}
-                  <svg
-                    class="tz-option-check"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
+                  <Check class="tz-option-check" />
                 {/if}
               {/snippet}
             </Select.Item>
@@ -136,14 +135,15 @@
   </Select.Root>
 
   <!-- Same mechanism as DateInput: the browser still runs constraint
-       validation before dispatching submit, so `required` keeps blocking
-       exactly as it did on a native <select>. -->
+       validation before dispatching submit, so a required select keeps blocking
+       exactly as a native one did. -->
   <input
     class="tz-validity"
     bind:this={proxy}
     {value}
-    {required}
+    {name}
     {disabled}
+    data-tz-label={label}
     tabindex="-1"
     aria-hidden="true"
     onfocus={() => document.getElementById(uid)?.focus()}
@@ -151,7 +151,10 @@
   />
 
   {#if hint}<small>{hint}</small>{/if}
-  {#if showError}
-    <small class="tz-field-error">{t("form.required")}</small>
+  {#if showError && error}
+    <small class="tz-field-error">{error}</small>
+  {/if}
+  {#if refusal}
+    <small class="tz-field-error">{refusal}</small>
   {/if}
 </div>

@@ -25,7 +25,7 @@ pub async fn get_map_style(
     base: String,
 ) -> CmdResult<String> {
     match style_id.as_str() {
-        "openfreemap" => Ok(terrazgo_geo::style::openfreemap_style(&geo.conn, &base)?),
+        "openfreemap" => Ok(terrazgo_geo::style::openfreemap_style(&geo.cache, &base)?),
         "pnoa" => Ok(terrazgo_geo::style::pnoa_style(&base)),
         _ => Err(CommandError::from(terrazgo_geo::GeoError::NotFound)),
     }

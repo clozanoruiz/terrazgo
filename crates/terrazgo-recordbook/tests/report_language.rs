@@ -16,12 +16,15 @@
 //! regression guard proving this arc changed wording and nothing else.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::db;
+
 use module_cue::models::*;
 use module_cue::repository as repo;
 use rusqlite::Connection;
 use serde_json::Value;
 use terrazgo_core::models::{FarmEsFields, NewZoneFlag, PlotEsFields};
-use terrazgo_recordbook::open_in_memory;
 use terrazgo_recordbook::{
     ReportLanguage, cuaderno_inputs, cuaderno_workbook, languages_for_farm, render_cuaderno,
 };
@@ -141,7 +144,6 @@ fn fixture(conn: &mut Connection, province: &str) -> Fixture {
             irrigation_code: Some("drip".into()),
             growing_environment_code: Some("greenhouse".into()),
             gip_system_code: None,
-            sown_on: None,
             crop_code: None,
             source: None,
             source_campaign: None,
@@ -159,6 +161,7 @@ fn fixture(conn: &mut Connection, province: &str) -> Fixture {
             farm_id: farm.id.clone(),
             application_date: "2026-05-01".into(),
             application_end_date: None,
+            drying_date: None,
             application_time: None,
             product_id: Some(product_id),
             country_code: None,
@@ -210,7 +213,7 @@ fn inputs(conn: &Connection, fx: &Fixture, language: ReportLanguage) -> Value {
 
 #[test]
 fn a_holding_in_catalunya_may_print_in_either_official_language() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08"); // Barcelona
     assert_eq!(
         languages_for_farm(&conn, &fx.farm_id).unwrap(),
@@ -220,7 +223,7 @@ fn a_holding_in_catalunya_may_print_in_either_official_language() {
 
 #[test]
 fn a_holding_in_a_castilian_only_region_is_offered_castilian_alone() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "47"); // Valladolid
     assert_eq!(
         languages_for_farm(&conn, &fx.farm_id).unwrap(),
@@ -233,7 +236,7 @@ fn a_holding_in_a_castilian_only_region_is_offered_castilian_alone() {
 /// rather than silently narrowing to Castilian.
 #[test]
 fn a_holding_with_no_province_anywhere_keeps_every_language_on_offer() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let season = repo::insert_season(
         &mut conn,
         NewSeason {
@@ -269,7 +272,7 @@ fn a_holding_with_no_province_anywhere_keeps_every_language_on_offer() {
 /// where they are — the SIGPAC reference is the second anchor.
 #[test]
 fn a_plots_sigpac_province_answers_when_the_farm_block_is_blank() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let farm = repo::insert_farm(
         &mut conn,
         NewFarm {
@@ -314,7 +317,7 @@ fn a_plots_sigpac_province_answers_when_the_farm_block_is_blank() {
 
 #[test]
 fn the_catalan_book_carries_catalan_headings_and_footnotes() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     let doc = inputs(&conn, &fx, ReportLanguage::Ca);
     let labels = &doc["labels"];
@@ -340,7 +343,7 @@ fn the_catalan_book_carries_catalan_headings_and_footnotes() {
 /// does not: "art. 16.3 del RD 1311/2012" is a citation, not a phrase.
 #[test]
 fn the_annex_states_the_conservation_duty_in_the_books_language() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
 
     let es = inputs(&conn, &fx, ReportLanguage::Es);
@@ -381,7 +384,7 @@ fn the_annex_states_the_conservation_duty_in_the_books_language() {
 /// carries both kinds, so one row proves the rule in both directions.
 #[test]
 fn a_translated_register_row_keeps_its_codes_and_translates_its_prose() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
 
     let es = inputs(&conn, &fx, ReportLanguage::Es);
@@ -407,7 +410,7 @@ fn a_translated_register_row_keeps_its_codes_and_translates_its_prose() {
 
 #[test]
 fn plot_rows_keep_the_models_siglas_in_the_catalan_book() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     let ca = inputs(&conn, &fx, ReportLanguage::Ca);
     let row = &ca["plot_rows"][0];
@@ -425,7 +428,7 @@ fn plot_rows_keep_the_models_siglas_in_the_catalan_book() {
 /// that the question was asked — reads correctly in either language.
 #[test]
 fn the_zone_check_summary_reads_in_the_books_language() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     terrazgo_core::repository::replace_zone_flags(
         &mut conn,
@@ -458,7 +461,7 @@ fn the_zone_check_summary_reads_in_the_books_language() {
 /// farmer's own name for the wellhead is user data, so it never does.
 #[test]
 fn the_water_negative_translates_but_the_farmers_own_name_does_not() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     terrazgo_core::repository::set_water_declaration(&mut conn, &fx.plot_id, "2026-05-12", None)
         .unwrap();
@@ -498,7 +501,7 @@ fn the_water_negative_translates_but_the_farmers_own_name_does_not() {
 
 #[test]
 fn the_catalan_workbook_names_its_tabs_and_headers_in_catalan() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     let book = cuaderno_workbook(
         &conn,
@@ -532,6 +535,10 @@ fn the_catalan_workbook_names_its_tabs_and_headers_in_catalan() {
             "6 Materials",
             "7.1 Pla d'adobat",
             "8 Reg",
+            "9.1 Pasturatge",
+            "9.2 Feines",
+            "9.4-9.5 Cobertes",
+            "Sembra",
         ]
     );
 
@@ -556,7 +563,7 @@ fn the_catalan_workbook_names_its_tabs_and_headers_in_catalan() {
 /// silently blank heading.
 #[test]
 fn every_language_renders_a_pdf_with_zero_template_warnings() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     for language in ReportLanguage::ALL {
         let pdf =
@@ -575,7 +582,7 @@ fn every_language_renders_a_pdf_with_zero_template_warnings() {
         // inspector is handed one of them and the footer says "hoja n de N".
         assert_eq!(
             pdf.page_count,
-            12,
+            16,
             "the book reflowed in '{}' — a longer translation moved a page break",
             language.code()
         );
@@ -587,7 +594,7 @@ fn every_language_renders_a_pdf_with_zero_template_warnings() {
 /// in both books, while the footnote explaining them is prose and translates.
 #[test]
 fn the_interval_and_the_total_are_notation_but_their_footnotes_translate() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
 
     // A second record, this one spanning days and stating its total.
@@ -605,6 +612,7 @@ fn the_interval_and_the_total_are_notation_but_their_footnotes_translate() {
             application_date: "2026-06-01".into(),
             application_end_date: Some("2026-06-03".into()),
             application_time: None,
+            drying_date: None,
             product_id: Some(product_id),
             country_code: None,
             dose_value: Some(1.5),
@@ -670,7 +678,7 @@ fn the_interval_and_the_total_are_notation_but_their_footnotes_translate() {
 /// the farmer's description of what was treated do not.
 #[test]
 fn the_non_field_registers_translate_their_headings_but_not_their_data() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
 
     let product_id: String = conn
@@ -682,6 +690,7 @@ fn the_non_field_registers_translate_their_headings_but_not_their_data() {
     repo::insert_non_field_treatment(
         &mut conn,
         NewNonFieldTreatment {
+            premises_id: None,
             season_id: fx.season_id.clone(),
             farm_id: fx.farm_id.clone(),
             country_code: None,
@@ -749,7 +758,7 @@ fn the_non_field_registers_translate_their_headings_but_not_their_data() {
 /// name are data and do not.
 #[test]
 fn the_seed_register_translates_its_headings_but_not_the_sack_label() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     repo::insert_seed_treatment(
         &mut conn,
@@ -763,6 +772,8 @@ fn the_seed_register_translates_its_headings_but_not_the_sack_label() {
             seed_quantity_kg: Some(680.0),
             seed_lot: Some("L-2025-4471".into()),
             treatment_kind_code: Some("processing_centre".into()),
+            acquired_on: None,
+            sowing_record_id: None,
             product_name: "Celest Trio".into(),
             product_registration_number: Some("ES-24.876".into()),
             product_active_substance: None,
@@ -816,7 +827,7 @@ fn the_seed_register_translates_its_headings_but_not_the_sack_label() {
 /// buyer, the lot and the unit symbol are data and do not.
 #[test]
 fn the_analysis_and_harvest_registers_translate_headings_but_not_the_record() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     repo::insert_analysis_record(
         &mut conn,
@@ -926,7 +937,7 @@ fn the_fertilisation_register_translates_its_prose_but_not_the_models_siglas() {
     use module_fertilisation::models::{
         MaterialNutrient, NewFertilisationPlot, NewFertilisationRecord, NewFertiliserMaterial,
     };
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn, "08");
     let material_id = module_fertilisation::repository::insert_fertiliser_material(
         &mut conn,
@@ -966,6 +977,8 @@ fn the_fertilisation_register_translates_its_prose_but_not_the_models_siglas() {
             dose_unit_code: "m3_ha".into(),
             fertiliser_material_id: material_id,
             sludge_application: false,
+            sustainable_input_management: false,
+            irrigation_record_id: None,
             machinery_id: None,
             service_company: None,
             service_regfer_number: None,

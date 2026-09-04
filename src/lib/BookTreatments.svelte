@@ -5,13 +5,16 @@
   // Record book, treatments tab: model section 3.1, the phytosanitary
   // actuations register. The shell owns the farm/season selectors and the
   // catalogue data; this component owns the register's own list and form.
-  import { formatDate, t, tCode } from "../i18n.js";
+  import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
-  import { notify, run } from "./notifications.svelte.js";
+  import { run } from "./notifications.svelte.js";
   import TreatmentForm from "./TreatmentForm.svelte";
   import { draftFrom, emptyDraft } from "./treatmentDraft.js";
   import TzSelect from "./TzSelect.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
   import { codeItems } from "./selectItems.js";
 
   let {
@@ -92,7 +95,7 @@
     run(async () => {
       if (!(await confirmDialog(t("treatment.delete_confirm")))) return;
       await invoke("delete_treatment_record", { treatmentId: record.id });
-      notify(t("message.treatment_deleted"));
+      closeForm();
       await onChanged();
     });
   }
@@ -120,8 +123,25 @@
 
   function treatedPlotsSummary(treatedPlots) {
     return treatedPlots
-      .map((tp) => `${plotName(tp.plot_id)} (${tp.surface_treated_ha} ha)`)
+      .map((tp) => `${plotName(tp.plot_id)} (${formatNumber(tp.surface_treated_ha)} ha)`)
       .join(", ");
+  }
+
+  /// The dose cell. A purely non-chemical actuation has no product and so no
+  /// dose; what it took instead is the measure's own intensity, which is a
+  /// count of traps rather than a rate and is why the two are not one column.
+  function doseCell(record) {
+    if (record.product_id !== null) {
+      return `${formatNumber(record.dose_value)} ${tCode("unit", record.dose_unit_code)}`;
+    }
+    if (record.measure_intensity_value === null) return "";
+    // The count stays the RAW number: Intl.PluralRules selects on a number,
+    // and the formatted string would not.
+    return `${formatNumber(record.measure_intensity_value)} ${tCode(
+      "unit",
+      record.measure_intensity_unit_code,
+      record.measure_intensity_value,
+    )}`;
   }
 
   /// The date the model's 3.1 column asks for: a single day, or the interval
@@ -136,15 +156,19 @@
   // Entering a treatment needs a product and an operator to reference; the
   // hint sends the user to the catalogue view to create them.
   const missingRefs = $derived(products.length === 0 || operators.length === 0);
+
+  /// The row the inspector is editing, so the delete button beside the form —
+  /// and the efficacy control above it — know which record they are about.
+  /// Null while entering a new one.
+  const editing = $derived(treatments.find(({ record }) => record.id === draft.editingId) ?? null);
 </script>
 
 <div class="view-head">
   <h3>{t("treatments.records_title")}</h3>
-  <button
-    type="button"
-    onclick={() => (treatmentFormOpen ? closeForm() : showForm())}
-    disabled={missingRefs || plots.length === 0}
-  >
+  <!-- Always opens a blank form, never toggles the pane shut: with the entry
+       form in an inspector, "new" beside a record being corrected means a new
+       record, and the pane has a close button of its own. -->
+  <button type="button" onclick={() => showForm()} disabled={missingRefs || plots.length === 0}>
     {t("treatments.new")}
   </button>
 </div>
@@ -152,107 +176,117 @@
   <p>{t("treatments.missing_refs")} <a href="#/registry">{t("nav.registry")}</a></p>
 {/if}
 
-{#if treatmentFormOpen}
-  <TreatmentForm
-    {draft}
-    {farmId}
-    {countryCode}
-    {seasonId}
-    {plots}
-    {crops}
-    {operators}
-    {machinery}
-    {products}
-    {units}
-    {quantityUnits}
-    {intensityUnits}
-    {advisors}
-    {justifications}
-    {efficacies}
-    {reasons}
-    onSaved={treatmentSaved}
-    onCancel={closeForm}
-  />
-{/if}
+<TzWorkspace
+  open={treatmentFormOpen}
+  title={draft.editingId
+    ? (editing?.record.product_name_snapshot ?? t("treatment.non_chemical"))
+    : t("treatments.new")}
+  onclose={closeForm}
+  ondelete={editing ? () => deleteTreatment(editing.record) : null}
+  deleteLabel={t("treatment.delete")}
+>
+  {#snippet list()}
+    {#if treatments.length === 0}
+      {#if !missingRefs}
+        <p class="table-empty">{t("treatments.empty")}</p>
+      {/if}
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table" use:resizableColumns={"treatments"}>
+          <thead>
+            <tr>
+              <th>{t("column.date")}</th>
+              <th>{t("column.product")}</th>
+              <th class="col-num">{t("column.dose")}</th>
+              <th>{t("column.operator")}</th>
+              <th>{t("column.plots")}</th>
+              <th>{t("column.problems")}</th>
+              <th>{t("column.phi_until")}</th>
+              <th>{t("column.efficacy")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each treatments as entry (entry.record.id)}
+              {@const record = entry.record}
+              <tr
+                class:selected={draft.editingId === record.id}
+                onclick={(e) => opensRow(e) && showForm(entry)}
+              >
+                <td class="col-name">
+                  <button type="button" class="row-open" onclick={() => showForm(entry)}>
+                    {appliedOn(record)}
+                  </button>
+                </td>
+                <!-- A purely non-chemical actuation has no product to name, so
+                     the cell falls back to the measure it took. -->
+                <td class="col-muted">
+                  {record.product_name_snapshot ?? t("treatment.non_chemical")}
+                </td>
+                <td class="col-muted col-num">{doseCell(record)}</td>
+                <td class="col-muted">{record.operator_name_snapshot}</td>
+                <td class="col-muted">{treatedPlotsSummary(entry.plots)}</td>
+                <td class="col-muted">{problemSummary(entry.problems)}</td>
+                <td class="col-muted">
+                  {record.phi_end_date === null ? "" : formatDate(record.phi_end_date)}
+                </td>
+                <td class="col-muted">
+                  {record.efficacy_code
+                    ? tCode("efficacy", record.efficacy_code)
+                    : t("treatment.efficacy_pending")}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  {/snippet}
 
-<ul class="card-list">
-  {#each treatments as { record, plots: treatedPlots, problems, justifications: recordJustifications } (record.id)}
-    <li class="card">
-      <div class="stack">
-        <!-- A purely non-chemical actuation has no product to name, so the
-             heading falls back to the measure it took. -->
-        <strong>
-          {appliedOn(record)} — {record.product_name_snapshot ?? t("treatment.non_chemical")}
-        </strong>
-        <span class="detail">
-          {#if record.product_id !== null}
-            {record.dose_value}
-            {tCode("unit", record.dose_unit_code)}
-          {/if}
-          {#if record.total_quantity_value !== null}
-            · {t("treatment.total_quantity_detail", {
-              value: record.total_quantity_value,
-              unit: tCode("unit", record.total_quantity_unit_code),
-            })}
-          {/if}
-          ·
-          {record.operator_name_snapshot}
-        </span>
-        <span class="detail">{problemSummary(problems)}</span>
-        <span class="detail">
-          {recordJustifications.map((j) => tCode("justification", j.justification_code)).join(", ")}
-        </span>
-        <span class="detail">{treatedPlotsSummary(treatedPlots)}</span>
-        {#if record.phi_end_date !== null}
-          <span class="detail">
-            {t("treatment.phi_until", { date: formatDate(record.phi_end_date) })}
-          </span>
-        {/if}
-        {#if record.advisor_name_snapshot !== null || record.measure_code !== null}
-          <!-- What model 3.1 bis prints: who advised, and what was tried
-               instead of a spray. -->
-          <span class="detail">
-            {[
-              record.advisor_name_snapshot,
-              record.measure_intensity_value !== null
-                ? t("treatment.measure_intensity_detail", {
-                    value: record.measure_intensity_value,
-                    unit: tCode("unit", record.measure_intensity_unit_code),
-                  })
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </span>
-        {/if}
+  {#snippet inspector(formId)}
+    <!-- Efficacy is observed AFTER the application, so a correction never
+         carries it: it has its own audited setter and saves on change. It used
+         to sit on every row for want of anywhere else; the inspector names the
+         record it is about, which is where it belonged. -->
+    {#if editing}
+      <div class="form-grid">
         <TzSelect
-          class="inline-field"
           label={t("treatment.efficacy")}
+          hint={t("treatment.efficacy_hint")}
           items={codeItems(efficacies, "efficacy")}
           nullable
           nullLabel={t("treatment.efficacy_pending")}
-          value={record.efficacy_code ?? ""}
-          onchange={(code) => setEfficacy(record, code)}
+          value={editing.record.efficacy_code ?? ""}
+          onchange={(code) => setEfficacy(editing.record, code)}
         />
       </div>
-      <button
-        type="button"
-        onclick={() =>
-          showForm({
-            record,
-            plots: treatedPlots,
-            problems,
-            justifications: recordJustifications,
-          })}
-      >
-        {t("form.edit")}
-      </button>
-      <button type="button" class="btn-danger" onclick={() => deleteTreatment(record)}>
-        {t("treatment.delete")}
-      </button>
-    </li>
-  {/each}
-</ul>
-{#if treatments.length === 0 && !missingRefs}
-  <p>{t("treatments.empty")}</p>
-{/if}
+    {/if}
+
+    <TreatmentForm
+      {draft}
+      {farmId}
+      {countryCode}
+      {seasonId}
+      {plots}
+      {crops}
+      {operators}
+      {machinery}
+      {products}
+      {units}
+      {quantityUnits}
+      {intensityUnits}
+      {advisors}
+      {justifications}
+      {efficacies}
+      {reasons}
+      onSaved={treatmentSaved}
+      {formId}
+    />
+  {/snippet}
+
+  {#snippet actions(formId)}
+    <div class="form-actions">
+      <button type="submit" form={formId}>{t("form.save")}</button>
+      <button type="button" class="btn-cancel" onclick={closeForm}>{t("form.cancel")}</button>
+    </div>
+  {/snippet}
+</TzWorkspace>

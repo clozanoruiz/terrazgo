@@ -24,9 +24,9 @@ serde_json = { workspace = true }
 # for tests/ to inspect record_change payloads. Same crate, no new dependency.
 [dev-dependencies]
 serde_json = { workspace = true }
-# tests/export.rs validates the serializer's output against the vendored
-# official CUE JSON Schema (docs/references/cue-schema-3.11.4.json).
-jsonschema = { workspace = true }
+# Shared fixtures. It depends on terrazgo-core alone, so taking it here does
+# NOT put another module's schema in this crate's test graph.
+terrazgo-testkit = { workspace = true }
 
 [features]
 # Demo-campaign seeding (src/demo.rs). Enabled by the shell for its dev-only

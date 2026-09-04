@@ -13,8 +13,10 @@
   // "YYYY-MM-DD" string in, a "YYYY-MM-DD" string out (or "" for empty), so a
   // call site is a markup swap and no view logic moves. CalendarDate objects
   // live behind dateValue.js and never escape this component.
+  import { Calendar, ChevronLeft, ChevronRight } from "@lucide/svelte";
   import { DatePicker } from "bits-ui";
-  import { localeTag, formatDate, t } from "../i18n.js";
+  import { formatTag, formatDate, t } from "../i18n.js";
+  import { refusalStore } from "./formRefusal.js";
   import { toCalendarDate, fromCalendarDate } from "./dateValue.js";
 
   let {
@@ -28,6 +30,9 @@
     max = "",
     disabled = false,
     class: klass = "",
+    /// Names this field inside its form, so TzForm's `anchors` can reach it as
+    /// form.elements[name] to hang a backend refusal on the right control.
+    name = "",
     /// For the uncontrolled idiom: called with the new ISO string after a change.
     onchange = null,
   } = $props();
@@ -42,13 +47,18 @@
   const minValue = $derived(toCalendarDate(min));
   const maxValue = $derived(toCalendarDate(max));
 
-  // The browser still runs constraint validation before dispatching submit, so
-  // forms keep blocking exactly as they did with a native input. What carries
-  // that is a real (not type="hidden") input parked off-screen: `required` and
-  // setCustomValidity live on it. Bits UI's own hidden input was not enough —
-  // it carries no min, so the one range guard in the app would have been lost.
+  // The browser still runs constraint validation before submit, so forms keep
+  // blocking exactly as they did with a native input. What carries that is a
+  // real (not type="hidden") input parked off-screen. Bits UI's own hidden
+  // input was not enough — it carries no min, so the one range guard in the app
+  // would have been lost.
   let proxy = $state(null);
   let showError = $state(false);
+
+  // A backend refusal the form chose to hang on this field. Display only — it
+  // never becomes a validity, so it cannot wedge the next submit.
+  const refusals = refusalStore();
+  const refusal = $derived(name && refusals ? (refusals.byName[name] ?? "") : "");
 
   const rangeError = $derived.by(() => {
     if (!dateValue) return "";
@@ -61,7 +71,16 @@
     return "";
   });
 
-  $effect(() => proxy?.setCustomValidity(rangeError));
+  // One string drives both surfaces, the NumberInput shape: the inline <small>
+  // under this field and — because it reaches the proxy through
+  // setCustomValidity rather than a `required` attribute — the entry TzForm
+  // reads off validationMessage for the summary. Measured 2026-09-01: a bare
+  // `required` leaves validationMessage as the BROWSER's own string ("Please
+  // fill in this field."), which is the OS language, not the holding's. That is
+  // the same defect that retired the native date picker, one layer down.
+  const error = $derived(rangeError || (required && !value ? t("form.required") : ""));
+
+  $effect(() => proxy?.setCustomValidity(error));
 
   function commit(next) {
     value = fromCalendarDate(next);
@@ -77,7 +96,7 @@
     {minValue}
     {maxValue}
     {disabled}
-    locale={localeTag()}
+    locale={formatTag()}
     granularity="day"
     weekdayFormat="short"
     fixedWeeks={true}
@@ -97,16 +116,7 @@
           </DatePicker.Segment>
         {/each}
         <DatePicker.Trigger class="tz-field-trigger" aria-label={t("form.open_calendar")}>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            aria-hidden="true"
-          >
-            <rect x="3" y="4" width="18" height="18" rx="2" />
-            <path d="M16 2v4M8 2v4M3 10h18" />
-          </svg>
+          <Calendar />
         </DatePicker.Trigger>
       {/snippet}
     </DatePicker.Input>
@@ -124,27 +134,11 @@
           {#snippet children({ months, weekdays })}
             <div class="tz-calendar-head">
               <DatePicker.PrevButton class="tz-calendar-nav" aria-label={t("form.prev_month")}>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <path d="M15 18l-6-6 6-6" />
-                </svg>
+                <ChevronLeft />
               </DatePicker.PrevButton>
               <DatePicker.Heading class="tz-calendar-title" />
               <DatePicker.NextButton class="tz-calendar-nav" aria-label={t("form.next_month")}>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <path d="M9 18l6-6-6-6" />
-                </svg>
+                <ChevronRight />
               </DatePicker.NextButton>
             </div>
             {#each months as month (month.value)}
@@ -184,8 +178,9 @@
     class="tz-validity"
     bind:this={proxy}
     {value}
-    {required}
+    {name}
     {disabled}
+    data-tz-label={label}
     tabindex="-1"
     aria-hidden="true"
     onfocus={() => document.getElementById(uid)?.focus()}
@@ -193,7 +188,10 @@
   />
 
   {#if hint}<small>{hint}</small>{/if}
-  {#if showError}
-    <small class="tz-field-error">{rangeError || t("form.required")}</small>
+  {#if showError && error}
+    <small class="tz-field-error">{error}</small>
+  {/if}
+  {#if refusal}
+    <small class="tz-field-error">{refusal}</small>
   {/if}
 </div>

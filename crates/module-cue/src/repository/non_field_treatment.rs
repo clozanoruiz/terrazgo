@@ -22,6 +22,7 @@ use crate::models::{
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 /// What each subject is measured in. The model's own footnotes: produce in
@@ -71,7 +72,24 @@ pub fn insert_non_field_treatment(
     }
 
     // --- what was treated --------------------------------------------------
-    let subject_description = new.subject_description.trim().to_string();
+    // A named registry row is the identity B.b asks for, and it composes the
+    // printed cell — so the two can never disagree. Without one the farmer's
+    // own text stands, which keeps a lawful record recordable before any
+    // registry row exists (the efficacy precedent; the EXPORT precheck is
+    // where the format's requirement belongs).
+    let premises = match new.premises_id.as_deref() {
+        Some(id) => Some(terrazgo_core::repository::get_premises(&tx, id)?),
+        None => None,
+    };
+    crate::premises_link::validate_premises(
+        premises.as_ref(),
+        &new.subject_kind_code,
+        &new.farm_id,
+    )?;
+    let subject_description = match &premises {
+        Some(p) => crate::premises_link::describe_premises(p),
+        None => new.subject_description.trim().to_string(),
+    };
     if subject_description.is_empty() {
         return Err(CueError::Invalid("empty_subject"));
     }
@@ -117,6 +135,7 @@ pub fn insert_non_field_treatment(
         subject_kind_code: new.subject_kind_code,
         treated_on: new.treated_on,
         subject_description,
+        premises_id: new.premises_id.clone(),
         subject_product_code: new.subject_product_code,
         treated_quantity_value: new.treated_quantity_value,
         treated_quantity_unit_code: new.treated_quantity_unit_code,
@@ -144,7 +163,7 @@ pub fn insert_non_field_treatment(
     tx.execute(
         "INSERT INTO non_field_treatment (
             id, season_id, farm_id, country_code, subject_kind_code, treated_on,
-            subject_description, subject_product_code, treated_quantity_value,
+            subject_description, subject_product_code, premises_id, treated_quantity_value,
             treated_quantity_unit_code, product_id, product_quantity_value,
             product_quantity_unit_code, operator_id, machinery_id, advisor_id,
             advisor_name_snapshot, advisor_registration_snapshot, efficacy_code,
@@ -152,8 +171,8 @@ pub fn insert_non_field_treatment(
             operator_licence_snapshot, machinery_roma_snapshot, machinery_reganip_snapshot,
             notes, created_at, updated_at
          ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+            ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29
          )",
         params![
             record.id,
@@ -164,6 +183,7 @@ pub fn insert_non_field_treatment(
             record.treated_on,
             record.subject_description,
             record.subject_product_code,
+            record.premises_id,
             record.treated_quantity_value,
             record.treated_quantity_unit_code,
             record.product_id,
@@ -248,7 +268,30 @@ pub fn update_non_field_treatment(
         .optional()?
         .ok_or(CueError::NotFound)?;
 
-    let subject_description = update.subject_description.trim().to_string();
+    // The snapshot rule: re-take the description exactly when its FK changes.
+    // Naming a different store re-composes what the record states, because a
+    // record naming one warehouse while printing another's address would be
+    // worse than the mistake being fixed. Leaving the link alone keeps what the
+    // record already states, even if the registry row was corrected in between
+    // — an edit elsewhere must not silently rewrite a record the farmer did not
+    // touch (docs/data-model.md → "Nothing is ever frozen"). CLEARING the link
+    // leaves the last composed text standing: the record still states what it
+    // stated, and the farmer can now retype it.
+    let premises = match update.premises_id.as_deref() {
+        Some(id) => Some(terrazgo_core::repository::get_premises(&tx, id)?),
+        None => None,
+    };
+    crate::premises_link::validate_premises(
+        premises.as_ref(),
+        &before.subject_kind_code,
+        &before.farm_id,
+    )?;
+    let link_changed = update.premises_id != before.premises_id;
+    let subject_description = match (&premises, link_changed) {
+        (Some(p), true) => crate::premises_link::describe_premises(p),
+        (Some(_), false) => before.subject_description.clone(),
+        (None, _) => update.subject_description.trim().to_string(),
+    };
     if subject_description.is_empty() {
         return Err(CueError::Invalid("empty_subject"));
     }
@@ -283,6 +326,7 @@ pub fn update_non_field_treatment(
     let mut after = before.clone();
     after.treated_on = update.treated_on;
     after.subject_description = subject_description;
+    after.premises_id = update.premises_id;
     after.subject_product_code = update.subject_product_code;
     after.treated_quantity_value = update.treated_quantity_value;
     after.treated_quantity_unit_code = update.treated_quantity_unit_code;
@@ -323,6 +367,7 @@ pub fn update_non_field_treatment(
     tx.execute(
         "UPDATE non_field_treatment SET
             treated_on = ?2, subject_description = ?3, subject_product_code = ?4,
+            premises_id = ?23,
             treated_quantity_value = ?5, treated_quantity_unit_code = ?6, product_id = ?7,
             product_quantity_value = ?8, product_quantity_unit_code = ?9, operator_id = ?10,
             machinery_id = ?11, advisor_id = ?12, advisor_name_snapshot = ?13,
@@ -353,7 +398,8 @@ pub fn update_non_field_treatment(
             after.machinery_roma_snapshot,
             after.machinery_reganip_snapshot,
             after.notes,
-            after.updated_at
+            after.updated_at,
+            after.premises_id
         ],
     )?;
     log_update(
@@ -576,6 +622,26 @@ pub fn get_non_field_treatment(conn: &Connection, id: &str) -> Result<NonFieldTr
 
 /// The register as the book prints it: oldest first within each section, which
 /// is how a record book reads.
+/// Every record of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_non_field_treatments_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<NonFieldTreatmentDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM non_field_treatment
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY treated_on, id",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_with_details(conn, records)
+}
+
 pub fn list_non_field_treatments(
     conn: &Connection,
     season_id: &str,
@@ -589,10 +655,7 @@ pub fn list_non_field_treatments(
     let records = stmt
         .query_map(params![season_id, farm_id], map_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| with_details(conn, record))
-        .collect()
+    all_with_details(conn, records)
 }
 
 fn problems_of(conn: &Connection, record_id: &str) -> Result<Vec<NonFieldTreatmentProblem>> {
@@ -600,16 +663,18 @@ fn problems_of(conn: &Connection, record_id: &str) -> Result<Vec<NonFieldTreatme
         "SELECT * FROM non_field_treatment_problem WHERE non_field_treatment_id = ?1 ORDER BY id",
     )?;
     let rows = stmt
-        .query_map([record_id], |row| {
-            Ok(NonFieldTreatmentProblem {
-                id: row.get("id")?,
-                non_field_treatment_id: row.get("non_field_treatment_id")?,
-                reason_category_code: row.get("reason_category_code")?,
-                problem_code: row.get("problem_code")?,
-            })
-        })?
+        .query_map([record_id], map_problem)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+fn map_problem(row: &Row) -> rusqlite::Result<NonFieldTreatmentProblem> {
+    Ok(NonFieldTreatmentProblem {
+        id: row.get("id")?,
+        non_field_treatment_id: row.get("non_field_treatment_id")?,
+        reason_category_code: row.get("reason_category_code")?,
+        problem_code: row.get("problem_code")?,
+    })
 }
 
 fn justifications_of(
@@ -621,15 +686,17 @@ fn justifications_of(
          WHERE non_field_treatment_id = ?1 ORDER BY id",
     )?;
     let rows = stmt
-        .query_map([record_id], |row| {
-            Ok(NonFieldTreatmentJustification {
-                id: row.get("id")?,
-                non_field_treatment_id: row.get("non_field_treatment_id")?,
-                justification_code: row.get("justification_code")?,
-            })
-        })?
+        .query_map([record_id], map_justification)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
+}
+
+fn map_justification(row: &Row) -> rusqlite::Result<NonFieldTreatmentJustification> {
+    Ok(NonFieldTreatmentJustification {
+        id: row.get("id")?,
+        non_field_treatment_id: row.get("non_field_treatment_id")?,
+        justification_code: row.get("justification_code")?,
+    })
 }
 
 fn with_details(conn: &Connection, record: NonFieldTreatment) -> Result<NonFieldTreatmentDetail> {
@@ -640,6 +707,39 @@ fn with_details(conn: &Connection, record: NonFieldTreatment) -> Result<NonField
         problems,
         justifications,
     })
+}
+
+/// [`with_details`] for a whole list, in two child statements rather than two
+/// per record. The single-record path keeps its point queries.
+fn all_with_details(
+    conn: &Connection,
+    records: Vec<NonFieldTreatment>,
+) -> Result<Vec<NonFieldTreatmentDetail>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut problems = children_by_parent(
+        conn,
+        "SELECT * FROM non_field_treatment_problem WHERE non_field_treatment_id IN ({ids})
+         ORDER BY non_field_treatment_id, id",
+        &ids,
+        map_problem,
+        |p| p.non_field_treatment_id.clone(),
+    )?;
+    let mut justifications = children_by_parent(
+        conn,
+        "SELECT * FROM non_field_treatment_justification WHERE non_field_treatment_id IN ({ids})
+         ORDER BY non_field_treatment_id, id",
+        &ids,
+        map_justification,
+        |j| j.non_field_treatment_id.clone(),
+    )?;
+    Ok(records
+        .into_iter()
+        .map(|record| NonFieldTreatmentDetail {
+            problems: problems.remove(&record.id).unwrap_or_default(),
+            justifications: justifications.remove(&record.id).unwrap_or_default(),
+            record,
+        })
+        .collect())
 }
 
 /// The one edit these records allow, for the same reason field treatments do:
@@ -677,6 +777,25 @@ pub fn set_non_field_efficacy(
     )?;
     tx.commit()?;
     Ok(after)
+}
+
+/// Which registers already name this premises — the live records' distinct
+/// `subject_kind_code`s.
+///
+/// Read by the shell before core corrects a premises' `kind_code`: core owns
+/// the thing and cannot see this table, so the guard spans two crates the way
+/// season deletion's does. Soft-deleted records are excluded: a withdrawn
+/// record makes no claim about what the store is.
+pub fn subject_kinds_naming_premises(conn: &Connection, premises_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT DISTINCT subject_kind_code FROM non_field_treatment
+         WHERE premises_id = ?1 AND deleted_at IS NULL
+         ORDER BY subject_kind_code",
+    )?;
+    let rows = stmt
+        .query_map([premises_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// Soft delete, like every other regulatory record: the row stays, both audit
@@ -725,6 +844,7 @@ fn map_record(row: &Row) -> rusqlite::Result<NonFieldTreatment> {
         subject_kind_code: row.get("subject_kind_code")?,
         treated_on: row.get("treated_on")?,
         subject_description: row.get("subject_description")?,
+        premises_id: row.get("premises_id")?,
         subject_product_code: row.get("subject_product_code")?,
         treated_quantity_value: row.get("treated_quantity_value")?,
         treated_quantity_unit_code: row.get("treated_quantity_unit_code")?,

@@ -17,11 +17,18 @@
   // The printed 7.1 table is not entered anywhere: its aportadas and acumuladas
   // are computed from section 6's own records, because a stored copy could
   // disagree with the register above it.
-  import { formatDate, t } from "../i18n.js";
+  import { formatDate, formatNumber, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
-  import { notify, run } from "./notifications.svelte.js";
+  import { run } from "./notifications.svelte.js";
+  import TzCheckbox from "./TzCheckbox.svelte";
+  import NumberInput from "./NumberInput.svelte";
   import DateInput from "./DateInput.svelte";
   import SpeciesPicker from "./SpeciesPicker.svelte";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
 
   let { farmId, seasonId, crops } = $props();
 
@@ -70,14 +77,22 @@
     formOpen = true;
   }
 
+  function hideForm() {
+    formOpen = false;
+    editingId = null;
+  }
+
+  /// The row the inspector is editing, so the delete button beside the form
+  /// knows which plan it is about. Null while creating.
+  const editing = $derived(plans.find((d) => d.plan.id === editingId) ?? null);
+
   function toggleCrop(cropId, checked) {
     chosenCrops = checked
       ? [...chosenCrops, cropId]
       : chosenCrops.filter((existing) => existing !== cropId);
   }
 
-  function submit(event) {
-    event.preventDefault();
+  async function submit() {
     const payload = {
       needs_n_kg_ha: Number(needsN),
       needs_p2o5_kg_ha: Number(needsP2o5),
@@ -92,28 +107,25 @@
       crop_ids: chosenCrops,
     };
 
-    run(async () => {
-      if (editingId) {
-        await invoke("update_fertilisation_plan", {
-          planId: editingId,
-          update: { ...payload, id: editingId },
-        });
-      } else {
-        await invoke("create_fertilisation_plan", {
-          plan: { ...payload, season_id: seasonId, farm_id: farmId },
-        });
-      }
-      notify(t("message.plan_saved"));
-      formOpen = false;
-      load();
-    });
+    if (editingId) {
+      await invoke("update_fertilisation_plan", {
+        planId: editingId,
+        update: { ...payload, id: editingId },
+      });
+    } else {
+      await invoke("create_fertilisation_plan", {
+        plan: { ...payload, season_id: seasonId, farm_id: farmId },
+      });
+    }
+    hideForm();
+    load();
   }
 
   function remove(plan) {
     run(async () => {
       if (!(await confirmDialog(t("plan.delete_confirm")))) return;
       await invoke("delete_fertilisation_plan", { planId: plan.id });
-      notify(t("message.plan_deleted"));
+      hideForm();
       load();
     });
   }
@@ -134,89 +146,103 @@
     <p class="detail">{t("plan.no_crops")}</p>
   {/if}
 
-  <ul class="card-list">
-    {#each plans as detail (detail.plan.id)}
-      <li class="card">
-        <div class="stack">
-          <strong>{detail.crop_ids.map(cropLabel).join(", ")}</strong>
-          <span class="detail">
-            {t("plan.needs_detail", {
-              n: detail.plan.needs_n_kg_ha,
-              p: detail.plan.needs_p2o5_kg_ha,
-              k: detail.plan.needs_k2o_kg_ha,
-            })}
-            · {t("plan.yield_detail", { yield: detail.plan.expected_yield_kg_ha })}
-          </span>
-          <span class="detail">{formatDate(detail.plan.drawn_up_on)}</span>
+  <TzWorkspace
+    open={formOpen}
+    title={editingId ? editing?.crop_ids.map(cropLabel).join(", ") : t("plan.new")}
+    onclose={hideForm}
+    ondelete={editing ? () => remove(editing.plan) : null}
+  >
+    {#snippet list()}
+      {#if plans.length === 0}
+        <p class="table-empty">{t("table.empty")}</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table" use:resizableColumns={"plans"}>
+            <thead>
+              <tr>
+                <th>{t("column.crops")}</th>
+                <th>{t("column.needs")}</th>
+                <th class="col-num">{t("column.expected_yield")}</th>
+                <th>{t("column.drawn_up_on")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each plans as detail (detail.plan.id)}
+                <tr
+                  class:selected={editingId === detail.plan.id}
+                  onclick={(e) => opensRow(e) && showForm(detail)}
+                >
+                  <td class="col-name">
+                    <button type="button" class="row-open" onclick={() => showForm(detail)}>
+                      {detail.crop_ids.map(cropLabel).join(", ")}
+                    </button>
+                  </td>
+                  <td class="col-muted">
+                    {t("plan.needs_detail", {
+                      n: formatNumber(detail.plan.needs_n_kg_ha),
+                      p: formatNumber(detail.plan.needs_p2o5_kg_ha),
+                      k: formatNumber(detail.plan.needs_k2o_kg_ha),
+                    })}
+                  </td>
+                  <td class="col-muted col-num">
+                    {formatNumber(detail.plan.expected_yield_kg_ha)}
+                  </td>
+                  <td class="col-muted">{formatDate(detail.plan.drawn_up_on)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
-        <button type="button" onclick={() => showForm(detail)}>{t("form.edit")}</button>
-        <button type="button" class="btn-danger" onclick={() => remove(detail.plan)}>
-          {t("form.delete")}
-        </button>
-      </li>
-    {/each}
-  </ul>
+      {/if}
+    {/snippet}
 
-  {#if formOpen}
-    <form onsubmit={submit}>
-      <div class="form-grid">
-        <DateInput label={t("plan.drawn_up_on")} required bind:value={drawnUpOn} />
-        <label>
-          <span>{t("plan.expected_yield")}</span>
-          <input type="number" step="any" min="0.001" required bind:value={expectedYield} />
-        </label>
-        <label>
-          <span>{t("plan.preceding_crop")}</span>
-          <SpeciesPicker bind:name={precedingName} bind:code={precedingCode} />
-        </label>
-        <label>
-          <span>{t("treatment.notes")}</span>
-          <input bind:value={notes} />
-        </label>
-        <label class="inline">
-          <input type="checkbox" bind:checked={toolGenerated} />
-          <span>{t("plan.tool_generated")}</span>
-        </label>
-      </div>
-
-      <fieldset class="subsection">
-        <legend>{t("plan.needs_section")}</legend>
+    {#snippet inspector(formId)}
+      <TzForm id={formId} onsubmit={submit}>
         <div class="form-grid">
+          <DateInput label={t("plan.drawn_up_on")} required bind:value={drawnUpOn} />
+          <NumberInput
+            label={t("plan.expected_yield")}
+            min={0.001}
+            required
+            bind:value={expectedYield}
+          />
           <label>
-            <span>{t("plan.needs_n")}</span>
-            <input type="number" step="any" min="0" required bind:value={needsN} />
+            <span>{t("plan.preceding_crop")}</span>
+            <SpeciesPicker bind:name={precedingName} bind:code={precedingCode} />
           </label>
-          <label>
-            <span>{t("plan.needs_p2o5")}</span>
-            <input type="number" step="any" min="0" required bind:value={needsP2o5} />
-          </label>
-          <label>
-            <span>{t("plan.needs_k2o")}</span>
-            <input type="number" step="any" min="0" required bind:value={needsK2o} />
-          </label>
+          <TextInput label={t("treatment.notes")} bind:value={notes} />
+          <TzCheckbox label={t("plan.tool_generated")} bind:checked={toolGenerated} />
         </div>
-      </fieldset>
 
-      <fieldset class="subsection">
-        <legend>{t("plan.crops")}</legend>
-        <div class="checkbox-list">
-          {#each crops as crop (crop.id)}
-            <label class="inline">
-              <input
-                type="checkbox"
+        <fieldset class="subsection">
+          <legend>{t("plan.needs_section")}</legend>
+          <div class="form-grid">
+            <NumberInput label={t("plan.needs_n")} min={0} required bind:value={needsN} />
+            <NumberInput label={t("plan.needs_p2o5")} min={0} required bind:value={needsP2o5} />
+            <NumberInput label={t("plan.needs_k2o")} min={0} required bind:value={needsK2o} />
+          </div>
+        </fieldset>
+
+        <fieldset class="subsection">
+          <legend>{t("plan.crops")}</legend>
+          <div class="checkbox-list">
+            {#each crops as crop (crop.id)}
+              <TzCheckbox
+                label={cropLabel(crop.id)}
                 checked={chosenCrops.includes(crop.id)}
-                onchange={(event) => toggleCrop(crop.id, event.currentTarget.checked)}
+                onchange={(next) => toggleCrop(crop.id, next)}
               />
-              <span>{cropLabel(crop.id)}</span>
-            </label>
-          {/each}
-        </div>
-      </fieldset>
+            {/each}
+          </div>
+        </fieldset>
+      </TzForm>
+    {/snippet}
 
+    {#snippet actions(formId)}
       <div class="form-actions">
-        <button type="submit">{t("form.save")}</button>
-        <button type="button" onclick={() => (formOpen = false)}>{t("form.cancel")}</button>
+        <button type="submit" form={formId}>{t("form.save")}</button>
+        <button type="button" class="btn-cancel" onclick={hideForm}>{t("form.cancel")}</button>
       </div>
-    </form>
-  {/if}
+    {/snippet}
+  </TzWorkspace>
 {/if}

@@ -34,7 +34,6 @@ pub fn insert_crop(conn: &mut Connection, new: NewCrop, actor: Option<&str>) -> 
         irrigation_code: new.irrigation_code,
         growing_environment_code: new.growing_environment_code,
         gip_system_code: new.gip_system_code,
-        sown_on: new.sown_on,
         crop_code: new.crop_code,
         source: new.source.unwrap_or_else(|| SOURCE_USER.to_string()),
         source_campaign: new.source_campaign,
@@ -46,10 +45,10 @@ pub fn insert_crop(conn: &mut Connection, new: NewCrop, actor: Option<&str>) -> 
     tx.execute(
         "INSERT INTO crop
            (id, plot_id, season_id, species_name, variety, production_system_code,
-            area_ha, irrigation_code, growing_environment_code, gip_system_code, sown_on,
+            area_ha, irrigation_code, growing_environment_code, gip_system_code,
             crop_code, source, source_campaign, declared_area_ha,
             created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
             crop.id,
             crop.plot_id,
@@ -61,7 +60,6 @@ pub fn insert_crop(conn: &mut Connection, new: NewCrop, actor: Option<&str>) -> 
             crop.irrigation_code,
             crop.growing_environment_code,
             crop.gip_system_code,
-            crop.sown_on,
             crop.crop_code,
             crop.source,
             crop.source_campaign,
@@ -86,6 +84,55 @@ pub fn list_crops(conn: &Connection, season_id: &str, farm_id: &str) -> Result<V
     )?;
     let crops = stmt
         .query_map(params![season_id, farm_id], map_crop)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(crops)
+}
+
+/// One crop by id, WITHDRAWN ONES INCLUDED — the SIEX export.
+///
+/// **The soft-delete filter is left off deliberately, and that is why this has a
+/// name rather than being a query at each caller.** Crop deletion is always
+/// allowed (`treatment_plot` and its siblings froze the name and variety they
+/// print), so a record written years ago routinely names a crop that is no
+/// longer live — and the descriptor still has to state that crop's PRODUCTOS
+/// code. Spelling the query inline four times expressed that intent only by the
+/// absence of a `WHERE`, which the next reader to tidy one of them would not
+/// see.
+///
+/// `find_` rather than `get_`, the [`super::find_export_alias`] convention: a
+/// missing row is `None`, not an error. Every `crop_id` column that reaches here
+/// carries a real foreign key, so that case is unreachable in practice and the
+/// caller simply names no crop code.
+pub fn find_crop_for_export(conn: &Connection, id: &str) -> Result<Option<Crop>> {
+    let crop = conn
+        .query_row("SELECT * FROM crop WHERE id = ?1", [id], map_crop)
+        .optional()?;
+    Ok(crop)
+}
+
+/// Live crops on ONE plot in one season — the DGC units that plot carries.
+///
+/// A narrower [`list_crops`], and it exists because several readers have to
+/// answer "which crop was on this plot" for a register that stores only the
+/// plot: the eco-scheme junctions carry no `crop_id`, because no printed page of
+/// model section 9 asks for one, while the SIEX exchange unit is a plot+crop
+/// pair — a field FEGA itself describes as *"campo calculado"*.
+///
+/// It returns every match rather than an `Option` on purpose. **A plot carrying
+/// two crops is two units, and which of them a caller may assume is the
+/// caller's rule, not this one's**: the export refuses such a plot by name
+/// rather than choosing, and a future reader might reasonably split instead.
+/// Soft-deleted crops are excluded — a withdrawn crop is not a unit, and
+/// counting one would make a plot look ambiguous over a row the farmer has
+/// already retracted.
+pub fn crops_on_plot(conn: &Connection, plot_id: &str, season_id: &str) -> Result<Vec<Crop>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM crop
+         WHERE plot_id = ?1 AND season_id = ?2 AND deleted_at IS NULL
+         ORDER BY id",
+    )?;
+    let crops = stmt
+        .query_map(params![plot_id, season_id], map_crop)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(crops)
 }
@@ -118,7 +165,6 @@ pub fn update_crop(
     after.irrigation_code = update.irrigation_code;
     after.growing_environment_code = update.growing_environment_code;
     after.gip_system_code = update.gip_system_code;
-    after.sown_on = update.sown_on;
     after.crop_code = update.crop_code;
     // Provenance is set-if-present: the manual edit form does not carry these,
     // and losing "this row came from the 2025 declaration" to an unrelated typo
@@ -131,8 +177,8 @@ pub fn update_crop(
     tx.execute(
         "UPDATE crop SET species_name = ?2, variety = ?3, production_system_code = ?4,
                          area_ha = ?5, irrigation_code = ?6, growing_environment_code = ?7,
-                         gip_system_code = ?8, sown_on = ?9, crop_code = ?10, source = ?11,
-                         source_campaign = ?12, declared_area_ha = ?13, updated_at = ?14
+                         gip_system_code = ?8, crop_code = ?9, source = ?10,
+                         source_campaign = ?11, declared_area_ha = ?12, updated_at = ?13
          WHERE id = ?1",
         params![
             id,
@@ -143,7 +189,6 @@ pub fn update_crop(
             after.irrigation_code,
             after.growing_environment_code,
             after.gip_system_code,
-            after.sown_on,
             after.crop_code,
             after.source,
             after.source_campaign,
@@ -202,12 +247,15 @@ pub fn soft_delete_crop(conn: &mut Connection, id: &str, actor: Option<&str>) ->
 /// Whether any crop still lives in this season — the guard
 /// `soft_delete_season` uses (only an empty season may be deleted).
 pub(super) fn season_has_crops(conn: &Connection, season_id: &str) -> Result<bool> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM crop WHERE season_id = ?1 AND deleted_at IS NULL",
+    // EXISTS rather than COUNT(*): the subquery stops at the first matching row,
+    // where a count has to visit every one of a campaign's crops to answer a
+    // yes/no. With `idx_crop_season_plot` it is a single index seek.
+    let held: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM crop WHERE season_id = ?1 AND deleted_at IS NULL)",
         [season_id],
         |row| row.get(0),
     )?;
-    Ok(count > 0)
+    Ok(held)
 }
 
 fn map_crop(row: &Row) -> rusqlite::Result<Crop> {
@@ -222,7 +270,6 @@ fn map_crop(row: &Row) -> rusqlite::Result<Crop> {
         irrigation_code: row.get("irrigation_code")?,
         growing_environment_code: row.get("growing_environment_code")?,
         gip_system_code: row.get("gip_system_code")?,
-        sown_on: row.get("sown_on")?,
         crop_code: row.get("crop_code")?,
         source: row.get("source")?,
         source_campaign: row.get("source_campaign")?,

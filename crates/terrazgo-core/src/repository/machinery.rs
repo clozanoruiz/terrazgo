@@ -15,6 +15,7 @@ use crate::error::{CoreError, Result};
 use crate::models::{
     Machinery, MachineryDetail, MachineryEsExtension, NewMachinery, UpdateMachinery,
 };
+use crate::sql::children_by_parent;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
@@ -87,14 +88,26 @@ pub fn list_machinery(conn: &Connection, farm_id: &str) -> Result<Vec<Machinery>
 /// Active machinery of one farm with its Spanish extension — the registry list
 /// and edit form. `list_machinery` stays extension-less for the treatment form.
 pub fn list_machinery_details(conn: &Connection, farm_id: &str) -> Result<Vec<MachineryDetail>> {
-    let machinery = list_machinery(conn, farm_id)?;
-    machinery
+    let rows = list_machinery(conn, farm_id)?;
+    let ids: Vec<String> = rows.iter().map(|m| m.id.clone()).collect();
+    let mut extensions = children_by_parent(
+        conn,
+        "SELECT machinery_id, roma_number, reganip_number
+         FROM machinery_es_extension WHERE machinery_id IN ({ids})
+         ORDER BY machinery_id",
+        &ids,
+        map_extension,
+        |es| es.machinery_id.clone(),
+    )?;
+    Ok(rows
         .into_iter()
-        .map(|machinery| {
-            let es = get_extension(conn, &machinery.id)?;
-            Ok(MachineryDetail { machinery, es })
+        .map(|machinery| MachineryDetail {
+            es: extensions
+                .remove(&machinery.id)
+                .and_then(|rows| rows.into_iter().next()),
+            machinery,
         })
-        .collect()
+        .collect())
 }
 
 /// Full-row update; `farm_id` is immutable by design (see `UpdateMachinery`).
@@ -207,7 +220,20 @@ fn insert_extension(
     Ok(ext)
 }
 
-fn get_extension(conn: &Connection, machinery_id: &str) -> Result<Option<MachineryEsExtension>> {
+/// One machine's Spanish registry numbers, by id.
+///
+/// Public because the SIEX export reads a ROMA number LIVE for a record that
+/// froze none of its own: a corrected ROMA means the past record named the right
+/// machine with a wrong number (docs/data-model.md → "Nothing is ever frozen").
+/// There is no soft-delete question here — the extension row exists while either
+/// number does, and is hard-deleted with the last of them.
+///
+/// `find_` rather than `get_`, the [`super::find_export_alias`] convention: a
+/// machine registered in neither ROMA nor REGANIP simply has no row.
+pub fn find_machinery_es(
+    conn: &Connection,
+    machinery_id: &str,
+) -> Result<Option<MachineryEsExtension>> {
     Ok(conn
         .query_row(
             "SELECT machinery_id, roma_number, reganip_number

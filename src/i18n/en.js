@@ -15,8 +15,10 @@ import errors from "./en/errors.js";
 import farm from "./en/farm.js";
 import book from "./en/book.js";
 import fertilisation from "./en/fertilisation.js";
+import ecoscheme from "./en/ecoscheme.js";
 import map from "./en/map.js";
 import settings from "./en/settings.js";
+import external from "./en/external.js";
 
 export default {
   ...common,
@@ -24,6 +26,8 @@ export default {
   ...farm,
   ...book,
   ...fertilisation,
+  ...ecoscheme,
   ...map,
   ...settings,
+  ...external,
 };

@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Report-engine errors. Library-style `thiserror` enum like every other
-//! crate; the shell maps it at the command boundary when a consumer arrives.
+//! crate. It reaches the command boundary wrapped by its consumer rather than
+//! directly: `terrazgo-recordbook` carries it as a `#[from]` variant and
+//! implements `Classify`, which maps it to `internal` — see the variants
+//! below for why that is the right answer for every one of them.
 
 /// Everything that can go wrong turning a template + data into a PDF.
 ///

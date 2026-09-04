@@ -55,7 +55,8 @@ export default {
   "treatment.machinery": "Machinery",
   "treatment.machinery_none": "— none —",
   "treatment.phi_days": "PHI (days)",
-  "treatment.phi_default": "Product default: {days} days",
+  "treatment.phi_default.one": "Product default: 1 day",
+  "treatment.phi_default.other": "Product default: {count} days",
   "treatment.notes": "Notes",
   "treatment.plots_section": "Treated plots",
   "treatment.crop": "Crop",
@@ -85,8 +86,24 @@ export default {
     "The duty applies: {surface} ha of permanent crops and arable land, {irrigated} ha irrigated.",
   "advisory.duty_possibly_exempt":
     "With {surface} ha of permanent crops and arable land and {irrigated} ha irrigated, the holding may be exempt (RD 1051/2022 art. 4.1) — check it, the exemption has conditions the app cannot see.",
-  "advisory.duty_undetermined":
-    "The exemption cannot be checked: {plots} plot(s) with no SIGPAC land use or no area.",
+  "advisory.duty_undetermined.one":
+    "The exemption cannot be checked: 1 plot with no SIGPAC land use or no area.",
+  "advisory.duty_undetermined.other":
+    "The exemption cannot be checked: {count} plots with no SIGPAC land use or no area.",
+  "advisory.covers_missing_widths":
+    "Covers with no widths recorded (RD 1048/2022 arts. 42.1.e and 43.1.b)",
+  "advisory.covers_missing_widths_hint":
+    "The cover width and the free canopy width fall due on a later deadline than the establishment date, so the cover is properly recorded: what is missing is that second annotation.",
+  "advisory.inert_covers_established_late":
+    "Inert covers established after 15 April (RD 1048/2022 art. 43.1.a)",
+  "advisory.inert_covers_established_late_hint":
+    "The article sets 15 April as the limit for establishment. The record book states what happened; whether that affects an aid is a separate matter.",
+  "advisory.covers_missing_maintenance":
+    "Live covers with no maintenance recorded (RD 1048/2022 art. 42.1.c)",
+  "advisory.grazing_records_without_end":
+    "Grazings with no end date, on a campaign already closed (RD 1048/2022 art. 30.2 ter)",
+  "advisory.grazing_records_without_end_hint":
+    "The one-month deadline runs from the end of grazing, so an open record is not late: the book simply cannot show the annotation as finished.",
   "export.pdf_title": "Printable record book (PDF)",
   "export.pdf_run": "Generate PDF…",
   "export.pdf_hint":
@@ -105,7 +122,8 @@ export default {
   "product.holder": "Holder / manufacturer",
   "product.formulation": "Formulation",
   "product.phi_days": "Default PHI (days)",
-  "product.phi_detail": "PHI {days} days",
+  "product.phi_detail.one": "PHI 1 day",
+  "product.phi_detail.other": "PHI {count} days",
   "product.auth_section": "Authorisation",
   "product.auth_country": "Country",
   "product.auth_number": "Registration number",
@@ -169,6 +187,12 @@ export default {
   "non_field.subject_postharvest": "Plant product treated",
   "non_field.subject_storage_premises": "Premises treated (type and address)",
   "non_field.subject_transport": "Vehicle treated (type, model and plate)",
+  "non_field.premises": "Premises or vehicle from the catalogue",
+  "non_field.premises_hint":
+    "Anexo III B.b asks for the premises or means of transport treated to be identified.",
+  "non_field.premises_none": "Not registered — describe it here",
+  "non_field.premises_composed": "Recorded from the catalogue entry.",
+  "non_field.premises_missing": "None registered yet; you can add one in the catalogue:",
   "non_field.quantity_t": "Quantity treated (t)",
   "non_field.quantity_m3": "Volume treated (m\u00b3)",
   "non_field.advisor_hint":
@@ -180,6 +204,10 @@ export default {
 
   // Register 3.2: use of treated seed.
   "seed.title": "Treated seed",
+  "seed.tab": "Treated seed",
+  "non_field.tab_postharvest": "Postharvest",
+  "non_field.tab_storage_premises": "Premises",
+  "non_field.tab_transport": "Transport",
   "seed.new": "New sowing",
   "seed.sown_on": "Sowing date",
   "seed.quantity": "Seed quantity (kg)",
@@ -196,6 +224,12 @@ export default {
   "seed_treatment_kind.processing_centre": "Treated at a processing centre",
   "seed_treatment_kind.purchased_es": "Bought already treated, in Spain",
   "seed_treatment_kind.purchased_abroad": "Bought already treated, outside Spain",
+  "seed.acquired_on": "Purchase date",
+  "seed.acquired_on_hint":
+    "When the seed was bought. The printed model does not ask; it is recorded so the record book can be exported.",
+  "seed.sowing_link": "Sowing it was used in",
+  "seed.sowing_link_hint": "Link it to the sowing record on the Crops tab, if you kept one.",
+  "seed.sowing_link_none": "Not linked",
   "seed.plots_section": "Plots sown",
   "seed.surface": "Surface sown (ha)",
   "seed.lot_detail": "lot {lot}",

@@ -57,7 +57,8 @@ export default {
   "treatment.machinery": "Maquinària",
   "treatment.machinery_none": "— cap —",
   "treatment.phi_days": "Termini de seguretat (dies)",
-  "treatment.phi_default": "Valor del producte: {days} dies",
+  "treatment.phi_default.one": "Valor del producte: 1 dia",
+  "treatment.phi_default.other": "Valor del producte: {count} dies",
   "treatment.notes": "Observacions",
   "treatment.plots_section": "Parcel·les tractades",
   "treatment.crop": "Cultiu",
@@ -87,8 +88,24 @@ export default {
     "L’obligació és aplicable: {surface} ha de cultius permanents i terres de cultiu, {irrigated} ha de regadiu.",
   "advisory.duty_possibly_exempt":
     "Amb {surface} ha de cultius permanents i terres de cultiu i {irrigated} ha de regadiu, l’explotació podria estar exceptuada (RD 1051/2022 art. 4.1); comproveu-ho, l’excepció té condicions que l’aplicació no coneix.",
-  "advisory.duty_undetermined":
-    "No es pot comprovar l’excepció: {plots} parcel·la/es sense ús SIGPAC o sense superfície.",
+  "advisory.duty_undetermined.one":
+    "No es pot comprovar l’excepció: 1 parcel·la sense ús SIGPAC o sense superfície.",
+  "advisory.duty_undetermined.other":
+    "No es pot comprovar l’excepció: {count} parcel·les sense ús SIGPAC o sense superfície.",
+  "advisory.covers_missing_widths":
+    "Cobertes sense amplades anotades (RD 1048/2022 art. 42.1.e i 43.1.b)",
+  "advisory.covers_missing_widths_hint":
+    "L'amplada de la coberta i l'amplada lliure de projecció de capçada s'anoten en un termini posterior al de la data d'establiment, així que la coberta està ben registrada: el que falta és aquesta segona anotació.",
+  "advisory.inert_covers_established_late":
+    "Cobertes inertes establertes després del 15 d'abril (RD 1048/2022 art. 43.1.a)",
+  "advisory.inert_covers_established_late_hint":
+    "L'article fixa el 15 d'abril com a data límit d'establiment. El quadern registra el que ha passat; si això afecta l'ajut és una altra cosa.",
+  "advisory.covers_missing_maintenance":
+    "Cobertes vegetals sense manteniment anotat (RD 1048/2022 art. 42.1.c)",
+  "advisory.grazing_records_without_end":
+    "Pasturatges sense data de fi, amb la campanya ja tancada (RD 1048/2022 art. 30.2 ter)",
+  "advisory.grazing_records_without_end_hint":
+    "El termini d'un mes compta des del final del pasturatge, així que un registre obert no va amb retard: simplement el quadern no el pot donar per acabat.",
   "export.pdf_title": "Quadern imprimible (PDF)",
   "export.pdf_run": "Genera el PDF…",
   "export.pdf_hint":
@@ -107,7 +124,8 @@ export default {
   "product.holder": "Titular / fabricant",
   "product.formulation": "Formulació",
   "product.phi_days": "Termini de seguretat per defecte (dies)",
-  "product.phi_detail": "termini de seguretat {days} dies",
+  "product.phi_detail.one": "termini de seguretat 1 dia",
+  "product.phi_detail.other": "termini de seguretat {count} dies",
   "product.auth_section": "Autorització",
   "product.auth_country": "País",
   "product.auth_number": "Núm. de registre",
@@ -176,6 +194,13 @@ export default {
   "non_field.subject_postharvest": "Producte vegetal tractat",
   "non_field.subject_storage_premises": "Local tractat (tipus i adre\u00e7a)",
   "non_field.subject_transport": "Vehicle tractat (tipus, model i matr\u00edcula)",
+  "non_field.premises": "Local o vehicle del cat\u00e0leg",
+  "non_field.premises_hint":
+    "L'annex III B.b demana identificar el local o mitj\u00e0 de transport tractat.",
+  "non_field.premises_none": "Sense registrar \u2014 descriviu-lo aqu\u00ed",
+  "non_field.premises_composed": "S'anota a partir de la fitxa del cat\u00e0leg.",
+  "non_field.premises_missing":
+    "Encara no n'hi ha cap de registrat; podeu afegir-lo al cat\u00e0leg:",
   "non_field.quantity_t": "Quantitat tractada (t)",
   "non_field.quantity_m3": "Volum tractat (m\u00b3)",
   "non_field.advisor_hint": "Annex III B.d: s’indica l’aplicador i, si escau, l’assessor.",
@@ -186,6 +211,10 @@ export default {
 
   // Registre 3.2: \u00fas de llavor tractada.
   "seed.title": "Llavor tractada",
+  "seed.tab": "Llavor tractada",
+  "non_field.tab_postharvest": "Postcollita",
+  "non_field.tab_storage_premises": "Locals",
+  "non_field.tab_transport": "Transport",
   "seed.new": "Nova sembra",
   "seed.sown_on": "Data de sembra",
   "seed.quantity": "Quantitat de llavor (kg)",
@@ -202,6 +231,13 @@ export default {
   "seed_treatment_kind.processing_centre": "Tractada en un centre de condicionament",
   "seed_treatment_kind.purchased_es": "Adquirida tractada a Espanya",
   "seed_treatment_kind.purchased_abroad": "Adquirida tractada fora d'Espanya",
+  "seed.acquired_on": "Data d'adquisici\u00f3",
+  "seed.acquired_on_hint":
+    "Quan es va comprar la llavor. El model impr\u00e8s no ho demana; es registra per poder exportar el quadern.",
+  "seed.sowing_link": "Sembra en qu\u00e8 es va emprar",
+  "seed.sowing_link_hint":
+    "Enllaceu-la amb el registre de sembra de la pesta\u00f1a Cultius, si l'heu anotat.",
+  "seed.sowing_link_none": "Sense enlla\u00e7ar",
   "seed.plots_section": "Parcel\u00b7les sembrades",
   "seed.surface": "Superf\u00edcie sembrada (ha)",
   "seed.lot_detail": "lot {lot}",

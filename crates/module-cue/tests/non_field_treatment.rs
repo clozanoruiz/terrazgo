@@ -14,6 +14,10 @@
 //! the stricter of the two, so a future export needs no migration.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::last_change;
+
 use module_cue::models::*;
 use module_cue::open_in_memory;
 use module_cue::repository as repo;
@@ -103,6 +107,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
 /// A postharvest treatment: grain fumigated in store, measured in tonnes.
 fn sample(fx: &Fixture, kind: &str) -> NewNonFieldTreatment {
     NewNonFieldTreatment {
+        premises_id: None,
         season_id: fx.season_id.clone(),
         farm_id: fx.farm_id.clone(),
         country_code: None,
@@ -126,25 +131,6 @@ fn sample(fx: &Fixture, kind: &str) -> NewNonFieldTreatment {
         efficacy_code: None,
         notes: None,
     }
-}
-
-fn last_change(
-    conn: &Connection,
-    table: &str,
-    id: &str,
-) -> (String, serde_json::Value, serde_json::Value) {
-    conn.query_row(
-        "SELECT operation, payload FROM record_change
-         WHERE entity_table = ?1 AND entity_id = ?2
-         ORDER BY changed_at DESC, id DESC LIMIT 1",
-        [table, id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    )
-    .map(|(op, payload)| {
-        let mut doc: serde_json::Value = serde_json::from_str(&payload).unwrap();
-        (op, doc["before"].take(), doc["after"].take())
-    })
-    .unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -689,6 +675,7 @@ fn a_declaration_can_be_withdrawn_and_then_restated() {
 /// thing at a time.
 fn correction_of(record: &NonFieldTreatment) -> UpdateNonFieldTreatment {
     UpdateNonFieldTreatment {
+        premises_id: record.premises_id.clone(),
         treated_on: record.treated_on.clone(),
         subject_description: record.subject_description.clone(),
         subject_product_code: record.subject_product_code.clone(),
@@ -876,4 +863,174 @@ fn a_correction_logs_complete_before_and_after_images() {
     );
     assert_eq!(after["subject_description"], "Trigo blando, silo 3");
     assert!(after["product_name_snapshot"].is_string());
+}
+
+// --- the premises registry (2026-08-20) ------------------------------------
+
+fn store(conn: &mut Connection, farm_id: &str, name: &str, address: &str) -> String {
+    terrazgo_core::repository::insert_premises(
+        conn,
+        terrazgo_core::models::NewPremises {
+            farm_id: farm_id.into(),
+            kind_code: "building".into(),
+            name: name.into(),
+            address: Some(address.into()),
+            vehicle_model: None,
+            plate: None,
+            class_code: None,
+            volume_m3: Some(400.0),
+            notes: None,
+            cadastral_reference: None,
+            rea_installation_code: None,
+        },
+        None,
+    )
+    .unwrap()
+    .premises
+    .id
+}
+
+#[test]
+fn a_named_premises_composes_the_printed_subject() {
+    // RD 1311/2012 Anexo III Parte I B.b asks for the local treated to be
+    // identified. Once a registry row is named it composes the cell, so the
+    // record and the registry cannot state different things.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let premises_id = store(
+        &mut conn,
+        &fx.farm_id,
+        "Almacén grande",
+        "Camino de la Vega, 1",
+    );
+
+    let mut new = sample(&fx, "storage_premises");
+    new.premises_id = Some(premises_id.clone());
+    new.subject_description = "whatever the form still had in the box".into();
+    let stored = repo::insert_non_field_treatment(&mut conn, new, None).unwrap();
+
+    assert_eq!(
+        stored.record.subject_description,
+        "Almacén grande, Camino de la Vega, 1"
+    );
+    assert_eq!(
+        stored.record.premises_id.as_deref(),
+        Some(premises_id.as_str())
+    );
+}
+
+#[test]
+fn a_record_may_still_name_no_premises() {
+    // The link is nullable on purpose: a farmer who has not built the registry
+    // yet must still be able to record a lawful treatment. The export precheck
+    // is where the exchange format's requirement belongs.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+
+    let stored =
+        repo::insert_non_field_treatment(&mut conn, sample(&fx, "storage_premises"), None).unwrap();
+    assert_eq!(stored.record.premises_id, None);
+    assert!(!stored.record.subject_description.is_empty());
+}
+
+#[test]
+fn each_register_refuses_the_kind_its_page_does_not_print() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let building = store(&mut conn, &fx.farm_id, "Almacén grande", "Camino 1");
+
+    let mut wrong = sample(&fx, "transport");
+    wrong.premises_id = Some(building.clone());
+    assert!(matches!(
+        repo::insert_non_field_treatment(&mut conn, wrong, None).unwrap_err(),
+        module_cue::CueError::Invalid("premises_kind_mismatch")
+    ));
+
+    let mut produce = sample(&fx, "postharvest");
+    produce.premises_id = Some(building);
+    assert!(matches!(
+        repo::insert_non_field_treatment(&mut conn, produce, None).unwrap_err(),
+        module_cue::CueError::Invalid("premises_on_produce_record")
+    ));
+}
+
+#[test]
+fn correcting_the_premises_re_takes_the_description_and_correcting_it_elsewhere_does_not() {
+    // The snapshot rule, both directions. Naming a DIFFERENT store re-composes
+    // the cell; correcting the store's own address leaves every record that
+    // named it stating exactly what it stated before.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let first = store(&mut conn, &fx.farm_id, "Almacén grande", "Camino 1");
+    let second = store(&mut conn, &fx.farm_id, "Nave nueva", "Polígono 4");
+
+    let mut new = sample(&fx, "storage_premises");
+    new.premises_id = Some(first.clone());
+    let stored = repo::insert_non_field_treatment(&mut conn, new, None).unwrap();
+    assert_eq!(
+        stored.record.subject_description,
+        "Almacén grande, Camino 1"
+    );
+
+    // (a) an edit made ELSEWHERE must not reach the record
+    terrazgo_core::repository::update_premises(
+        &mut conn,
+        &first,
+        terrazgo_core::models::UpdatePremises {
+            kind_code: "building".into(),
+            name: "Almacén grande".into(),
+            address: Some("Camino 99".into()),
+            vehicle_model: None,
+            plate: None,
+            class_code: None,
+            volume_m3: Some(400.0),
+            notes: None,
+            cadastral_reference: None,
+            rea_installation_code: None,
+        },
+        None,
+    )
+    .unwrap();
+    let mut untouched = correction_of(&stored.record);
+    untouched.notes = Some("corrigiendo otra cosa".into());
+    let after =
+        repo::update_non_field_treatment(&mut conn, &stored.record.id, untouched, None).unwrap();
+    assert_eq!(
+        after.record.subject_description, "Almacén grande, Camino 1",
+        "correcting the registry row must not rewrite what the record states"
+    );
+
+    // (b) naming a different store IS the correction, so it re-takes
+    let mut moved = correction_of(&after.record);
+    moved.premises_id = Some(second);
+    let after =
+        repo::update_non_field_treatment(&mut conn, &stored.record.id, moved, None).unwrap();
+    assert_eq!(after.record.subject_description, "Nave nueva, Polígono 4");
+}
+
+#[test]
+fn a_premises_of_another_holding_cannot_be_named() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let neighbour = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Finca del Vecino".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            country_code: "es".into(),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+    let theirs = store(&mut conn, &neighbour, "Almacén ajeno", "Otro camino 2");
+
+    let mut new = sample(&fx, "storage_premises");
+    new.premises_id = Some(theirs);
+    assert!(matches!(
+        repo::insert_non_field_treatment(&mut conn, new, None).unwrap_err(),
+        module_cue::CueError::Invalid("premises_not_on_farm")
+    ));
 }

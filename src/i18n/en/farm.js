@@ -53,6 +53,7 @@ export default {
     'Abstraction points for human consumption on or near the plot (record book section 2.2). Tick "none" on plots you have checked and where there are none: blank means the question has not been asked yet.',
   "water_points.empty": "No abstraction points recorded yet.",
   "water_points.none_on": 'No abstraction points on "{plot}" (checked)',
+  "water_points.none_column": "No abstraction points (checked)",
   "water_point.denomination": "Name",
   "water_point.inside_plot": "Inside the plot",
   "water_point.distance": "Distance (m)",
@@ -81,8 +82,6 @@ export default {
   "crop.species": "Species",
   "crop.variety": "Variety",
   "crop.production_system": "Production system",
-  "crop.sown_on": "Sown on",
-  "crop.sown_detail": "sown {date}",
   "crop.delete_confirm":
     'Delete crop "{species}"? Treatments already recorded keep their own data.',
   "operators.title": "Operators",
@@ -110,6 +109,37 @@ export default {
   "machinery.itv_detail": "ITV due {date}",
   "machinery.delete_confirm":
     'Delete machinery "{name}"? It is hidden from the app but its records are kept.',
+  "premises.title": "Premises and vehicles",
+  "premises.intro":
+    "The stores and vehicles treated in sections 3.4 and 3.5. Registering one here means every treatment can identify it, instead of describing it again.",
+  "premises.new": "New premises or vehicle",
+  "premises.empty": "No premises or vehicles on this farm yet.",
+  "premises.no_farms": "Create a farm first:",
+  "premises.farm": "Farm",
+  "premises.kind": "Register type",
+  "premises.name": "Name",
+  "premises.name_hint": "What it is called on the farm; this is what prints as the “type”.",
+  "premises.address": "Address",
+  "premises.vehicle_model": "Model",
+  "premises.plate": "Registration plate",
+  "premises.cadastral_reference": "Cadastral reference",
+  "premises.es_section": "Spanish registry data",
+  "premises.rea_installation_code": "REA building code",
+  "premises.rea_hint":
+    "The identifier REA assigns to this building; it appears on its registration. Required by the official export.",
+  "premises.rea_detail": "REA {code}",
+  "premises.cadastral_hint":
+    "Of the building, or of the plot it stands on if it has none. Required by the official export.",
+  "premises.class": "Class of building or installation",
+  "premises.class_hint": "Official catalogue of buildings and installations.",
+  "premises.volume": "Capacity (m³)",
+  "premises.volume_hint": "Total capacity; the volume treated is recorded on each treatment.",
+  "premises.volume_detail": "{volume} m³",
+  "premises.notes": "Notes",
+  "premises.delete_confirm":
+    'Delete "{name}"? It is hidden from the app but the treatments naming it are kept.',
+  "premises_kind.building": "Premises or installation",
+  "premises_kind.vehicle": "Means of transport",
   "production_system.conventional": "Conventional",
   "production_system.organic": "Organic",
   "production_system.integrated": "Integrated",
@@ -124,7 +154,6 @@ export default {
   "profiles.empty": "No profiles yet.",
   "profile.display_name": "Name",
   "profile.operator_link": "Linked operator (applicator)",
-  "profile.operator_detail": "Applicator: {name}",
   "profile.delete_confirm": 'Delete profile "{name}"? It will no longer appear in lists.',
 
   // Slice 5: the fields the official model asks for.
@@ -199,6 +228,8 @@ export default {
   "crops.proposals_campaign": "CAP declaration campaign {campaign} → season {season}",
   "crops.proposal_insert": "Add as a new crop",
   "crops.proposals_refresh": "Refresh from SIGPAC",
+  "crops.proposals_accept": "Accept",
+  "crops.proposals_effect": "Effect",
   "crops.proposal_secondary": "Add as a secondary crop",
   "crops.proposal_update": 'Update crop "{name}" with the declared values',
   "crops.proposal_update_hint": "It is the plot's only crop and has no treatments yet.",
@@ -214,7 +245,10 @@ export default {
   "crops.proposal_declared_area": "Declared area: {area} ha",
   "crops.proposal_none": "No crops declared in campaigns {current} or {previous}: {plots}",
   "crops.proposal_no_ref": "No complete SIGPAC reference: {plots}",
-  "crops.proposal_unreachable": "SIGPAC could not be consulted for these plots ({reason}): {plots}",
+  "crops.proposal_unreachable.one":
+    "SIGPAC could not be consulted for this plot ({reason}): {plots}",
+  "crops.proposal_unreachable.other":
+    "SIGPAC could not be consulted for these plots ({reason}): {plots}",
   "crops.proposal_confirm": "Save the selected crops ({count}) — declaration campaign {campaigns}",
   "crops.proposal_empty": "SIGPAC has no declared crops for these plots.",
   "crop.species_search": "Search species…",

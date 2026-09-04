@@ -9,19 +9,16 @@
 //! catalogues whose raw rows are not that list.
 
 use rusqlite::Connection;
-use serde::Serialize;
 use terrazgo_core::catalogue::{CatalogueCode, active_codes};
 
 use crate::error::Result;
 use crate::siex;
 
 /// One offer in a catalogue-backed picker: the code the record stores, and the
-/// name the farmer reads.
-#[derive(Debug, Clone, Serialize)]
-pub struct CataloguePick {
-    pub code: String,
-    pub name: String,
-}
+/// name the farmer reads. Core's, since core grew a catalogue-backed field of
+/// its own (`premises.class_code`) and two identical structs would serialize
+/// the same JSON while drifting independently.
+pub use terrazgo_core::catalogue::CataloguePick;
 
 /// The harvested produce a sale or a postharvest treatment can name (FEGA
 /// `PROD_VEGETAL`), one entry per code.

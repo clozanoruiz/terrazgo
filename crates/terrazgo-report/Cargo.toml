@@ -24,3 +24,9 @@ thiserror = { workspace = true }
 # Dev-only font-parsing deps deliberately absent: the glyph-coverage test
 # reads the vendored faces through typst's own Font type, so the test and the
 # renderer can never disagree on how a font is parsed.
+
+[dev-dependencies]
+# .xlsx is a zip container, and the date-format contract is only observable
+# inside it — see tests/workbook.rs. rust_xlsxwriter already depends on this
+# crate, so the dev tree gains no new code, only access to it.
+zip = { workspace = true }

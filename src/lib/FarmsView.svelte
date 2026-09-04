@@ -7,11 +7,16 @@
   import { t, tCode } from "../i18n.js";
   import { invoke } from "./backend.js";
   import { lookups, loadLookups } from "./lookups.svelte.js";
-  import { notify, run } from "./notifications.svelte.js";
+  import { run } from "./notifications.svelte.js";
   import Skeleton from "./Skeleton.svelte";
   import { sortedBy } from "./collate.js";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems } from "./selectItems.js";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
 
   let farms = $state([]);
   // Display order is the client's business: SQL orders by BINARY collation,
@@ -56,8 +61,7 @@
       : null;
   }
 
-  function submit(event) {
-    event.preventDefault();
+  async function submit() {
     const farm = {
       name: name.trim(),
       owner_name: ownerName.trim() || null,
@@ -65,71 +69,88 @@
       country_code: countryCode,
       es: collectEs(),
     };
-    run(async () => {
-      await invoke("create_farm", { farm });
-      notify(t("message.farm_saved", { name: farm.name }));
-      creating = false;
-      farms = await invoke("list_farms");
-    });
+    await invoke("create_farm", { farm });
+    creating = false;
+    farms = await invoke("list_farms");
   }
 
-  function farmDetail(farm) {
-    return [tCode("country", farm.country_code), farm.owner_name].filter(Boolean).join(" · ");
-  }
+  // The "·"-joined detail string these lists used to build is gone: the table
+  // has a column per value, which is what makes them scannable down the page.
 </script>
 
-<section class="view">
+<section class="view framed">
   <div class="view-head">
     <h2>{t("farms.title")}</h2>
     <button type="button" onclick={startCreate}>{t("farms.new")}</button>
   </div>
 
-  {#if creating}
-    <form onsubmit={submit}>
-      <div class="form-grid">
-        <label><span>{t("farm.name")}</span><input required bind:value={name} /></label>
-        <label><span>{t("farm.owner")}</span><input bind:value={ownerName} /></label>
-        <label><span>{t("farm.owner_tax_id")}</span><input bind:value={ownerTaxId} /></label>
-        <TzSelect
-          label={t("farm.country")}
-          items={codeItems(countries, "country")}
-          bind:value={countryCode}
-        />
-      </div>
-      {#if countryCode === "es"}
-        <fieldset class="es-only">
-          <legend>{t("farm.es_section")}</legend>
-          <div class="form-grid">
-            <label><span>{t("farm.rea")}</span><input bind:value={reaCode} /></label>
-            <label><span>{t("farm.rega")}</span><input bind:value={regaCode} /></label>
-            <label><span>{t("farm.province")}</span><input bind:value={provinceCode} /></label>
-          </div>
-        </fieldset>
+  <TzWorkspace open={creating} title={t("farms.new")} onclose={() => (creating = false)}>
+    {#snippet list()}
+      {#if loading}
+        <Skeleton />
+      {:else if farms.length === 0}
+        <p class="table-empty">{t("farms.empty")}</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table" use:resizableColumns={"farms"}>
+            <thead>
+              <tr>
+                <th>{t("column.name")}</th>
+                <th>{t("column.country")}</th>
+                <th>{t("column.owner")}</th>
+                <th>{t("column.tax_id")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each sortedFarms as farm (farm.id)}
+                <!-- A farm row navigates rather than opening an inspector: the
+                     holding has a page of its own. The <a> is still what a
+                     keyboard reaches; the row click is the pointer shortcut. -->
+                <tr onclick={(e) => opensRow(e) && (location.hash = "#/farms/" + farm.id)}>
+                  <td class="col-name"><a href={"#/farms/" + farm.id}>{farm.name}</a></td>
+                  <td class="col-muted">{tCode("country", farm.country_code)}</td>
+                  <td class="col-muted">{farm.owner_name ?? ""}</td>
+                  <td class="col-muted">{farm.owner_tax_id ?? ""}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
+    {/snippet}
+
+    {#snippet inspector(formId)}
+      <TzForm id={formId} onsubmit={submit}>
+        <div class="form-grid">
+          <TextInput label={t("farm.name")} required bind:value={name} />
+          <TextInput label={t("farm.owner")} bind:value={ownerName} />
+          <TextInput label={t("farm.owner_tax_id")} bind:value={ownerTaxId} />
+          <TzSelect
+            label={t("farm.country")}
+            items={codeItems(countries, "country")}
+            bind:value={countryCode}
+          />
+        </div>
+        {#if countryCode === "es"}
+          <fieldset class="es-only">
+            <legend>{t("farm.es_section")}</legend>
+            <div class="form-grid">
+              <TextInput label={t("farm.rea")} bind:value={reaCode} />
+              <TextInput label={t("farm.rega")} bind:value={regaCode} />
+              <TextInput label={t("farm.province")} bind:value={provinceCode} />
+            </div>
+          </fieldset>
+        {/if}
+      </TzForm>
+    {/snippet}
+
+    {#snippet actions(formId)}
       <div class="form-actions">
-        <button type="submit">{t("form.save")}</button>
+        <button type="submit" form={formId}>{t("form.save")}</button>
         <button type="button" class="btn-cancel" onclick={() => (creating = false)}
           >{t("form.cancel")}</button
         >
       </div>
-    </form>
-  {/if}
-
-  {#if loading}
-    <Skeleton />
-  {:else}
-    <ul class="card-list">
-      {#each sortedFarms as farm (farm.id)}
-        <li class="card">
-          <a href={"#/farms/" + farm.id}>
-            <strong>{farm.name}</strong>
-            <span class="detail">{farmDetail(farm)}</span>
-          </a>
-        </li>
-      {/each}
-    </ul>
-    {#if farms.length === 0}
-      <p>{t("farms.empty")}</p>
-    {/if}
-  {/if}
+    {/snippet}
+  </TzWorkspace>
 </section>

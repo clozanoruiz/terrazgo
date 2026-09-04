@@ -19,3 +19,9 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 csv = { workspace = true }
+
+# Shared test fixtures. This is a DEV-dependency cycle (the testkit depends on
+# this crate), which cargo allows precisely because it does not affect the
+# library build — only `cargo test` sees it.
+[dev-dependencies]
+terrazgo-testkit = { workspace = true }

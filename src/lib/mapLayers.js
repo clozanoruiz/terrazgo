@@ -7,6 +7,8 @@
 // adding one entry here, exactly like nav.js entries add screens.
 //
 // Framework-agnostic tier: no Svelte imports (docs/frontend-conventions.md).
+
+import { formatNumber } from "../i18n.js";
 //
 // Entry contract:
 //   id       — stable slug; also namespaces the MapLibre source/layer ids.
@@ -170,14 +172,11 @@ export const MAP_LAYERS = [
         invoke("list_geo_features", { farmId }),
         invoke("list_zone_flags", { farmId }),
       ]);
-      // Latest campaign wins per (plot, zone kind): flags arrive newest
-      // campaign first, so the first row seen decides.
-      const seen = new Set();
+      // One row per (plot, zone kind) already: the backend answers with each
+      // plot's current standing, so latest-campaign-wins is settled there and
+      // not re-decided here.
       const zones = new Map();
       for (const flag of flags) {
-        const key = `${flag.plot_id}/${flag.zone_type_code}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
         if (flag.status === "inside") {
           if (!zones.has(flag.plot_id)) zones.set(flag.plot_id, {});
           zones.get(flag.plot_id)[flag.zone_type_code] = true;
@@ -267,7 +266,10 @@ export const MAP_LAYERS = [
       return [
         { labelKey: "map.inspect.crop_code", value: props.parc_producto },
         { labelKey: "map.inspect.exploitation_system", value: props.parc_sistexp },
-        { labelKey: "map.inspect.declared_surface", value: m2ToHa(props.parc_supcult) },
+        {
+          labelKey: "map.inspect.declared_surface",
+          value: formatNumber(m2ToHa(props.parc_supcult)),
+        },
         { labelKey: "map.inspect.campaign", value: props.exp_ano },
       ];
     },
@@ -384,7 +386,7 @@ export const MAP_LAYERS = [
       return [
         { labelKey: "map.inspect.sigpac_ref", value: ref },
         { labelKey: "map.inspect.land_use", value: props.uso_sigpac },
-        { labelKey: "map.inspect.surface_ha", value: m2ToHa(props.superficie) },
+        { labelKey: "map.inspect.surface_ha", value: formatNumber(m2ToHa(props.superficie)) },
       ];
     },
   },
@@ -396,7 +398,12 @@ export const MAP_LAYERS = [
 // Rounding to whole m² BEFORE dividing = rounding the result to 4 ha
 // decimals (the REST services' own precision); the raw tile values carry
 // float noise (1152241.0265…) that would otherwise render as-is.
-function m2ToHa(value) {
+//
+// Exported because the GPKG import suggests a plot's area from the same kind
+// of m² figure (MapView's importEntryAsPlot). That path used to round to 2 ha
+// decimals of its own, which discarded precision the source actually states —
+// two answers to one question, and the less faithful one was the one stored.
+export function m2ToHa(value) {
   return value == null ? null : Math.round(value) / 10000;
 }
 

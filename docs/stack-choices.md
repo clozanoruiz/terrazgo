@@ -1,11 +1,12 @@
 # Stack choices — questions asked, and the answers
 
-> Status: reviewed 2026-08-12. Five candidate changes to the stack were weighed
-> on what they would *offer*, not on how much work they would be. **Four of the
-> five answers are "no", and that is the reason this document exists**: a
-> rejected option with its reasoning written down stays rejected, while one
-> that was only ever discussed comes back every few months. Nothing here is
-> scheduled; the items that survived are listed at the end as candidates.
+> Status: five candidate changes reviewed 2026-08-12, a sixth (§2b, icons)
+> added 2026-09-03. They were weighed on what they would *offer*, not on how
+> much work they would be. **Four of the six answers are "no", and that is the
+> reason this document exists**: a rejected option with its reasoning written
+> down stays rejected, while one that was only ever discussed comes back every
+> few months. Nothing here is scheduled; the items that survived are listed at
+> the end as candidates.
 >
 > The measurements are kept alongside the verdicts. If a premise changes — a
 > new raster need, a library that grows a capability it lacks today — the
@@ -20,6 +21,7 @@
 | Svelte stores / a MobX-style layer? | **No library.** One narrow module for reference data |
 | Tailwind CSS or similar? | **No.** The gap is a thin token set, not the CSS language |
 | An API for third-party extensions? | **One already exists** and it is compile-time. Improve it for our own modules |
+| An icon library instead of hand-copied paths? | **Yes — Lucide** (`@lucide/svelte`, ISC), adopted 2026-09-03. It injects no stylesheet, so it clears the standing rule |
 
 ---
 
@@ -237,6 +239,60 @@ guard keeps them out (see
 components"). Without this measurement the failure would have been found by a
 user, not by a table.
 
+**Re-read 2026-08-26, and the ban turned out wider than the defect.** The
+measurement above was right; the rule drawn from it named components where the
+fault lay in a default. In bits-ui 2.18.1, `document.body.setAttribute("style",
+…)` occurs **exactly once in the dist** and is reachable only from
+`BodyScrollLock`'s teardown; `new BodyScrollLock` occurs **exactly once**,
+inside `if (preventScroll)`; and `<ScrollLock>` is rendered by exactly two
+components, both of which forward a `preventScroll` prop. So
+`Dialog.Content preventScroll={false}` never constructs the lock — the identical
+guard the owned controls already use — and in this app the prop costs nothing at
+all, because `body { overflow: hidden }` means there is no body scroll to lock.
+`TzDialog.svelte` is the one sanctioned `Dialog` import; the other three stay
+banned because nothing needs them.
+
+**The lesson is about the shape of the conclusion, not the components.** A
+measurement of a *mechanism* had been written down as a list of *names*, and a
+list of names cannot be re-checked against a new version of the library — this
+one had already drifted, since `DropdownMenu` and `ContextMenu` no longer take
+the lock at all. State the mechanism and the escape from it, then let the list
+follow. And this re-read cost a `tauri build --debug --no-bundle`: the method
+note above still binds, but the **debug** profile carries
+`tauri/custom-protocol` too, which is several minutes cheaper than a release
+build and serves the frontend under exactly the same policy.
+
+---
+
+## 2b. Icons: Lucide, in place of hand-copied paths (2026-09-03)
+
+**Verdict: yes.** Icons were 24 inline `<svg>` blocks and six path strings in
+`nav.js`, copied by hand from Feather and attributed in five comments — there
+was never a dependency to remove. Lucide is Feather's maintained successor,
+with ~1600 icons against Feather's ~290, so picking a new one stops being a
+copy-paste from a third-party site into our source.
+
+**It clears the standing rule for a new dependency** — *no runtime stylesheet
+injection*, §2's live CSP constraint. Read out of `@lucide/svelte` 1.40.0's
+dist: the one shared `Icon.svelte` renders `<svg>` with `defaultAttributes`
+spread onto it plus a `class` array, and `setAttribute("style", …)`, `<style>`,
+`insertRule` and `.style.` appear nowhere in the package. Nothing to verify in a
+`custom-protocol` build, because there is no CSS to block.
+
+Two consequences worth knowing:
+
+- **The size it renders is an ATTRIBUTE** (`width={size} height={size}`, 24 by
+  default), and any CSS length overrides an attribute. So every existing icon
+  rule still wins, and `.sidebar svg` could drop its `fill`/`stroke`/
+  `stroke-width`/linecap declarations — the library states all four itself.
+- **`nav.js` names an icon; it does not hold one.** It is the agnostic tier and
+  may not import components, so `icon` is a Lucide name and `lib/icons.js` is
+  the view-tier half that resolves it — the `nav.js` / `routes.js` split, for
+  the same reason.
+
+Cost, measured: **+2.3 kB raw / +0.5 kB gzipped** on the main chunk for the 16
+distinct icons in use, so the tree-shaking claim holds.
+
 ---
 
 ## 3. Frontend state: stores, or a MobX-style layer
@@ -262,7 +318,7 @@ records. That is a good trade in a typical web app and a bad one here.
 - 14 commands are fetched independently by two or more components —
   `list_farms` by five; `list_countries`, `list_operators`, `list_advisors`,
   `list_plots`, `list_problem_codes` and `get_settings` by three each.
-- `TreatmentsView.svelte` mounts with 26 `$state` list declarations and 29
+- `RecordBookView.svelte` mounts with 26 `$state` list declarations and 29
   `invoke()` calls, most of them lookups.
 - Those lists are then prop-drilled two levels: `BookTreatments` takes 17 props
   and re-drills 17 into `TreatmentForm`.

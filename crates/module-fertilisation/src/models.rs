@@ -37,6 +37,19 @@ pub struct FertiliserMaterial {
     pub deleted_at: Option<String>,
 }
 
+/// Anexo III C.f's seven ways a fertiliser reaches the crop. Not a plain
+/// `Lookup`: it carries a third column, and every consumer needs it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApplicationMethod {
+    pub code: String,
+    pub i18n_key: String,
+    /// Two of the seven are fertigation. Stored rather than derived from the
+    /// code, so no reader has to know which by reading identifiers — the form
+    /// keys its irrigation picker on this, the book keys the model's "(F)" box
+    /// on it, and the export keys `Fertirrigacion` on it.
+    pub is_fertigation: bool,
+}
+
 /// One line of a material's composition: a percentage against one of the three
 /// FEGA nutrient catalogues, chosen by `kind_code`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -144,8 +157,17 @@ pub struct FertilisationRecord {
     pub richness_k2o_snapshot: Option<f64>,
     /// C.i / art. 5.g — whether sewage sludge was applied.
     pub sludge_application: bool,
+    /// `Fertilizacion.GestionSostInsu` — whether the holding manages its inputs
+    /// sustainably. Twin-only: Anexo V marks it Obligatorio, no decree names it
+    /// and the printed model has no box.
+    pub sustainable_input_management: bool,
     /// C.g, explicitly optional.
     pub machinery_id: Option<String>,
+    /// The watering that carried this fertiliser, for a FERTIGATION only —
+    /// one act the decree records twice and the twin re-joins as
+    /// `Fertirrigacion`. `None` on every other application method, where the
+    /// repository refuses it.
+    pub irrigation_record_id: Option<String>,
     /// C.k — the service company and its REGFER number, when the applicator is
     /// not the holding's own.
     pub service_company: Option<String>,
@@ -203,7 +225,11 @@ pub struct NewFertilisationRecord {
     #[serde(default)]
     pub sludge_application: bool,
     #[serde(default)]
+    pub sustainable_input_management: bool,
+    #[serde(default)]
     pub machinery_id: Option<String>,
+    #[serde(default)]
+    pub irrigation_record_id: Option<String>,
     #[serde(default)]
     pub service_company: Option<String>,
     #[serde(default)]
@@ -239,7 +265,11 @@ pub struct UpdateFertilisationRecord {
     #[serde(default)]
     pub sludge_application: bool,
     #[serde(default)]
+    pub sustainable_input_management: bool,
+    #[serde(default)]
     pub machinery_id: Option<String>,
+    #[serde(default)]
+    pub irrigation_record_id: Option<String>,
     #[serde(default)]
     pub service_company: Option<String>,
     #[serde(default)]

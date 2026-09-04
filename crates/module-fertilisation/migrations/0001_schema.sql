@@ -179,9 +179,14 @@ CREATE TABLE irrigation_plot (
 
 -- `Riego.OrigenAgua[]`. A junction because the twin is an array; unique per
 -- (record, origin) so listing a source twice folds instead of erroring.
+-- Where the water came from. A junction rather than a column because one
+-- watering can legitimately draw on more than one source at once — a well
+-- topped up from a channel is ordinary, and the record must be able to say so.
 CREATE TABLE irrigation_water_origin (
     id                   TEXT PRIMARY KEY,
     irrigation_record_id TEXT NOT NULL REFERENCES irrigation_record(id) ON DELETE CASCADE,
+    -- Surface water, groundwater, reclaimed water, desalinated…: a small
+    -- CLOSED list, so it gets a real foreign key.
     origin_code          TEXT NOT NULL REFERENCES water_origin(code),
     UNIQUE (irrigation_record_id, origin_code)
 );
@@ -260,10 +265,19 @@ CREATE TABLE fertiliser_material (
 --
 -- Codes verbatim, no foreign key (the catalogue rule). A pure child of the
 -- material: it dies with it.
+-- What a fertiliser material CONTAINS: one coded junction rather than a fixed
+-- set of columns, because RD 1311/2012 Anexo III sección C hangs eight
+-- agronomic values off the material and a fixed column set would have to guess
+-- which eight.
 CREATE TABLE fertiliser_material_nutrient (
     id                     TEXT PRIMARY KEY,
     fertiliser_material_id TEXT NOT NULL REFERENCES fertiliser_material(id) ON DELETE CASCADE,
+    -- WHICH of the three catalogues `nutrient_code` is read against, and it is
+    -- load-bearing: the same integer means a different substance in each one
+    -- (3 is nitric N in the first, copper in the second, lead in the third).
+    -- Reading the code without its kind is not merely imprecise, it is wrong.
     kind_code              TEXT NOT NULL REFERENCES nutrient_kind(code),
+    -- The provider's code within that catalogue, verbatim and FK-free.
     nutrient_code          TEXT NOT NULL,
     -- Percentage of the material, as the label states it (SIEX `Porcentaje`).
     percentage             REAL NOT NULL,
@@ -325,6 +339,32 @@ CREATE TABLE fertilisation_record (
     -- so an application with no machine simply omits the block.
     machinery_id            TEXT REFERENCES machinery(id),
 
+    -- Anexo V block 9 field 5, `Fertilizacion.GestionSostInsu`: "indicar si
+    -- realizan o no una gestión sostenible de insumos conforme a las
+    -- disposiciones normativas vigentes en materia de nutrición sostenible de
+    -- los suelos agrarios". No decree names it and the printed model has no
+    -- box; FEGA marks it Obligatorio inside a block we do send, which is the
+    -- standing line that already put `sludge_application` here and
+    -- `tool_generated` on the plan.
+    sustainable_input_management INTEGER NOT NULL DEFAULT 0,
+
+    -- The watering that carried this fertiliser, when the application was a
+    -- FERTIGATION (added 2026-08-21).
+    --
+    -- One act, recorded twice, because the decree splits it: art. 5.d puts the
+    -- fertiliser in this register and art. 5.e puts the water in
+    -- `irrigation_record`. The exchange format re-joins them —
+    -- `Fertilizacion.Fertirrigacion` is `Riego`'s own data restated, member for
+    -- member — and it is the ONLY reader of C.l's two water-quality figures,
+    -- which live on the irrigation record and appear in no printed column and
+    -- in no other block. Without this link they are captured for nobody.
+    --
+    -- Refused unless `application_method.is_fertigation`, because on any other
+    -- method the link would assert a fertigation that did not happen; and the
+    -- export precheck demands it when the method IS one, which asks for nothing
+    -- new — art. 5.e already obliges the irrigation record for a fertigation.
+    irrigation_record_id    TEXT REFERENCES irrigation_record(id),
+
     -- C.k: the service company, when the applicator is not the holding's own,
     -- with its REGFER registration number (RD 1051/2022 art. 18 — a THIRD
     -- machinery registry beside ROMA and REGANIP). The decree attaches the
@@ -371,10 +411,12 @@ CREATE TABLE fertilisation_plot (
 -- means different things in each: 41 rows under "Fertilización", 31 under
 -- "Riego", 26 under "Fitosanitario". The code is stored verbatim and THIS
 -- TABLE fixes the ámbito.
+-- Sustainable-management practices claimed for this application. A junction
+-- because several apply at once, and coded against the provider's list.
 CREATE TABLE fertilisation_practice (
     id                      TEXT PRIMARY KEY,
     fertilisation_record_id TEXT NOT NULL REFERENCES fertilisation_record(id) ON DELETE CASCADE,
-    practice_code           TEXT NOT NULL,
+    practice_code           TEXT NOT NULL,   -- provider catalogue code, verbatim, no FK
     UNIQUE (fertilisation_record_id, practice_code)
 );
 
@@ -445,6 +487,8 @@ CREATE INDEX idx_fertilisation_plan_season ON fertilisation_plan (season_id, far
 -- The repository keeps a crop in at most ONE live plan: two plans recommending
 -- different nitrogen for the same crop would make section 7.1 print two
 -- different figures for one row.
+-- Which crops a plan covers. One plan routinely spans several crops, and the
+-- plan's own figures are per hectare, so the junction carries no quantities.
 CREATE TABLE fertilisation_plan_crop (
     id                     TEXT PRIMARY KEY,
     fertilisation_plan_id  TEXT NOT NULL REFERENCES fertilisation_plan(id) ON DELETE CASCADE,

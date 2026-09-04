@@ -53,6 +53,25 @@ pub fn list_gip_systems(conn: &Connection) -> Result<Vec<Lookup>> {
     lookup_rows(conn, "SELECT code, i18n_key FROM gip_system ORDER BY rowid")
 }
 
+/// What a `premises` row is — building or vehicle — for the registry form.
+/// Core-native words: the register's own vocabulary (`storage_premises` /
+/// `transport`) belongs to module-cue, and these say what the THING is.
+pub fn list_premises_kinds(conn: &Connection) -> Result<Vec<Lookup>> {
+    lookup_rows(
+        conn,
+        "SELECT code, i18n_key FROM premises_kind ORDER BY rowid",
+    )
+}
+
+/// Sown or planted — how a crop began, for the sowing register's form. SIEX
+/// codes the pair as `SiembraPlantacion` 1 and 0.
+pub fn list_sowing_kinds(conn: &Connection) -> Result<Vec<Lookup>> {
+    lookup_rows(
+        conn,
+        "SELECT code, i18n_key FROM sowing_kind ORDER BY rowid",
+    )
+}
+
 /// Open air / mesh / plastic cover / greenhouse, for the crop form.
 pub fn list_growing_environments(conn: &Connection) -> Result<Vec<Lookup>> {
     lookup_rows(

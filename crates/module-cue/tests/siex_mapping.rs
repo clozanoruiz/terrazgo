@@ -15,19 +15,15 @@
 //!     instead of silently under-offering choices in the form.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::db_with_catalogues;
+
 use module_cue::repository as repo;
 use module_cue::siex;
 use rusqlite::Connection;
 use std::collections::HashSet;
-use terrazgo_core::catalogue::{active_codes, ensure_catalogues};
-
-/// In-memory app database with the real vendored catalogue snapshot imported —
-/// the state a running app is always in.
-fn db_with_catalogues() -> Connection {
-    let mut conn = module_cue::open_in_memory().unwrap();
-    ensure_catalogues(&mut conn).unwrap();
-    conn
-}
+use terrazgo_core::catalogue::active_codes;
 
 /// Assert lookup table ↔ catalogue equivalence through a mapping function.
 fn assert_bijective(
@@ -298,6 +294,60 @@ fn every_dose_unit_maps_to_an_active_siex_unit() {
         );
         assert!(factor > 0.0, "conversion factors are positive exact ratios");
     }
+}
+
+#[test]
+fn every_intensity_unit_maps_to_an_active_siex_unit() {
+    // One direction, like the dose units above: UNIDADES_MEDIDA publishes far
+    // more counts than a measure's intensity will ever be stated in.
+    let conn = db_with_catalogues();
+    let active: HashSet<String> = active_codes(&conn, "UNIDADES_MEDIDA")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.code)
+        .collect();
+    for unit in terrazgo_core::repository::list_intensity_units(&conn).unwrap() {
+        let siex_code = siex::intensity_unit_to_siex(&unit.code)
+            .unwrap_or_else(|| panic!("intensity unit '{}' has no SIEX mapping", unit.code));
+        assert!(
+            active.contains(&siex_code.to_string()),
+            "intensity unit '{}' maps to SIEX {siex_code}, absent/retired in UNIDADES_MEDIDA",
+            unit.code
+        );
+    }
+    // A count is not a rate and not an amount: the three maps are disjoint in
+    // both directions, which is what keeps a dose out of a field asking how
+    // many traps were hung.
+    assert_eq!(siex::intensity_unit_to_siex("l_ha"), None);
+    assert_eq!(siex::intensity_unit_to_siex("kg"), None);
+    assert_eq!(siex::unit_to_siex("traps"), None);
+    assert_eq!(siex::quantity_unit_to_siex("traps"), None);
+}
+
+#[test]
+fn the_mdf_registration_is_demanded_of_the_three_kinds_anexo_v_names() {
+    // Anexo V field 19: "Solo se muestra en caso en que la alternativa no
+    // química sea: suelta de OCB, trampas y otros y feromonas y atrayentes para
+    // monitoreo" — TIPO_MEDIDA_FITOSANITARIA 1, 14 and 15.
+    let conn = db_with_catalogues();
+    let demanded: HashSet<String> = active_codes(&conn, "TIPO_MEDIDA_FITOSANITARIA")
+        .unwrap()
+        .into_iter()
+        .map(|c| c.code)
+        .filter(|code| {
+            code.trim()
+                .parse::<i64>()
+                .is_ok_and(siex::measure_requires_mdf_number)
+        })
+        .collect();
+    assert_eq!(
+        demanded,
+        HashSet::from(["1".to_string(), "14".to_string(), "15".to_string()]),
+        "the three kinds must all still be published, and no fourth may appear"
+    );
+    // The catalogue runs 1-12, 14, 15 — there is no code 13, so a map that
+    // reached it would be naming a row that does not exist.
+    assert!(!siex::measure_requires_mdf_number(13));
 }
 
 #[test]

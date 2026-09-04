@@ -11,10 +11,8 @@ use module_cue::repository;
 use terrazgo_core::date::today_utc;
 
 use crate::state;
-use crate::state::AppState;
 use rusqlite::Connection;
 use serde::Serialize;
-use std::sync::MutexGuard;
 use tauri::State;
 
 // One file per crate the commands wrap. The parent keeps the boundary
@@ -24,16 +22,20 @@ use tauri::State;
 mod app;
 mod core;
 mod cue;
+mod ecoscheme;
 mod fertilisation;
 mod geo;
+mod links;
 mod recordbook;
 mod sigpac;
 
 pub use app::*;
 pub use core::*;
 pub use cue::*;
+pub use ecoscheme::*;
 pub use fertilisation::*;
 pub use geo::*;
+pub use links::*;
 pub use recordbook::*;
 pub use sigpac::*;
 
@@ -102,7 +104,13 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
     if let Some(e) = err.downcast_ref::<module_fertilisation::FertilisationError>() {
         return e.classify();
     }
+    if let Some(e) = err.downcast_ref::<module_ecoscheme::EcoschemeError>() {
+        return e.classify();
+    }
     if let Some(e) = err.downcast_ref::<terrazgo_recordbook::RecordbookError>() {
+        return e.classify();
+    }
+    if let Some(e) = err.downcast_ref::<terrazgo_siex::SiexError>() {
         return e.classify();
     }
     if let Some(e) = err.downcast_ref::<terrazgo_geo::GeoError>() {
@@ -126,30 +134,24 @@ impl<E: Into<anyhow::Error>> From<E> for CommandError {
 
 type CmdResult<T> = Result<T, CommandError>;
 
-/// Lock the shared connection. A poisoned mutex (a panic while another command
-/// held the lock) is unrecoverable for that connection — surface it as an error
-/// rather than `unwrap()` (no unwrap/expect outside tests).
-fn lock_conn<'a>(state: &'a State<'_, AppState>) -> CmdResult<MutexGuard<'a, Connection>> {
-    state
-        .conn
-        .lock()
-        .map_err(|_| CommandError(anyhow!("database connection mutex is poisoned")))
-}
-
-/// Same poisoned-mutex reasoning as [`lock_conn`], for the geo cache.
-fn lock_geo<'a>(geo: &'a State<'_, state::GeoState>) -> CmdResult<MutexGuard<'a, Connection>> {
-    geo.conn
-        .lock()
-        .map_err(|_| CommandError(anyhow!("geo cache mutex is poisoned")))
-}
+// A command reaches the database through `state.db.lock()?` and then
+// `conn()` / `conn_mut()` on the guard. There is no wrapper here any more:
+// `terrazgo_core::db::Database` already turns a poisoned lock and a closed
+// database into `Unavailable`, which the blanket conversion below carries to
+// the frontend.
 
 /// Re-derive the alert set after a write, whatever domain the write was in.
 ///
 /// The alert engine is module-cue's, and modules never call each other — so
 /// chaining it after a core, sigpac or fertilisation write is the SHELL's job,
 /// which is why this sits here beside the locks rather than in `cue.rs`.
-fn reconcile_alerts(conn: &mut Connection) -> Result<(), CommandError> {
-    repository::refresh_alerts(conn, &today_utc(), &AlertConfig::default())?;
+///
+/// The config is a parameter rather than read here because this runs with the
+/// connection already locked, and settings are always locked BEFORE the
+/// database (see [`active_actor`]). Callers resolve it with [`alert_config`]
+/// at the top of the command.
+fn reconcile_alerts(conn: &mut Connection, config: &AlertConfig) -> Result<(), CommandError> {
+    repository::refresh_alerts(conn, &today_utc(), config)?;
     Ok(())
 }
 
@@ -165,6 +167,41 @@ fn active_actor(settings: &State<'_, state::SettingsState>) -> CmdResult<Option<
         .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?
         .active_user_id
         .clone())
+}
+
+/// The alert lead times this device is configured with — **the shell's only
+/// source of an [`AlertConfig`]**.
+///
+/// module-cue deliberately does not implement `Default` for it, so there is no
+/// second way to conjure one: a call site that skipped this helper would have
+/// to name `AlertConfig::defaults()` against its doc comment rather than
+/// merely forget something. An unset field follows module-cue's default, so a
+/// farmer who never opened Settings tracks the code.
+///
+/// Read fresh per command, and the settings lock is released before any other
+/// is taken — same contract as [`active_actor`], which is why both are called
+/// at the top of a command rather than under the connection guard.
+fn alert_config(settings: &State<'_, state::SettingsState>) -> CmdResult<AlertConfig> {
+    let guard = settings
+        .settings
+        .lock()
+        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?;
+    Ok(AlertConfig::from_overrides(
+        guard.licence_lead_days,
+        guard.itv_lead_days,
+    ))
+}
+
+/// How far back the map's PHI tint looks on this device — **the shell's only
+/// source of a horizon**, for the same reason [`alert_config`] is the only
+/// source of an `AlertConfig`. module-cue keeps its own constant private, so a
+/// caller cannot reach past this and silently ignore the farmer's choice.
+fn phi_horizon(settings: &State<'_, state::SettingsState>) -> CmdResult<i64> {
+    let guard = settings
+        .settings
+        .lock()
+        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?;
+    Ok(repository::phi_horizon_days(guard.phi_recent_days))
 }
 
 #[cfg(test)]

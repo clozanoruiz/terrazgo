@@ -10,6 +10,7 @@ export default {
   // técnico, precedido por internal_intro para orientar al usuario normal.
   "error.internal_intro": "Se ha producido un error interno:",
   "error.not_found": "El registro no existe.",
+  "error.invalid.unknown_link": "Ese enlace no está disponible en esta versión.",
   "error.invalid.empty_name": "El nombre no puede estar vacío.",
   "error.invalid.operator_not_found": "El operador seleccionado ya no existe.",
   "error.invalid.empty_authorisation_number": "El número de registro no puede estar vacío.",
@@ -45,6 +46,9 @@ export default {
   "error.invalid.report_language_unknown": "Ese idioma no está disponible para el cuaderno.",
   "error.invalid.cache_cap_too_small":
     "El espacio para mapas sin conexión es demasiado pequeño (mínimo 64 MB).",
+  "error.invalid.lead_days_out_of_range": "La antelación del aviso debe estar entre 1 y 400 días.",
+  "error.invalid.phi_horizon_out_of_range":
+    "Los días para mostrar parcelas tratadas deben estar entre 7 y 730.",
   "error.invalid_date": "Fecha no válida «{date}» (se espera AAAA-MM-DD).",
   "error.authorisation_missing": "El producto {product_id} no está autorizado en «{country}».",
   "error.country_mismatch": "El país «{provided}» no coincide con el de la explotación («{farm}»).",
@@ -106,6 +110,12 @@ export default {
   "error.invalid.invalid_harvest_quantity":
     "Indique la cantidad y su unidad (kg o t), o deje ambas en blanco.",
   "error.invalid.plot_not_on_farm": "La parcela elegida no pertenece a esta explotaci\u00f3n.",
+  "error.invalid.sowing_not_on_farm":
+    "La siembra elegida es de otra explotaci\u00f3n o de otra campa\u00f1a.",
+  "error.invalid.irrigation_not_on_farm":
+    "El riego elegido es de otra explotaci\u00f3n o de otra campa\u00f1a.",
+  "error.invalid.link_needs_fertigation":
+    "Solo una fertirrigaci\u00f3n puede enlazarse con un riego. Elija fertirrigaci\u00f3n por aspersi\u00f3n o localizada como forma de aplicaci\u00f3n.",
 
   // Sección 8 — el registro de riego (RD 1051/2022 art. 5.e).
   "error.invalid.invalid_date_interval": "La fecha final no puede ser anterior a la inicial.",
@@ -132,6 +142,8 @@ export default {
   "error.invalid.unknown_application_method": "Elija una forma de aplicación de la lista.",
   "error.invalid.machinery_not_on_farm": "La maquinaria elegida no pertenece a esta explotación.",
   "error.invalid.empty_practice_code": "Elija una buena práctica de la lista.",
+  "error.invalid.practices_contradict_none":
+    "«No realiza buenas prácticas» no puede marcarse junto a otras prácticas.",
 
   // Sección 7.1 — el plan de abonado (RD 1051/2022 art. 4.2, 5.a y 6).
   "error.invalid.invalid_nutrient_need": "Las necesidades no pueden ser negativas.",
@@ -147,4 +159,44 @@ export default {
   "error.invalid.unknown_measure_code": "La medida indicada no figura en el catálogo oficial.",
   "error.invalid.invalid_intensity":
     "La intensidad debe indicarse con su unidad (trampas, difusores…) y ser mayor que cero.",
+
+  // Ecorrégimenes — 9.1 pastoreo extensivo (RD 1048/2022 art. 30.2 ter).
+  "error.invalid.practice_not_grazing":
+    "Ese ecorrégimen no se justifica con un pastoreo. Elija pastoreo extensivo, siega sostenible, pastos comunales o cubierta vegetal.",
+  "error.invalid.no_animals": "Indique al menos un grupo de animales.",
+  "error.invalid.incomplete_animal_line":
+    "Cada grupo de animales necesita especie y REGA de la explotación ganadera.",
+  "error.invalid.nonpositive_volume": "El volumen debe ser mayor que cero.",
+  "error.invalid.premises_kind_mismatch":
+    "Ese registro no corresponde a este apartado: los locales van en el 3.4 y los medios de transporte en el 3.5.",
+  "error.invalid.premises_not_on_farm": "El local o vehículo pertenece a otra explotación.",
+  "error.invalid.premises_kind_in_use":
+    "No se puede cambiar el tipo mientras haya tratamientos que lo nombran en el otro apartado. Corrija o elimine esos tratamientos primero.",
+  "error.invalid.premises_on_produce_record":
+    "Un tratamiento postcosecha trata producto vegetal, no un local ni un vehículo.",
+  "error.invalid.nonpositive_animal_count": "El número de animales debe ser mayor que cero.",
+
+  // 9.2 siega sostenible y "9.6" pastos comunales (RD 1048/2022 arts. 31 y anexo IV).
+  "error.invalid.practice_not_operation":
+    "El pastoreo extensivo se anota en el registro 9.1, no como labor: su obligación son las fechas de pastoreo.",
+  // Registro de siembra (RD 1048/2022 art. 45.2, cultivos bajo agua).
+  "error.invalid.flooded_before_sown":
+    "La fecha de inundación no puede ser anterior a la de siembra: el registro es de siembra en seco, primero la semilla y después el agua.",
+
+  // 9.4 y 9.5 cubiertas (RD 1048/2022 arts. 42 y 43).
+  "error.invalid.practice_not_cover":
+    "Ese ecorrégimen no establece una cubierta. Solo las cubiertas vegetales (P6) y las inertes de restos de poda (P7) se anotan aquí.",
+  "error.invalid.incomplete_widths":
+    "La anchura de la cubierta, la anchura libre de proyección de copa y la fecha en que se midieron son una sola anotación: indíquelas juntas o déjelas las tres en blanco.",
+  "error.invalid.nonpositive_width": "Las anchuras deben ser mayores que cero.",
+  "error.invalid.not_a_maintenance_kind":
+    "El modelo 9.4 solo recoge siega, desbroce y pastoreo como mantenimiento de la cubierta. Las demás labores se anotan en el registro 9.2.",
+  "error.invalid.maintenance_on_an_inert_cover":
+    "El art. 43 no exige anotar mantenimiento de una cubierta inerte: solo su fecha de establecimiento y las dos anchuras.",
+  "error.invalid.animals_on_a_non_grazing_line":
+    "Solo el pastoreo lleva grupos de animales; quítelos de la línea de siega o desbroce.",
+  "error.invalid.cover_not_found": "La cubierta indicada ya no existe.",
+  "error.invalid.cover_on_another_farm": "La cubierta indicada pertenece a otra explotación.",
+  "error.invalid.cover_practice_mismatch":
+    "El mantenimiento debe anotarse bajo el mismo ecorrégimen que la cubierta que mantiene.",
 };

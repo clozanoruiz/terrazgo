@@ -1,12 +1,15 @@
 [workspace]
 members = [
     "crates/terrazgo-core",
+    "crates/terrazgo-testkit",
     "crates/terrazgo-net",
     "crates/terrazgo-geo",
     "crates/terrazgo-report",
     "crates/terrazgo-recordbook",
+    "crates/terrazgo-siex",
     "crates/module-cue",
     "crates/module-fertilisation",
+    "crates/module-ecoscheme",
     "crates/module-sigpac",
     "src-tauri",
 ]
@@ -14,7 +17,7 @@ resolver = "3"
 
 # Shared package metadata; crates inherit with `<field>.workspace = true`.
 [workspace.package]
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 # Floor set by rusqlite_migration 2.6; raise as dependencies demand.
 rust-version = "1.95"
@@ -93,6 +96,10 @@ typst-as-lib = "0.16"
 # features are empty; chrono/jiff/polars/serde integrations stay off — the
 # engine takes plain values and ISO date strings.
 rust_xlsxwriter = { version = "0.97", default-features = false }
+# Reading .xlsx back apart, dev-only (terrazgo-report's styles contract test).
+# Already in the tree as rust_xlsxwriter's own dependency, and pinned to the
+# same minor so the two resolve to one copy rather than two.
+zip = { version = "8.3", default-features = false, features = ["deflate"] }
 # Locale-aware ordering for the names the record book prints
 # (terrazgo-recordbook). SQLite's default BINARY collation orders by code
 # point, so `Á` (U+00C1) sorts after `Z` (U+005A) and a plot called "Ángel"
@@ -113,6 +120,17 @@ rust_xlsxwriter = { version = "0.97", default-features = false }
 icu_collator = "2.2"
 # Only to name the locale a collator is built for (`locale!("es")`).
 icu_locale_core = "2.2"
+# The OS name and VERSION for the About panel's technical details, which exist
+# so a bug report carries them. `std::env::consts::OS` is a compile-time
+# constant and only ever says "linux"; this reads the running system.
+# Deliberately the crate and NOT `tauri-plugin-os`: the plugin's value is a JS
+# API for the webview, and the About panel is fed from Rust, so the plugin
+# would only add an IPC surface plus `os:allow-*` permissions to a webview
+# whose permission surface is zero. It would also pull `gethostname`, and the
+# machine's hostname has no business on that page. Costs three crates in total
+# (`os_info`, `nix`, `cfg_aliases`); `plist` is macOS-only and `windows-sys`
+# Windows-only and already present.
+os_info = { version = "3.15", default-features = false }
 tauri = "2"
 tauri-build = "2"
 # Floor 2.7: that release removed the `confirm`/`ask` IPC commands (merged
@@ -131,7 +149,21 @@ tauri-plugin-fs = "2.5"
 # calls it via raw invoke, so the floor is the minor whose command shapes
 # (get_current_position / request_permissions) we code against.
 tauri-plugin-geolocation = "2.3"
+# Hands a URL to the platform browser, so the app can point at the official
+# registries it cannot query (none of them has an API). Used Rust-side only
+# (src-tauri/src/external_links.rs); the webview passes an id from a fixed
+# allowlist and never a URL, so it gets no `opener:allow-open-url`. Floor 2.5:
+# the minor whose Rust-side `OpenerExt::open_url` we call. Not a network
+# dependency — nothing here fetches; terrazgo-net remains the only such seam.
+tauri-plugin-opener = "2.5"
 terrazgo-core = { path = "crates/terrazgo-core" }
+# Shared test fixtures. A DEV-DEPENDENCY ONLY -- no shipping crate may name it --
+# and it depends on terrazgo-core alone. The core-only rule is what stops it
+# becoming a back door between modules: a testkit that named module-cue would
+# put module-cue's schema inside module-fertilisation's test graph, and the
+# `the_module_runs_on_core_alone` guards would keep passing while it was open.
+# Anything needing a module's tables belongs in that crate's own tests/common.
+terrazgo-testkit = { path = "crates/terrazgo-testkit" }
 # The network seam: the HTTP agent, its TLS trust policy, the offline
 # diagnosis. Depended on by terrazgo-geo and the shell only — core and the
 # modules must never name it (docs/architecture.md → "The network seam").
@@ -142,11 +174,22 @@ terrazgo-report = { path = "crates/terrazgo-report" }
 # modules and nothing depends on it but the shell. A module must never take it
 # as a dependency -- that would invert the arrow the whole layering rests on.
 terrazgo-recordbook = { path = "crates/terrazgo-recordbook" }
+# The SIEX descriptor export -- the SECOND top-layer consumer, on the same terms
+# as the record book: it reads core and every domain module and projects one
+# exchange document. It lives above the modules because ten of the format's
+# fifteen activity blocks come from module-fertilisation and module-ecoscheme,
+# which module-cue (its old home) may never depend on.
+terrazgo-siex = { path = "crates/terrazgo-siex" }
 module-cue = { path = "crates/module-cue" }
 # Fertilisation, irrigation and soil records (model sections 6, 7.1 and 8).
 # A second regulatory domain on the same core, under a second decree
 # (RD 1051/2022) with its own deadlines -- see docs/cuaderno-print.md.
 module-fertilisation = { path = "crates/module-fertilisation" }
+# The eco-scheme registers (model section 9). A THIRD decree, RD 1048/2022,
+# whose duties reach the cuaderno through RD 1054/2022 anexo II item 4 -- see
+# docs/cuaderno-print.md. Its registers are derived from the decree's articles,
+# not from the model's pages, because one of its duties has no printed page.
+module-ecoscheme = { path = "crates/module-ecoscheme" }
 # SIGPAC lookups go through terrazgo-geo's fetch — module-sigpac itself has
 # no HTTP dependency (the sanctioned-seam rule).
 module-sigpac = { path = "crates/module-sigpac" }

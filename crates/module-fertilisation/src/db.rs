@@ -114,6 +114,8 @@ pub fn migrations() -> Migrations<'static> {
 pub fn open_in_memory() -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     conn.pragma_update(None, "foreign_keys", true)?;
+    // Tests run on the same connection configuration the app does.
+    terrazgo_core::db::harden(&conn)?;
     migrations().to_latest(&mut conn)?;
     Ok(conn)
 }

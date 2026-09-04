@@ -12,19 +12,19 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::{
+    CAMPAIGNS, DECLARED, DECLARED_EMPTY, DECLARED_MULTILINE, DECLARED_SECONDARY,
+    seeded_cache_today, today_stamp,
+};
+
 use module_sigpac::service::{CropProposals, crop_species, propose_crops};
 use rusqlite::Connection;
 use std::collections::HashSet;
-use std::sync::Mutex;
+use terrazgo_core::db::Database;
 use terrazgo_core::models::{NewCrop, NewFarm, NewPlot, PlotEsFields};
 use terrazgo_core::repository::{insert_crop, insert_farm, insert_plot, insert_season};
-use terrazgo_geo::db::open_cache_in_memory;
-
-const DECLARED: &[u8] = include_bytes!("fixtures/cultivo-declarado.json");
-const DECLARED_EMPTY: &[u8] = include_bytes!("fixtures/cultivo-declarado-empty.json");
-const DECLARED_SECONDARY: &[u8] = include_bytes!("fixtures/cultivo-declarado-secondary.json");
-const DECLARED_MULTILINE: &[u8] = include_bytes!("fixtures/cultivo-declarado-multiline.json");
-const CAMPAIGNS: &[u8] = include_bytes!("fixtures/geopackages-listing.html");
 
 /// The fixture recintos, as the seven reference parts a plot stores.
 const VALLADOLID: [&str; 7] = ["47", "163", "0", "0", "11", "40", "1"];
@@ -38,7 +38,7 @@ const ANSWERING: i64 = 2025;
 
 struct Fixture {
     app: Connection,
-    cache: Mutex<Connection>,
+    cache: Database,
     farm_id: String,
     season_id: String,
     plot_id: String,
@@ -94,7 +94,7 @@ fn fixture(parts: [&str; 7], declaration: &[u8]) -> Fixture {
     .unwrap();
 
     let path = parts.join("/");
-    let cache = seeded_cache(&[
+    let cache = seeded_cache_today(&[
         ("sigpac/campaigns".to_string(), CAMPAIGNS),
         (format!("sigpac/cultivos/{CURRENT}/{path}"), DECLARED_EMPTY),
         (format!("sigpac/cultivos/{ANSWERING}/{path}"), declaration),
@@ -107,28 +107,6 @@ fn fixture(parts: [&str; 7], declaration: &[u8]) -> Fixture {
         season_id: season.id,
         plot_id: plot.id,
     }
-}
-
-/// Seeded as fetched TODAY on purpose. The fallback re-asks an EMPTY
-/// current-campaign answer stored on an earlier day, so seeding a fixed past
-/// date would make every test here depend on the machine having network.
-fn seeded_cache(entries: &[(String, &[u8])]) -> Mutex<Connection> {
-    let cache = open_cache_in_memory().unwrap();
-    for (key, data) in entries {
-        cache
-            .execute(
-                "INSERT INTO resource (key, data, content_type, fetched_at)
-                 VALUES (?1, ?2, 'application/json', ?3)",
-                rusqlite::params![key, data, today_stamp()],
-            )
-            .unwrap();
-    }
-    Mutex::new(cache)
-}
-
-/// Today, as the cache writes it.
-fn today_stamp() -> String {
-    format!("{}T00:00:00Z", terrazgo_core::date::today_utc())
 }
 
 fn add_crop(fx: &mut Fixture, species: &str, crop_code: Option<&str>) -> String {
@@ -144,7 +122,6 @@ fn add_crop(fx: &mut Fixture, species: &str, crop_code: Option<&str>) -> String 
             irrigation_code: None,
             growing_environment_code: None,
             gip_system_code: None,
-            sown_on: None,
             crop_code: crop_code.map(str::to_string),
             source: None,
             source_campaign: None,
@@ -385,7 +362,8 @@ fn plots_without_a_reference_or_a_declaration_are_reported_not_dropped() {
     .unwrap();
     let path = undeclared_parts.join("/");
     {
-        let cache = fx.cache.lock().unwrap();
+        let guard = fx.cache.lock().unwrap();
+        let cache = guard.conn().unwrap();
         for campaign in [CURRENT, ANSWERING] {
             cache
                 .execute(
@@ -450,8 +428,10 @@ fn a_plot_that_cannot_be_asked_about_is_reported_and_does_not_abort_the_rest() {
     .unwrap();
     let path = broken_parts.join("/");
     {
-        let cache = fx.cache.lock().unwrap();
-        cache
+        let guard = fx.cache.lock().unwrap();
+        guard
+            .conn()
+            .unwrap()
             .execute(
                 "INSERT INTO resource (key, data, content_type, fetched_at)
                  VALUES (?1, ?2, 'application/json', ?3)",

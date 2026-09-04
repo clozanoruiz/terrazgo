@@ -12,9 +12,8 @@ use crate::models::{
     parse_intersection_response, parse_recinto_response,
 };
 use crate::reference::SigpacRef;
-use rusqlite::Connection;
-use std::sync::Mutex;
 use terrazgo_core::date::today_utc;
+use terrazgo_core::db::Database;
 use terrazgo_geo::{GeoError, Result, fetch};
 
 /// The consultas base. Only this Rust code builds SIGPAC URLs — the webview
@@ -50,7 +49,7 @@ pub fn recinfo_cache_key(reference: &SigpacRef) -> String {
 /// Look one recinto up by its 7-part reference. `Ok(None)` means SIGPAC does
 /// not know the reference — the caller's "typo or outdated ref" signal.
 pub fn recinto_by_reference(
-    cache: &Mutex<Connection>,
+    cache: &Database,
     reference: &SigpacRef,
     refresh: bool,
 ) -> Result<Option<RecintoInfo>> {
@@ -68,7 +67,7 @@ pub fn recinto_by_reference(
 /// One zone-layer intersection for a recinto. `Ok(None)` = outside the layer
 /// (the service answers `[]`). `layer` is the service name from [`ZONE_LAYERS`].
 pub fn zone_intersection(
-    cache: &Mutex<Connection>,
+    cache: &Database,
     reference: &SigpacRef,
     layer: &str,
     refresh: bool,
@@ -94,7 +93,7 @@ pub fn declared_crops_cache_key(campaign: i64, reference: &SigpacRef) -> String 
 /// vector means nothing was declared — the service answers HTTP 200 with
 /// `numberMatched: 0`, never a 404.
 pub fn declared_crops_by_reference(
-    cache: &Mutex<Connection>,
+    cache: &Database,
     reference: &SigpacRef,
     campaign: i64,
     refresh: bool,
@@ -134,7 +133,7 @@ pub fn declared_crops_by_reference(
 /// instead — reporting "nothing declared" when we could not ask would be a
 /// claim we have no grounds for.
 pub fn declared_crops_with_fallback(
-    cache: &Mutex<Connection>,
+    cache: &Database,
     reference: &SigpacRef,
     current: i64,
     refresh: bool,
@@ -267,11 +266,7 @@ fn declared_crops_url(reference: &SigpacRef, campaign: i64) -> String {
 /// Look up the recinto under a geographic point (map click today, GPS
 /// position later). Coordinates are cached verbatim — a repeated click on
 /// the same stored feature works offline; arbitrary new points need network.
-pub fn recinto_by_point(
-    cache: &Mutex<Connection>,
-    lon: f64,
-    lat: f64,
-) -> Result<Option<RecintoInfo>> {
+pub fn recinto_by_point(cache: &Database, lon: f64, lat: f64) -> Result<Option<RecintoInfo>> {
     let key = format!("sigpac/recinfobypoint/{lon}/{lat}");
     let url = format!("{BASE_URL}/recinfobypoint/4326/{lon}/{lat}.geojson");
     let fetched = fetch::cached_resource(cache, &key, &url, "application/json", false)?;

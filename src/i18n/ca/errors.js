@@ -10,6 +10,7 @@ export default {
   // tècnic, precedit d'internal_intro per orientar l'usuari normal.
   "error.internal_intro": "S'ha produït un error intern:",
   "error.not_found": "El registre no existeix.",
+  "error.invalid.unknown_link": "Aquest enllaç no està disponible en aquesta versió.",
   "error.invalid.empty_name": "El nom no pot estar buit.",
   "error.invalid.operator_not_found": "L'operador seleccionat ja no existeix.",
   "error.invalid.empty_authorisation_number": "El número de registre no pot estar buit.",
@@ -43,6 +44,9 @@ export default {
   "error.invalid.report_language_unknown": "Aquest idioma no està disponible per al quadern.",
   "error.invalid.cache_cap_too_small":
     "L'espai per als mapes sense connexió és massa petit (mínim 64 MB).",
+  "error.invalid.lead_days_out_of_range": "L'antelació de l'avís ha de ser d'entre 1 i 400 dies.",
+  "error.invalid.phi_horizon_out_of_range":
+    "Els dies per mostrar les parcel·les tractades han de ser entre 7 i 730.",
   "error.invalid_date": "Data no vàlida «{date}» (s'espera AAAA-MM-DD).",
   "error.authorisation_missing": "El producte {product_id} no està autoritzat a «{country}».",
   "error.country_mismatch": "El país «{provided}» no coincideix amb el de l'explotació («{farm}»).",
@@ -105,6 +109,12 @@ export default {
     "Indiqueu la quantitat i la seva unitat (kg o t), o deixeu-les totes dues en blanc.",
   "error.invalid.plot_not_on_farm":
     "La parcel\u00b7la triada no pertany a aquesta explotaci\u00f3.",
+  "error.invalid.sowing_not_on_farm":
+    "La sembra triada \u00e9s d'una altra explotaci\u00f3 o d'una altra campanya.",
+  "error.invalid.irrigation_not_on_farm":
+    "El reg triat \u00e9s d'una altra explotaci\u00f3 o d'una altra campanya.",
+  "error.invalid.link_needs_fertigation":
+    "Nom\u00e9s una fertirrigaci\u00f3 es pot enlla\u00e7ar amb un reg. Trieu fertirrigaci\u00f3 per aspersi\u00f3 o localitzada com a forma d'aplicaci\u00f3.",
 
   // Secci\u00f3 8 \u2014 el registre de reg (RD 1051/2022 art. 5.e).
   "error.invalid.invalid_date_interval": "La data final no pot ser anterior a la inicial.",
@@ -131,6 +141,8 @@ export default {
   "error.invalid.unknown_application_method": "Trieu una forma d'aplicació de la llista.",
   "error.invalid.machinery_not_on_farm": "La maquinària triada no pertany a aquesta explotació.",
   "error.invalid.empty_practice_code": "Trieu una bona pràctica de la llista.",
+  "error.invalid.practices_contradict_none":
+    "«No fa bones pràctiques» no es pot marcar juntament amb altres pràctiques.",
 
   // Secció 7.1 — el pla d'adobat (RD 1051/2022 art. 4.2, 5.a i 6).
   "error.invalid.invalid_nutrient_need": "Les necessitats no poden ser negatives.",
@@ -146,4 +158,44 @@ export default {
   "error.invalid.unknown_measure_code": "La mesura indicada no figura al catàleg oficial.",
   "error.invalid.invalid_intensity":
     "La intensitat s'ha d'indicar amb la seva unitat (trampes, difusors…) i ser més gran que zero.",
+
+  // Ecorègims — 9.1 pasturatge extensiu (RD 1048/2022 art. 30.2 ter).
+  "error.invalid.practice_not_grazing":
+    "Aquest ecorègim no es justifica amb un pasturatge. Trieu pasturatge extensiu, sega sostenible, pastures comunals o coberta vegetal.",
+  "error.invalid.no_animals": "Indiqueu almenys un grup d'animals.",
+  "error.invalid.incomplete_animal_line":
+    "Cada grup d'animals necessita espècie i REGA de l'explotació ramadera.",
+  "error.invalid.nonpositive_volume": "El volum ha de ser més gran que zero.",
+  "error.invalid.premises_kind_mismatch":
+    "Aquest registre no correspon a aquest apartat: els locals van al 3.4 i els mitjans de transport al 3.5.",
+  "error.invalid.premises_not_on_farm": "El local o vehicle pertany a una altra explotació.",
+  "error.invalid.premises_kind_in_use":
+    "No es pot canviar el tipus mentre hi hagi tractaments que l'anomenen a l'altre apartat. Corregiu o suprimiu aquests tractaments primer.",
+  "error.invalid.premises_on_produce_record":
+    "Un tractament postcollita tracta producte vegetal, no un local ni un vehicle.",
+  "error.invalid.nonpositive_animal_count": "El nombre d'animals ha de ser més gran que zero.",
+
+  // 9.2 sega sostenible i "9.6" pastures comunals (RD 1048/2022 art. 31 i annex IV).
+  "error.invalid.practice_not_operation":
+    "El pasturatge extensiu s'anota al registre 9.1, no com a feina: la seva obligació són les dates de pasturatge.",
+  // Registre de sembra (RD 1048/2022 art. 45.2, cultius sota aigua).
+  "error.invalid.flooded_before_sown":
+    "La data d'inundació no pot ser anterior a la de sembra: el registre és de sembra en sec, primer la llavor i després l'aigua.",
+
+  // 9.4 i 9.5 cobertes (RD 1048/2022 arts. 42 i 43).
+  "error.invalid.practice_not_cover":
+    "Aquest ecorègim no estableix cap coberta. Aquí només s'anoten les cobertes vegetals (P6) i les inerts de restes de poda (P7).",
+  "error.invalid.incomplete_widths":
+    "L'amplada de la coberta, l'amplada lliure de projecció de capçada i la data en què es van mesurar són una sola anotació: indiqueu-les juntes o deixeu-les totes tres en blanc.",
+  "error.invalid.nonpositive_width": "Les amplades han de ser més grans que zero.",
+  "error.invalid.not_a_maintenance_kind":
+    "El model 9.4 només recull sega, esbrossada i pasturatge com a manteniment de la coberta. La resta de feines s'anoten al registre 9.2.",
+  "error.invalid.maintenance_on_an_inert_cover":
+    "L'art. 43 no exigeix anotar el manteniment d'una coberta inerta: només la data d'establiment i les dues amplades.",
+  "error.invalid.animals_on_a_non_grazing_line":
+    "Només el pasturatge porta grups d'animals; traieu-los de la línia de sega o esbrossada.",
+  "error.invalid.cover_not_found": "La coberta indicada ja no existeix.",
+  "error.invalid.cover_on_another_farm": "La coberta indicada pertany a una altra explotació.",
+  "error.invalid.cover_practice_mismatch":
+    "El manteniment s'ha d'anotar sota el mateix ecorègim que la coberta que manté.",
 };

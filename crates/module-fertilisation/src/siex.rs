@@ -123,6 +123,15 @@ pub fn dose_unit_to_siex(code: &str) -> Option<i64> {
 /// label; this is how a serializer still says so.
 pub const DENSITY_UNIT_SIEX: i64 = 12;
 
+/// The unit `Fertirrigacion.DosisN` and `DosisP` are stated in — mg/L, code 20
+/// of `UNIDADES_MEDIDA`.
+///
+/// Anexo III C.l and Anexo V's fields 41-42 both fix it ("mg/l o ppm", which
+/// are the same number for water), so the columns carry no unit of their own
+/// and this is how the serializer states it. The same code module-cue reaches
+/// for when a g/L dose has to be sent as mg/L.
+pub const WATER_CONCENTRATION_UNIT_SIEX: i64 = 20;
+
 /// Catalogue `fertiliser_material.material_code` resolves against — Anexo III
 /// C.d's first level.
 pub fn fertiliser_material_catalogue(country_code: &str) -> Option<&'static str> {
@@ -160,6 +169,12 @@ pub fn good_practice_catalogue(country_code: &str) -> Option<&'static str> {
 /// strings — a mirror of an external contract, accent included.
 pub const GOOD_PRACTICE_SCOPE_KEY: &str = "Ámbito";
 pub const FERTILISATION_SCOPE: &str = "Fertilización";
+
+/// The row every ámbito of `BUENAS_PRACTICAS_AMBITOS` opens with, spelled "No
+/// realiza buenas prácticas". An ordinary code in the file, and the catalogue's
+/// shape says nothing about it — but its MEANING contradicts every other row,
+/// which is why `validated_practices` refuses to store it beside one.
+pub const NO_PRACTICES_CODE: &str = "0";
 
 /// The `DETALLE_MATERIAL_FERT` column carrying the parent `MAT_FERTI` code.
 /// The file leads with it, which is why the importer takes its code from a

@@ -13,7 +13,7 @@ Terrazgo is an offline-first desktop/mobile app: a Svelte webview talking to
 a Rust backend over Tauri's IPC, with SQLite as the single source of truth on
 the device. No network calls exist in any core or module code path — that is
 a hard rule, not an accident of youth. The one sanctioned network seam is the
-`terrazgo-net` crate (see "The network seam" below); its two consumers are
+`terrazgo-net` crate (the dependency list below names it); its two consumers are
 `terrazgo-geo`, which wraps it in cache-through map fetching, and the shell's
 catalogue refresh, which the user has to ask for. With no network the app
 keeps working.
@@ -33,6 +33,10 @@ keeps working.
 │  state.rs (AppState, GeoState, SettingsState)          │
 └───────┬──────────────────┬──────────────────┬──────────┘
         │                  │                  │
+      (the shell also consumes the two READ MODELS above the modules:
+       terrazgo-recordbook — the printed book — and terrazgo-siex — the
+       exchange descriptor. Siblings; neither depends on the other.)
+
 ┌───────▼──────────┐ ┌─────▼────────────┐ ┌───▼──────────────────┐
 │ crates/          │ │ crates/          │ │ crates/terrazgo-geo  │
 │ module-cue       │▶│ terrazgo-core    │◀│ tile/resource cache, │
@@ -45,6 +49,7 @@ keeps working.
                      │ terrazgo.db │   │ geo-cache.db │  │ terrazgo-net     │
                      │ user data,  │   │ tiles/styles │  │ the ONLY HTTP    │
                      │ WAL, FKs on │   │ own runner   │  │ agent + TLS      │
+                     │ (Database)  │   │ (Database)   │  │                  │
                      └─────────────┘   └──────────────┘  └──────────────────┘
                         derived, re-fetchable, never in    ▲ used by geo and
                         backups or record_change           │ the shell only
@@ -54,7 +59,8 @@ Dependency direction is one-way and enforced by the crate graph — the
 compiler, not discipline, prevents a core→module import:
 
 - `terrazgo-core` depends on **no module and never on the shell**. It owns
-  the farm registry (land, calendar, people, machines), geometry storage
+  the farm registry (land, calendar, people, machines, and the premises a
+  treatment can be applied to), geometry storage
   (`geo_feature`), the imported reference catalogues (`catalogue` +
   vendored SIEX snapshot), the audit helpers, date utilities, the
   pure-parsing GeoJSON validator, backup and the device-local settings file.
@@ -90,6 +96,25 @@ compiler, not discipline, prevents a core→module import:
   `RecordbookError` (2026-08-07): the book borrowed `module_cue::Result` when
   it was first extracted, and a document that reads several domains must not
   report failures as though it were any one of them.
+- `terrazgo-siex` is the **SIEX descriptor export** (2026-08-20), and the
+  record book's **sibling**: the second top-layer consumer, on identical terms.
+  It reads core and every domain module and projects one exchange document —
+  the official CUE descriptor of FEGA Anexo VI — with frozen integer aliases, a
+  precheck and JSON-Schema validation. Neither it nor the record book depends
+  on the other; they share their *sources* and nothing else, because a Spanish
+  form for a human inspector and a machine exchange format are not the same
+  document and do not fail the same way. It lived in `module_cue::export` until
+  ten of the format's fifteen activity blocks turned out to come from
+  `module-fertilisation` and `module-ecoscheme`, which a module may never
+  depend on — the same wall that produced `terrazgo-recordbook`, hit a second
+  time, and the reason the placement rule now has two instances rather than
+  one. It owns `SiexError` for the record book's reason. **Dormant**: no
+  interface calls it (docs/siex-export.md), and it is kept compiling and
+  validated so the descriptor cannot silently fall behind the registers the
+  app captures — which is exactly what it had done by 2026-08-20, emitting one
+  of fifteen activity blocks against twelve registers that had twins. The
+  "finish the serializer" arc closed that gap on 2026-08-22: **thirteen blocks
+  emitted**, every one with a register behind it.
 - `module-fertilisation` is the record book's **second decree** (2026-08-07):
   fertilisation, irrigation and soil records under RD 1051/2022, whose art. 5
   has been binding since 1 January 2026. It depends on `terrazgo-core` and on
@@ -98,6 +123,15 @@ compiler, not discipline, prevents a core→module import:
   than in a future Irrigation module because art. 5.e puts irrigation doses and
   dates inside the same cuaderno duty as fertilisation; the Irrigation module
   keeps planning.
+- `module-ecoscheme` is the record book's **third decree** (2026-08-18): the
+  eco-scheme annotations of RD 1048/2022, which reach the cuaderno through
+  RD 1054/2022 anexo II item 4 and print as the model's section 9. Like the
+  other modules it depends on `terrazgo-core` alone. Its registers are shaped
+  by the DECREE rather than by the printed form — three tables against five
+  model pages — because the form hides duties the decree creates: anexo IV's
+  has no page at all, art. 42 is three annotations on three deadlines that one
+  printed row collapses, and model 9.3 prints three of the five dates art. 45.2
+  names.
 - The shell depends on all of these and owns everything Tauri-specific: command
   wrappers, the migration runner, the `geo://` protocol, managed state, the
   window.
@@ -236,15 +270,217 @@ is the correct behaviour for "the database didn't open or migrate":
    catalogues" below). After first run this is a handful of date probes.
 4. `refresh_alerts(today)` — idempotent reconciliation, so the UI never
    opens on stale alert state.
-5. Put `AppState { conn: Mutex<Connection>, db_path, schema_version }` into
-   Tauri managed state and register the commands.
+5. Put `AppState { db: Database, db_path, schema_version }` into Tauri managed
+   state and register the commands.
 
-Why a `Mutex`? Tauri runs commands on a thread pool, and anything in managed
-state must be `Send + Sync`. A rusqlite `Connection` is `!Sync` — it must
-never be used from two threads at once — so the mutex serialises all
-database access through the single connection. For a single-user desktop app
-that is exactly right; if a long query ever blocks the UI, the upgrade path
-is a connection pool (r2d2), not removing the lock.
+`Database` (`terrazgo_core::db`) is the handle both long-lived connections are
+held by — the app database and the geo cache. It is a `Mutex<Option<Connection>>`
+and a pair of accessors, and each half earns its place.
+
+The **lock** is there because Tauri runs commands on a thread pool and anything
+in managed state must be `Send + Sync`, while a rusqlite `Connection` is
+`!Sync` — it must never be used from two threads at once. So the mutex
+serialises all database access through the single connection. For a single-user
+desktop app that is exactly right; if a long query ever blocks the UI, the
+upgrade path is a connection pool (r2d2), not removing the lock.
+
+The **`Option`** is there so the connection can be closed. See "Shutdown".
+
+A command reaches the connection in two steps, and each step is the only place
+one of the two failures can be seen:
+
+```rust
+let db = state.db.lock()?;   // Err(Unavailable::Poisoned) — a panic mid-write
+let conn = db.conn()?;       // Err(Unavailable::Closed)   — shutdown, or a
+                             //                               failed import
+```
+
+**A re-entrant lock panics in debug builds instead of hanging.** Functions that
+take a `&Database` lock it themselves — `terrazgo_geo::fetch` does it on every
+call, since its contract is that the lock is *released* across network I/O — so
+a caller already holding a guard would deadlock on re-entry. `std::sync::Mutex`
+is not reentrant, and a deadlock does not fail a test, it hangs it. `lock()`
+therefore checks a thread-local of currently-held databases and panics naming
+the mistake. **The whole mechanism is `#[cfg(debug_assertions)]`**: a release
+build has no thread-local, no field on `DbGuard`, no `Drop`, and no check —
+verifiable with `nm` on the two rlibs.
+
+`conn()` / `conn_mut()` follow the standard library's pairing, so a command says
+which it needs. `Deref` would read better — `MutexGuard` itself does it — but
+`deref(&self) -> &Connection` cannot return a `Result`, so a closed database
+would have to panic; `MutexGuard` can only get away with it because it has no
+empty state.
+
+## Hardening, and checking for corruption
+
+Every connection the app opens — ours and imported alike — goes through
+`terrazgo_core::db::harden`, which switches off the SQL features a database
+file could otherwise use against us. It costs nothing here, because the schema
+defines **no views and no triggers** and the app registers **no custom SQL
+functions, collations or virtual tables**:
+
+| flag | what it stops |
+|---|---|
+| `DEFENSIVE` | `writable_schema`, and `PRAGMA journal_mode=OFF` |
+| `ENABLE_TRIGGER = false` | a trigger in an imported file firing |
+| `ENABLE_VIEW = false` | reading a view |
+| `trusted_schema = OFF` | trusting expressions embedded in a schema |
+
+Every one of those was measured rather than assumed, and the tests beside
+`harden` keep them measured. Three results are worth knowing:
+
+- **Foreign-key actions are unaffected.** The schema has 33 `ON DELETE CASCADE`
+  clauses and they keep working with triggers off.
+- **`DEFENSIVE` protects WAL** rather than threatening it: it refuses
+  `journal_mode=OFF`, so nothing running in SQL can undo what Shutdown fixes.
+- **`CREATE VIEW` and `CREATE TRIGGER` still succeed** — only *using* them is
+  refused. That is why `src-tauri/tests/schema_features.rs` asserts the composed
+  schema defines neither: without it a migration adding one would apply
+  cleanly, ship, and fail at read time far from the cause.
+
+### Three layers, because the flags do not travel
+
+`harden`'s settings live on the connection, not in the database file. So a
+hostile file cannot arrive with them pre-disabled — but equally they do not
+travel, and **every open site has to apply them or nobody does**. Nothing in
+the type system distinguishes a hardened `Connection` from a plain one, so
+three mechanisms overlap:
+
+1. **Each opener hardens.** `open_app_db` is public and returns a bare
+   `Connection`; its contract is "returns a hardened connection", not "returns
+   one that becomes safe if you remember to wrap it". It also means migrations
+   run under the same restrictions the app later queries under.
+2. **`Database::new` hardens.** The two long-lived connections — the app book
+   and the geo cache — cannot be held in an unhardened state, because the
+   constructor is the only way in. The compiler carries that rule.
+3. **`src-tauri/tests/hardened_connections.rs` scans for the rest.** Three
+   connections are short-lived and never become a `Database` (a backup being
+   validated, an imported GeoPackage, the corruption check's reader), and a
+   future crate could add a fourth. The test is a **rule, not an allowlist**:
+   any shipping file that opens a connection must also harden it, so adding a
+   crate or a feature never requires editing it.
+
+That third one matches per file rather than per call site, deliberately:
+`terrazgo-geo`'s `try_open` hardens one call away inside
+`apply_pragmas_and_migrate`, which is correct factoring that an adjacency rule
+would flag. The cost is a blind spot — a file that opens two connections and
+hardens one passes — so it is a tripwire against forgetting wholesale, not a
+proof of coverage.
+
+The two connections that matter most are the ones opened on a file **someone
+else wrote** — a GeoPackage the farmer imports, and a backup that could arrive
+on a USB stick. Both are read-only, hardened, and integrity-checked before
+anything in them is believed. `validate_backup`'s check catches a *damaged*
+file; the hardening is what catches a *crafted* one, which would otherwise pass
+every check and then become the live database.
+
+Three settings are deliberately left at their defaults, all of them the kind
+someone "optimises" later: `synchronous` stays FULL (this is a legal record,
+not a cache), `mmap_size` stays 0 (with memory-mapped I/O a stray pointer
+anywhere in the process can corrupt the file), and `cell_size_check` stays off.
+
+### The weekly corruption check
+
+`PRAGMA quick_check` runs on the startup worker, at most once every
+`INTEGRITY_CHECK_INTERVAL_DAYS` (7). The verdict goes in `settings.json` — not
+in the database, which is the point: a file too corrupt to read still has a
+readable verdict beside it — and `get_status` reports it. The Status view warns
+only when it says `ok: false`; a healthy database says nothing, because
+reporting "all fine" weekly trains a farmer to ignore the one time it is not.
+
+Three choices behind that shape, all from measurement
+(`src-tauri/tests/quick_check_cost.rs` re-runs it):
+
+- **`quick_check`, not `integrity_check`.** About half the cost (measured
+  1.5–2.1x across 29–513 MB, converging on 2.1x) and it catches structural
+  page damage. The thorough check still
+  happens on every backup, where `VACUUM INTO` reads every page and the copy is
+  verified — and since 2026-08-26 whenever the farmer asks, below.
+- **Throttled, not per-launch.** Cost is linear at ~1.7 ms/MB: ~10 ms for a
+  smallholder, but approaching a second for a cooperative-scale book after a
+  decade, and `record_change` grows without bound until sync gives it a
+  retention policy.
+- **Its own read-only connection.** Holding the shared lock for that long would
+  freeze every command at startup; WAL admits a second reader without
+  disturbing writers. The cost is a narrow race — closing the window mid-check
+  leaves the sidecars behind that once.
+
+### Check and compact, on request
+
+Settings offers one button (`check_and_compact_database`, 2026-08-26). It is
+**one action rather than two, because the check gates the compaction**:
+`VACUUM` rebuilds the file by reading every page and writing a fresh one, so on
+a damaged database it would copy the damage forward instead of revealing it. A
+failed check therefore stops with the file untouched and tells the farmer to
+restore a backup.
+
+The button runs **`integrity_check`**, not the weekly `quick_check`, and the two
+are asked for different reasons: the weekly one is a cheap structural screen
+nobody requested, this one is a person asking, and a person asking will wait. It
+adds index-against-table consistency and the UNIQUE/NOT NULL/CHECK constraints,
+at roughly twice the cost (~3.5 ms/MB — 20 ms on a smallholder's book, a couple
+of seconds on a cooperative-scale one). Because they differ,
+`IntegrityCheck.thorough` records **which** check produced a verdict; without
+it, "checked three days ago, fine" would mean two different things. A verdict
+written before that field existed loads as the quick check it was.
+
+Two shapes worth keeping. A bad verdict is an **outcome, not an error** — it
+returns `Ok` with `integrity.ok == false`, the way a refused catalogue refresh
+does, because failing the command would hand the farmer an error instead of the
+answer they asked for. And size is reported as `page_count * page_size`, not the
+file's length: in WAL mode the pages are still in the sidecar when `VACUUM`
+returns, so the file on disk is not yet the honest number.
+
+Unlike the weekly check this runs on the **live** connection, holding the
+database lock — it has to, because `VACUUM` needs the writer. The lock is
+released before the settings lock is taken to record the verdict: the invariant
+everything obeys is that no thread ever holds both at once, which
+`active_actor` reaches from the other direction.
+
+## Shutdown
+
+SQLite in WAL mode keeps a `-wal` and a `-shm` file beside the database and
+**deletes them when the last connection closes cleanly**. Nothing else does:
+`wal_checkpoint(TRUNCATE)` empties the write-ahead log but leaves both files on
+disk.
+
+Nothing closed them, and the reason is structural: **Tauri never drops managed
+state**, because the platform event loop ends the process with
+`std::process::exit` (tao's GTK loop does exactly this after dispatching
+`LoopDestroyed`). So `Connection::drop` never runs, and a WAL grew without
+bound — measured at 6.3 MB beside a 6.0 MB database.
+
+The fix is a `RunEvent::Exit` handler:
+
+```rust
+app.run(|handle, event| {
+    if let tauri::RunEvent::Exit = event {
+        close_databases(handle);
+    }
+});
+```
+
+which is why `run()` ends in `.build(ctx)` + `app.run(callback)` rather than the
+one-liner `.run(ctx)`. `RunEvent::Exit` is delivered before `process::exit`, and
+`close_databases` takes each connection out of its `Database` and calls
+`Connection::close`.
+
+Three things about that hook are deliberate:
+
+- **Explicit `close()`, not `Drop`.** rusqlite's `Drop` discards the close
+  error; `Connection::close` flushes the prepared-statement cache and reports
+  what failed.
+- **`try_state`, not `state`.** `initialise` runs on a worker thread, so a
+  window closed during startup can arrive here before either database has been
+  managed. That exit leaves the sidecars behind, and it is the one case that
+  still does.
+- **Not gated to desktop.** Android never reaches `RunEvent::Exit` — the system
+  kills the process — which is exactly what WAL is for. Gating would add a `cfg`
+  for a branch that already never runs.
+
+A close blocks on the lock, so a command still running (a report render, say)
+finishes first. That is the right order: closing under a live command is worse
+than waiting for it.
 
 ### On Android the webview starts first, and the first reply waits for a second message
 
@@ -292,6 +528,17 @@ render, so `src/index.html` carries a wordless spinner that `main.js` removes
 just before `mount()`. Wordless because it renders before i18n has resolved a
 locale.
 
+**The same hazard has a second instance, so treat it as a class rather than one
+bug.** `tauri::webview_version()` is implemented on Android by spinning
+`loop { first_activity_id(); sleep(100 ms) }` and then blocking on the main pipe
+(wry's `android/mod.rs`). Anything shaped like that — a call that waits on the
+activity or the webview — must stay off the startup path. That is why the
+version strings the About panel prints live in their own `get_about_info`
+command rather than joining `get_status`: it can only be reached by tapping a
+button inside a webview, which is proof the thing being waited for already
+exists. **The general rule: before calling a platform API during startup, check
+whether its Android implementation waits for the activity.**
+
 The consequence for anything else that runs early: **do not await a lone invoke
 before the gate has completed.** Everything downstream is safe by construction —
 `loadLookups()` and every view's mount-time fetch run after `await
@@ -324,6 +571,25 @@ pool, so "the main thread is contended during Android startup" was the obvious
 suspect. Measured with the retry pump disabled, it changes nothing — Rust logs
 the command executing while the frontend's promise is still pending 15 s later.
 The parking is in reply **delivery**, not in command dispatch.
+
+Also rejected as the explanation: wry issue #1551, whose `rx.recv_timeout`
+TODO looks like exactly this symptom. It sits on the custom-protocol path,
+and the `MainPipe` probes above exonerate it.
+
+One anomaly met on the way is not a bug at all, recorded so it is not chased
+again: `Event::Resumed` never arrives on a first launch, because tao drops the
+first resume deliberately ("to match the iOS implementation"). Background the
+app and return and the second one lands in 1 ms.
+
+The upstream fix is [tao#1304](https://github.com/tauri-apps/tao/pull/1304),
+open since 2026-08-08, which names the mechanism these measurements could only
+bound from outside: `ALooper_pollAll` returns an fd event instead of
+`ALOOPER_POLL_WAKE` when both are ready in the same epoll batch, so
+`EventSource::User` never runs and the receiver is never drained. That is the
+measured co-factor — pending ndk_glue traffic — reached from the other end. Its
+patch was applied locally and verified on device: the event arrives at +3000 ms
+instead of being lost until +5003. The app-side startup ordering above is
+correct whichever way the PR goes.
 
 ## The data model in five ideas
 
@@ -410,11 +676,13 @@ catalogue API) and `terrazgo_core::catalogue::ensure_catalogues` imports
 them at startup into `catalogue` + `catalogue_code` (added 2026-07-14;
 design history in docs/siex-export.md → "Storage design"). Offline-first:
 codes resolve from first run, no network — refreshing the snapshot is a
-release-ritual step, and an in-app refresh through terrazgo-geo's fetch is a
-possible later addition (same parser, same upsert).
+release-ritual step, and users can also fetch the provider's current copy
+from Settings (docs/maintenance.md §1), through the same parser and the same
+upsert.
 
-The importer is idempotent (a per-catalogue lifecycle-date fast path makes
-the steady-state startup cost a handful of probes) and **upsert-only**: the
+The importer is idempotent — it runs the vendored snapshot on the first
+launch of each app version and skips on the ones after, so the steady-state
+startup cost is a handful of probes and no parsing — and **upsert-only**: the
 provider retires codes by baja date instead of deleting them, and so do we —
 a code referenced by a years-old treatment record must keep resolving at
 inspection time. Pickers offer `active_codes` (not retired); resolution uses
@@ -443,24 +711,43 @@ phytosanitary problems) store the **catalogue code verbatim** on the record
 in `export_alias`: minted at first export, frozen forever, because the
 authority keys edits and deletions on them.
 
-The export itself lives in `module_cue::export` (added 2026-07-16; mapping
-design in docs/siex-export.md): `export_precheck` lists what blocks a valid
-export (records missing efficacy or an operator licence, treated plots
-without a crop, farm identity fields not yet entered from the REA papers)
-and `build_cuaderno` turns one farm+season into the official CUE descriptor
-JSON (`TratamFito` block), refusing while the precheck is not clean so
-nothing is silently dropped. Multi-crop treatments split into one
+The export itself lives in the `terrazgo-siex` crate (added 2026-07-16 as
+`module_cue::export`, extracted 2026-08-20; mapping design in
+docs/siex-export.md): `export_precheck` lists what blocks a valid export and
+`build_cuaderno` turns one farm+season into the official CUE descriptor JSON,
+refusing while the precheck is not clean so nothing is silently dropped.
+
+**It emits thirteen of the format's fifteen activity blocks** since the
+"finish the serializer" arc closed on 2026-08-22 — every block with a register
+behind it, `Cosecha` and `EnergiaUtilizada` having none by decision. One block
+builder per file under `src/blocks/`, each reading the module that owns its
+register.
+
+Three rules run through all of them. Multi-crop treatments split into one
 `TratamFito` per crop snapshot (3.11.4 descriptor rule), each split keyed by
 its own frozen alias; a core `crop` row is the SIEX plot+crop+season unit
 (DGC) and is referenced by a client-assigned integer (`CodigoDGCAjena`,
-aliases again). Soft-deleted records emit `Borrar` entries under their
-existing aliases; never-exported deletions leave no trace. The serializer's
-output is schema-validated in tests against the vendored official JSON
-Schema (the `jsonschema` crate, dev-dependency only — never in the shipped
-binary). The shell exposes both as commands (`export_cuaderno_precheck`,
-async `export_cuaderno` writing the JSON to a dialog-chosen path), and the
-record-book view runs precheck-then-export, rendering the blockers as a
-fix-it list.
+aliases again), which the eco-scheme blocks resolve from the plot and refuse
+to guess at when a plot carries several crops. Soft-deleted records emit
+`Borrar` entries under their existing aliases; never-exported deletions leave
+no trace.
+
+**The precheck is where the export's ethics live.** It refuses rather than
+dropping: every rule exists because some record could otherwise have gone out
+with a value silently missing, or not gone out at all with nothing on screen
+saying so. Several of its rules come from FEGA's Anexo V `OBLIGATORIEDAD`
+grading rather than from the JSON Schema's `required`, which is a weaker
+statement — docs/siex-export.md → "The law outranks the format" carries that
+precedence, and it is worth reading before adding or relaxing a rule here.
+
+The serializer's output is schema-validated in tests against the vendored
+official JSON Schema (the `jsonschema` crate, dev-dependency only — never in
+the shipped binary). The shell exposes both entry points as commands
+(`export_cuaderno_precheck`, async `export_cuaderno` writing the JSON to a
+dialog-chosen path) — but **nothing in the interface calls them** since
+2026-08-11: the export has no delivery path, so a button producing a file with
+nowhere to go was the wrong thing to show a farmer. Un-parking it means
+rebuilding the panel *and* its scripted checks.
 
 **Backup** (in `terrazgo_core::backup`): export is a `VACUUM INTO` snapshot
 — consistent and compact while the app runs, no WAL sidecars — which is then
@@ -500,6 +787,14 @@ engine owns *how* it looks (bold frozen header, autofilter, column widths,
 consistent across the reports modules will add, and the crate could be swapped
 without touching a caller.
 
+`rust_xlsxwriter` was picked (2026-08-02, `default-features = false`) as
+write-only, which is all a report engine needs: pure Rust, MIT/Apache-2.0, and
+13 transitive crates that are all permissive and C-free (zlib-rs rather than
+zlib), so Android cross-compilation is untouched. Rejected: `umya-spreadsheet`,
+which reads as well as writes and is correspondingly heavier; hand-rolled
+OOXML; and CSV, which cannot carry the book's ~18 sections, has no typed cells,
+and hands Excel decimal commas it will mangle.
+
 The design rule that matters is **typed cells**. The Typst template consumes
 pre-formatted Spanish strings because it only does layout; a spreadsheet must
 not, because sorting by date, filtering a product and summing hectares all
@@ -535,7 +830,13 @@ The whole pipeline is offline by construction:
   vendored alongside in `crates/terrazgo-report/fonts/`) are embedded with
   `include_bytes!`. Liberation Sans is metric-compatible with Arial, the
   look of the Spanish administrative forms. No system-font scanning: output
-  is identical on every platform.
+  is identical on every platform. Vendoring them by hand was chosen over
+  typst's own `typst-kit-embed-fonts` feature, which costs ~10 MB for a
+  bookish Libertinus look — and, more importantly, ships a default-font
+  fallback that would quietly satisfy the zero-warnings tripwire below
+  instead of exposing broken font wiring. Never add `ttf-parser` as a direct
+  dependency to inspect these faces: it trips cargo-deny's unmaintained
+  policy (RUSTSEC-2026-0192), and typst's own `Font` parser reads them.
 - **No package resolution**: typst-as-lib's network-capable features stay
   off, so an `@preview` import in a template fails the compile loudly
   instead of reaching for the network.
@@ -770,6 +1071,8 @@ URI is streamed into a staging copy first, because rusqlite and the GPKG
 reader need real paths). Staging files live under the app *cache* dir and
 delete themselves on drop — transient by construction, never in backups.
 
+## The map tier
+
 Mapping is whole-app infrastructure (plots today; irrigation, zone flags,
 treatments as overlays later), not a SIGPAC feature. Three pieces
 (implemented 2026-07-07; design history in
@@ -843,8 +1146,10 @@ that promise for kilobytes of savings. Since 2026-07-11 the cap is a user
 setting (Settings view; `tile_cache_max_bytes` in `settings.json`, unset =
 the `TILE_CACHE_MAX_BYTES` default, changes enforced immediately), and the
 same view offers clearing the tile cache outright — `resource` rows survive
-that too. Revisit the default at the mobile milestone, where device storage
-is the real constraint.
+that too. The default was reviewed on 2026-08-26 against device storage —
+the constraint it had been held open for — and kept at 512 MiB: it is a
+ceiling and not a reservation, so a phone holds only the tiles it browsed,
+and the cap is a user setting on every platform.
 
 **Layers as data.** `src/lib/mapLayers.js` mirrors the `nav.js` philosophy:
 a module contributes a map overlay by adding one entry — either a GeoJSON
@@ -961,6 +1266,47 @@ command, one feature per plot (stacked boundary sources would double the
 tint). They start toggled off (`defaultVisible: false`) and declare a
 `legend` (color swatch + label pairs) the layer panel shows while visible.
 
+## Pages the app points at, and never talks to
+
+Spain's agricultural registries publish no machine interface: ASPAFITOS is a
+server-rendered ASP.NET app, REGMAQ-ROMA answers a form POST with HTML, and
+ROPO's bulk download stopped updating in 2024. Scraping is not an acceptable
+interface here, so the app cannot look a farmer's ROMA number up for them.
+What it can do is say which registry holds it and open that registry — which
+is what `src-tauri/src/external_links.rs` and `tauri-plugin-opener` are for
+(added 2026-08-26).
+
+**This is not a network seam.** Nothing in that path fetches anything; it hands
+a URL to the platform browser and forgets it. `terrazgo-net` remains the one
+place the app itself speaks HTTP, and neither core nor any module gains a
+dependency from this — the offline-first rule is untouched.
+
+**Rust owns the URLs, and that is the design rather than a detail.** The
+allowlist is a `const` table of `(id, url)` in `external_links.rs`; the
+`open_external_link` command resolves an id or fails with
+`Invalid("unknown_link")`. The webview passes `"roma"`, never a URL, so the
+opener plugin is registered with **no `opener:allow-open-url` granted** — the
+`user_files.rs` precedent, and the reason the ACL files did not change when
+this landed.
+
+The split across the boundary is deliberate:
+
+| Where | What it knows | Why there |
+|---|---|---|
+| `src-tauri/src/external_links.rs` | id → URL | It is a permission decision. One source of truth for a destination, and the webview cannot name one. |
+| `src/lib/registryHints.js` | country + field → id | It is presentation: which *field* earns a hint is a UI question, and it is per country so no Spanish registry is hardcoded into a shared form component. |
+| `src/i18n/<locale>/external.js` | id → the sentence | Registry proper nouns (ROMA, ROPO, SIGPAC) do not translate; the sentence around them does. |
+
+`src-tauri/tests/registry_hints.rs` keeps the three in step, because the failure
+mode is otherwise invisible until a farmer taps a button.
+
+**What is deliberately absent.** REGA, SIEX, MDF, RGSEAA, REGFER and NIMA have
+columns in the schema but no link: none resolves to a stable public lookup
+page, and a hint that leads nowhere is worse than a bare label.
+`farm_es_extension.rea_code` can never gain one — REA is a per-community
+registry (REACYL, SIDEAC, …) and [siex-export.md](siex-export.md) → "the
+REA-first rule" forbids any user-facing string naming one community's service.
+
 ## The frontend in one page
 
 Full conventions in [frontend-conventions.md](frontend-conventions.md); the
@@ -974,9 +1320,13 @@ architectural skeleton:
   destinations are data (`lib/nav.js`), rendered twice: collapsible sidebar
   on wide screens, bottom tab bar on phones. Adding a view = one entry +
   one router branch.
-- **Feedback** flows through the notification bell: `run()` turns boundary
-  errors into red notifications (panel auto-opens), successes tick the
-  badge. There is no other error surface.
+- **Feedback** has two surfaces, split by whether a form is involved. A
+  form's own problems — its empty required fields and the backend's refusal to
+  save it — are drawn by `TzForm`: a summary at the top of that form listing
+  every one, plus each field's own inline message. Everything else flows
+  through the notification bell, where `run()` turns boundary errors into red
+  notifications (panel auto-opens) and successes tick the badge. A success is
+  only pushed when it says something the screen does not already show.
 - **i18n**: every user-facing string is a key present in *every* locale
   dictionary (a contract test enforces it); schema codes are translated at
   display time via `tCode`; user-entered data is never translated.
@@ -992,6 +1342,42 @@ architectural skeleton:
 - **No `@tauri-apps/api` dependency** — `withGlobalTauri` exposes
   `window.__TAURI__`, and plugin calls ride the same transport
   (`invoke("plugin:dialog|save")`).
+- **Build shape.** Vite's root is `src/` (`index.html`, `main.js`,
+  `App.svelte`) with `vite.config.js` and `package.json` at the repository
+  root; the output is `dist/`, which is gitignored and is what
+  `tauri.conf.json`'s `frontendDist` points at. **`npm run build` must run
+  before the first `cargo check` or `cargo test`**, because tauri's codegen
+  embeds `dist/` at compile time — on a fresh clone the Rust build fails
+  without it, and the error does not say so.
+
+### What the webview is allowed to call
+
+`src-tauri/capabilities/` holds the Tauri 2 ACL, and it is deliberately
+small. App-defined commands registered through `generate_handler!` are **not**
+ACL-gated at all, so the files only cover what the injected global API bundle
+and the plugins need:
+
+- `default.json` — `core:default` for the events/window plumbing, plus the
+  three dialog permissions (`save`, `open`, `message`) behind backup
+  export/import and the destructive-action confirmations.
+- `mobile.json` — the geolocation permissions for the map's GPS lookup,
+  behind a `platforms` gate so desktop builds never see a plugin that does
+  not exist there.
+
+**No filesystem permission and no opener permission is granted to the webview,
+and that is the point.** Two plugins are registered with nothing in the ACL at
+all, because both are driven entirely from Rust:
+
+- `tauri-plugin-fs` — every dialog-chosen read and write goes through
+  `src-tauri/src/user_files.rs` (see "Files the user picks" above);
+- `tauri-plugin-opener` — every outbound link goes through
+  `src-tauri/src/external_links.rs` (see "Pages the app points at" below).
+
+The shape is the same in both cases and is what makes the claim real rather
+than nominal: **the frontend names a thing, Rust decides what that means.** A
+webview granted `opener:allow-open-url` could open any URL it was talked into
+building; one that can only pass `"roma"` cannot. So the webview's permission
+surface stays at zero.
 
 ## Rust, for the JavaScript developer who lives here
 
@@ -1079,6 +1465,135 @@ Selective test-first, by code category:
    stubbed `invoke` (error-stub or backend-harvested fixtures), and an
    app-level harness drives the real debug binary in the real webview.
 
+### How the suite is organised, audited 2026-08-17, rebuilt 2026-08-24
+
+**It is the cargo convention with no bespoke harness** — 60 integration files
+across the crates' `tests/` directories, 26 inline `#[cfg(test)]` modules, 1 084
+tests including doc-tests. Five properties are worth naming so they are not
+traded away by a later tidy-up:
+
+- **Tests run against the real migrations.** Each crate's `open_in_memory()`
+  applies the actual composed migration set, so a repository test meets the
+  shipping schema's CHECK constraints and FKs rather than a fixture schema that
+  drifts from it.
+- **Assertions are semantic, and there is no snapshot library anywhere.** The
+  book's tests assert `rows[0]["species"] == "wheat"`, not a rendered blob.
+  Snapshot testing carries an "accept the new output" step that blesses
+  regressions by reflex, which is the wrong affordance to have anywhere near a
+  document with legal value.
+- **Test names state behaviour** (`rejects_an_interval_that_ends_before_it_starts`),
+  which is what keeps a suite this size readable years later.
+- **The source-scanning contract tests** (`i18n_contract`,
+  `command_registration`, `spdx_headers`, `neutral_voice`) encode as tests what
+  most projects leave to a CI grep, so they run before a push rather than after.
+- **`migration_composition.rs` pins both consumer crates' hand-written
+  `db::migrations()` to the module registry.** It is the structural guard that
+  makes a fourth module safe rather than hopeful: a module registered in the
+  shell but forgotten in the record book's or the descriptor's composition
+  fails here rather than as "no such table" in a report.
+
+#### Where a shared test helper goes
+
+Three homes, and the question that picks one is *what schema does it need?*
+
+- **Only `terrazgo-core` → `crates/terrazgo-testkit`**, a dev-dependency-only
+  crate. It holds `farm_with_plots` (the season, farm, two plots and the
+  second farm's plot every `PlotNotOnFarm` test needs), `last_change` (the
+  latest `record_change` row as `(operation, before, after)`) and `TempFile` (a
+  temp path with an RAII guard that also sweeps the `-wal`/`-shm` sidecars).
+  **It depends on core and nothing else, and that is the design.** A testkit
+  that grew a `module-cue` dependency would put module-cue's schema inside
+  module-fertilisation's test graph, and each module's
+  `the_module_runs_on_core_alone` guard would go on passing while it was open.
+- **This crate's own schema, and two or more test files use it →
+  `tests/common/mod.rs` in that crate.** Seven crates have one. It re-exports
+  the testkit so a test file needs one `mod common;` and one `use`, and adds
+  what is local: the `db()` and `db_with_catalogues()` openers, and the
+  crate's shared fixture. One test file means no `common` — `terrazgo-geo`
+  and `terrazgo-report` have none, and `terrazgo-net` has no `tests/` at all.
+- **Another crate's schema → it cannot be shared; duplicate it and say why.**
+  `terrazgo-recordbook/tests/common` and `terrazgo-siex/tests/common` build
+  field-for-field twins of the same export-ready Spanish farm, ~60 lines each,
+  and both say so at the top. Closing that would mean the testkit reaching into
+  module-cue, which is the back door above; and it is the same trade the crates
+  themselves make, since the book and the descriptor read the same registers
+  and share no code.
+
+#### The catalogue fixture is explicit
+
+**A test that resolves a catalogue code to a label opens through
+`db_with_catalogues()`; every other test opens through `db()`, and the
+difference is deliberate.** It used to be an ad-hoc `ensure_catalogues` call at
+47 sites, so within one file some tests resolved codes to prose and some
+printed the bare code, and which kind you wrote depended on which test you
+copied. Importing the vendored snapshot parses 1.6 MB of CSV per call, but the
+cost is the lesser reason — the statement is.
+
+The exception is core's tests OF `ensure_catalogues` itself (idempotency,
+upsert-never-delete), which still call it by hand: there the import is the
+subject rather than the setup.
+
+#### Doc-tests: where the example IS the specification
+
+- **Pure functions get a worked example each** — core's `date` and `geojson`,
+  module-fertilisation's `agronomy`, module-cue's `alerts`. There the example
+  is the specification, and it costs nothing to run.
+- **Each crate root gets one end-to-end example.** core's opens, writes and
+  reads back; terrazgo-report's renders a real PDF and asserts the warnings
+  list is empty.
+- **Repository functions get none.** A doc example per repository function
+  would spin a database each, for documentation whose real specification is the
+  test beside it.
+
+#### The six deviations, and where each landed
+
+1. **No shared test support — CLOSED.** `terrazgo-testkit` plus a
+   `tests/common/mod.rs` in seven crates, per the homes above. `fixture` was
+   defined 15 times and `last_change` 8; the plumbing now grows per crate
+   rather than per test file.
+2. **The migration upgrade-path test cannot yet prove what its name promises —
+   PARKED, correctly.** `applies_cleanly_on_top_of_previous_version` steps to
+   version 1 and then to latest, which while the migrations are squashed into
+   `0001`/`0002` only exercises "DDL, then seeds". It is the right test to have
+   standing and it becomes load-bearing at the first append-only migration;
+   until then **its green tick is not an upgrade guarantee.**
+3. **Zero doc-tests — CLOSED.** Eleven, under the rule above.
+4. **`open_in_memory()` is public API on the shipping crates — DECLINED, with
+   reasons.** A `#[cfg(feature = "testing")]` gate collides head-on with
+   deviation 3: a doc example needs `open_in_memory()` callable from a
+   doc-test, and gating it makes every such example either `ignore`d — a
+   doc-test that never runs — or forced to hand-roll `Connection::open_in_memory()`
+   plus `migrations().to_latest()` inline. Supporting: no `publish` key exists
+   anywhere in the workspace and nothing consumes these crates outside it, so
+   the surface is workspace-internal; shipping code that wants a scratch
+   connection already calls rusqlite's own; and the shell enables module-cue's
+   `demo` feature *unconditionally* because cargo features cannot be
+   debug-profile-conditional, so a `testing` feature would end up always on —
+   which is no gate at all.
+5. **`std::env::temp_dir()` and `tempfile` — DECLINED as a dependency, FIXED as
+   a defect.** The real problem was never the std temp dir: it was three files
+   with three cleanup disciplines, two of them removing their files with
+   explicit calls that a failing assertion skips. `terrazgo-geo`'s import tests
+   had already settled this once with an RAII `Drop` guard under a comment
+   reading *"no tempfile dev-dependency"*. That guard is now the testkit's
+   `TempFile`, used by all three — geo included, so the crate that wrote it
+   consumes it back rather than keeping a private copy.
+6. **Four oversized files — CLOSED.** `report.rs` (5 817), core's
+   `repository.rs` (4 137), module-cue's `repository.rs` (3 637) and
+   `export.rs` (3 591) were 53 % of the integration suite. They split along
+   their existing banner sections into 22 files, the largest 1 226 lines:
+   `report_*.rs` by section of the book, `repository_*.rs` by entity (matching
+   `src/repository/`'s layout), and `export_*.rs` **by SIEX block rather than by
+   arc seam** — finding how `Pastoreo` is serialized no longer requires knowing
+   it landed in seam 4.
+
+The pass moved blocks verbatim: no assertion changed and no test was renamed,
+so the count was identical before and after, per crate as well as in total. The
+only deletions were two tests in `module-cue/tests/migrations.rs` that
+re-asserted core's schema (`farm_without_country_is_rejected_by_the_schema`,
+`foreign_keys_are_enforced`) word for word from
+`terrazgo-core/tests/migrations.rs`.
+
 ## Releases
 
 Releases live at
@@ -1095,6 +1610,14 @@ the installers — verify any download with
 `gh attestation verify <file> --repo clozanoruiz/terrazgo`. Release notes are
 written by hand before a draft release is published.
 
+The snapshot is produced by `packaging/`, which holds the export script and
+the public-facing Spanish README and issue templates it drops in. The script
+strips the development-only trees and then **fails the release** if a
+case-insensitive grep finds any surviving reference to them, so a stray
+mention in a crate source or a doc stops the publish rather than shipping.
+`packaging/` is itself stripped from the snapshot. Procedure and the full
+release ritual: [maintenance.md](maintenance.md) §6.
+
 ## Recipes — where to start when you want to…
 
 - **Add a command end-to-end** → checklist in
@@ -1109,7 +1632,12 @@ written by hand before a draft release is published.
   END of `registered_modules()`; add `src-tauri/src/commands/<module>.rs` and
   list its commands in `lib.rs`'s `generate_handler!`; add a `Classify` impl for
   its error type and one line to the shell's downcast chain; add one area file
-  per locale. The core does not change.
+  per locale. The core does not change. For its tests: take
+  `terrazgo-testkit` as a dev-dependency and build fixtures on
+  `farm_with_plots`; add a `tests/common/mod.rs` once a second test file needs
+  to share something (see "Where a shared test helper goes" above); and if the
+  crate is a library, add it to the `cargo llvm-cov` line in the same commit or
+  it is simply not measured.
   *This used to be about ten hardcoded points; six were removed on 2026-08-13
   (the single 2940-line `commands.rs`, the backup-shape hand-join, the composed
   migration count, the i18n contract's crate list, the router branch chain and

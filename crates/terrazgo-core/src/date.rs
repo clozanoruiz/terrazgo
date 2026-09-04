@@ -13,6 +13,16 @@ use jiff::{Timestamp, ToSpan, civil::Date};
 
 /// Parse a `YYYY-MM-DD` string into a calendar date, mapping failure to `InvalidDate`.
 /// Public because module crates build their own date rules on it (e.g. CUE's alert rules).
+///
+/// ```
+/// use terrazgo_core::date::parse_date;
+///
+/// assert!(parse_date("2028-02-29").is_ok()); // 2028 is a leap year
+/// assert!(parse_date("2026-02-29").is_err()); // 2026 is not
+/// // A date-only field is exactly ten characters; anything else is a typo,
+/// // never a partially-understood value.
+/// assert!(parse_date("2026-02-28T00:00:00Z").is_err());
+/// ```
 pub fn parse_date(date: &str) -> Result<Date> {
     date.parse()
         .map_err(|_| CoreError::InvalidDate(date.to_string()))
@@ -20,6 +30,22 @@ pub fn parse_date(date: &str) -> Result<Date> {
 
 /// Add `days` to a `YYYY-MM-DD` date, returning a `YYYY-MM-DD` date.
 /// Month/year/leap-day/campaign-boundary crossings are handled by `jiff`.
+///
+/// This is how a PHI end date is derived: RD 1311/2012 makes the plazo de
+/// seguridad a number of days from the application, and the resulting date is
+/// the FIRST day harvest is allowed — not the last day it is forbidden.
+///
+/// ```
+/// use terrazgo_core::date::add_days;
+///
+/// // A 21-day PHI applied on 12 March: harvest is allowed from 2 April.
+/// assert_eq!(add_days("2026-03-12", 21).unwrap(), "2026-04-02");
+///
+/// // Leap day and campaign boundaries are `jiff`'s problem, not ours.
+/// assert_eq!(add_days("2028-02-28", 1).unwrap(), "2028-02-29");
+/// assert_eq!(add_days("2026-02-28", 1).unwrap(), "2026-03-01");
+/// assert_eq!(add_days("2026-12-31", 1).unwrap(), "2027-01-01");
+/// ```
 pub fn add_days(date: &str, days: i64) -> Result<String> {
     let result = parse_date(date)?
         .checked_add(days.days())

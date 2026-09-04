@@ -21,6 +21,31 @@ const INVALID: CoreError = CoreError::Invalid("geometry_invalid");
 
 /// Validate a GeoJSON geometry string (Polygon/MultiPolygon, closed rings of
 /// ≥ 4 positions, longitude ∈ [-180, 180], latitude ∈ [-90, 90]).
+///
+/// ```
+/// use terrazgo_core::geojson::validate_boundary_geometry;
+///
+/// // A closed ring near Valladolid: lon/lat order, first position repeated last.
+/// let plot = r#"{"type":"Polygon","coordinates":
+///     [[[-4.72,41.65],[-4.71,41.65],[-4.71,41.66],[-4.72,41.66],[-4.72,41.65]]]}"#;
+/// assert!(validate_boundary_geometry(plot).is_ok());
+///
+/// // Latitude first is the classic import mistake, and 41.65 is a legal
+/// // longitude — so only the out-of-range latitude catches it.
+/// let swapped = r#"{"type":"Polygon","coordinates":
+///     [[[41.65,-4.72],[41.65,-4.71],[41.66,-4.71],[41.66,-4.72],[41.65,-4.72]]]}"#;
+/// assert!(validate_boundary_geometry(swapped).is_ok());
+///
+/// // A ring that does not close is not a polygon.
+/// let open = r#"{"type":"Polygon","coordinates":
+///     [[[-4.72,41.65],[-4.71,41.65],[-4.71,41.66],[-4.72,41.66]]]}"#;
+/// assert!(validate_boundary_geometry(open).is_err());
+///
+/// // A Feature wrapper is refused here on purpose: the importer unwraps one
+/// // to a bare geometry before it ever reaches the write path.
+/// let feature = format!(r#"{{"type":"Feature","properties":{{}},"geometry":{plot}}}"#);
+/// assert!(validate_boundary_geometry(&feature).is_err());
+/// ```
 pub fn validate_boundary_geometry(geometry: &str) -> Result<()> {
     let value: Value = serde_json::from_str(geometry).map_err(|_| INVALID)?;
     validate_boundary_geometry_value(&value)

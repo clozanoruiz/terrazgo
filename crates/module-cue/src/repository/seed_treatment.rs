@@ -23,6 +23,7 @@ use crate::models::{
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 /// The `register_kind` code this table backs; `register_declaration`'s guard
@@ -40,6 +41,12 @@ pub fn insert_seed_treatment(
 
     let tx = conn.transaction()?;
     validate_treatment_kind(&tx, new.treatment_kind_code.as_deref())?;
+    validate_sowing_link(
+        &tx,
+        new.sowing_record_id.as_deref(),
+        &new.farm_id,
+        &new.season_id,
+    )?;
     let plots = validated_plots(&tx, &new.farm_id, &new.plots)?;
 
     let now = now_utc_iso();
@@ -54,6 +61,8 @@ pub fn insert_seed_treatment(
         seed_quantity_kg: new.seed_quantity_kg,
         seed_lot: blank_to_none(new.seed_lot),
         treatment_kind_code: new.treatment_kind_code,
+        acquired_on: blank_to_none(new.acquired_on),
+        sowing_record_id: new.sowing_record_id,
         product_name,
         product_registration_number: blank_to_none(new.product_registration_number),
         product_active_substance: blank_to_none(new.product_active_substance),
@@ -67,11 +76,13 @@ pub fn insert_seed_treatment(
     tx.execute(
         "INSERT INTO seed_treatment (
             id, season_id, farm_id, sown_on, species_name, variety, crop_code,
-            seed_quantity_kg, seed_lot, treatment_kind_code, product_name,
-            product_registration_number, product_active_substance, product_id,
-            efficacy_code, notes, created_at, updated_at
+            seed_quantity_kg, seed_lot, treatment_kind_code, acquired_on,
+            sowing_record_id, product_name, product_registration_number,
+            product_active_substance, product_id, efficacy_code, notes,
+            created_at, updated_at
          ) VALUES (
-            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
+            ?19, ?20
          )",
         params![
             record.id,
@@ -84,6 +95,8 @@ pub fn insert_seed_treatment(
             record.seed_quantity_kg,
             record.seed_lot,
             record.treatment_kind_code,
+            record.acquired_on,
+            record.sowing_record_id,
             record.product_name,
             record.product_registration_number,
             record.product_active_substance,
@@ -155,6 +168,12 @@ pub fn update_seed_treatment(
         )
         .optional()?
         .ok_or(CueError::NotFound)?;
+    validate_sowing_link(
+        &tx,
+        update.sowing_record_id.as_deref(),
+        &before.farm_id,
+        &before.season_id,
+    )?;
     let plots = validated_plots(&tx, &before.farm_id, &update.plots)?;
 
     let mut after = before.clone();
@@ -165,6 +184,8 @@ pub fn update_seed_treatment(
     after.seed_quantity_kg = update.seed_quantity_kg;
     after.seed_lot = blank_to_none(update.seed_lot);
     after.treatment_kind_code = update.treatment_kind_code;
+    after.acquired_on = blank_to_none(update.acquired_on);
+    after.sowing_record_id = update.sowing_record_id;
     after.product_name = product_name;
     after.product_registration_number = blank_to_none(update.product_registration_number);
     after.product_active_substance = blank_to_none(update.product_active_substance);
@@ -176,9 +197,9 @@ pub fn update_seed_treatment(
         "UPDATE seed_treatment SET
             sown_on = ?2, species_name = ?3, variety = ?4, crop_code = ?5,
             seed_quantity_kg = ?6, seed_lot = ?7, treatment_kind_code = ?8,
-            product_name = ?9, product_registration_number = ?10,
-            product_active_substance = ?11, product_id = ?12, notes = ?13,
-            updated_at = ?14
+            acquired_on = ?9, sowing_record_id = ?10, product_name = ?11,
+            product_registration_number = ?12, product_active_substance = ?13,
+            product_id = ?14, notes = ?15, updated_at = ?16
          WHERE id = ?1",
         params![
             id,
@@ -189,6 +210,8 @@ pub fn update_seed_treatment(
             after.seed_quantity_kg,
             after.seed_lot,
             after.treatment_kind_code,
+            after.acquired_on,
+            after.sowing_record_id,
             after.product_name,
             after.product_registration_number,
             after.product_active_substance,
@@ -403,6 +426,47 @@ pub fn get_seed_treatment(conn: &Connection, id: &str) -> Result<SeedTreatmentDe
 }
 
 /// Oldest first, the order a record book reads in.
+/// Every record of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_seed_treatments_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<SeedTreatmentDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM seed_treatment
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY sown_on, id",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_with_details(conn, records)
+}
+
+/// The live treated-seed records that name this sowing — the link model 3.2
+/// states about core's sowing register, read from the module side because only
+/// this side may hold the column.
+///
+/// Soft-deleted records are excluded: a withdrawn 3.2 row no longer asserts that
+/// the material was treated, and the export reads exactly that assertion.
+pub fn list_seed_treatments_for_sowing(
+    conn: &Connection,
+    sowing_record_id: &str,
+) -> Result<Vec<SeedTreatment>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM seed_treatment
+         WHERE sowing_record_id = ?1 AND deleted_at IS NULL
+         ORDER BY sown_on, id",
+    )?;
+    let rows = stmt
+        .query_map([sowing_record_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 pub fn list_seed_treatments(
     conn: &Connection,
     season_id: &str,
@@ -416,13 +480,7 @@ pub fn list_seed_treatments(
     let records = stmt
         .query_map(params![season_id, farm_id], map_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| {
-            let plots = plots_of(conn, &record.id)?;
-            Ok(SeedTreatmentDetail { record, plots })
-        })
-        .collect()
+    all_with_details(conn, records)
 }
 
 /// Whether any sowing hangs off this season — one arm of the guard the shell
@@ -484,6 +542,41 @@ fn validate_treatment_kind(tx: &Transaction, code: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// The named sowing must exist and belong to the SAME farm and campaign.
+///
+/// The foreign key alone would let a record point at another holding's sowing,
+/// and the export reads the link to state `MaterialTratado` on that sowing —
+/// so a cross-farm link would put one farmer's treated seed in another's
+/// descriptor. Soft-deleted sowings are refused too: a link is a statement
+/// about a live register, and the picker only offers live rows.
+fn validate_sowing_link(
+    tx: &Transaction,
+    sowing_record_id: Option<&str>,
+    farm_id: &str,
+    season_id: &str,
+) -> Result<()> {
+    let Some(id) = sowing_record_id else {
+        return Ok(());
+    };
+    let found: Option<(String, String)> = tx
+        .query_row(
+            "SELECT farm_id, season_id FROM sowing_record
+             WHERE id = ?1 AND deleted_at IS NULL",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match found {
+        Some((sowing_farm, sowing_season))
+            if sowing_farm == farm_id && sowing_season == season_id =>
+        {
+            Ok(())
+        }
+        Some(_) => Err(CueError::Invalid("sowing_not_on_farm")),
+        None => Err(CueError::NotFound),
+    }
+}
+
 fn validate_seed_quantity(value: Option<f64>) -> Result<()> {
     match value {
         None => Ok(()),
@@ -541,6 +634,30 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
 
 // --- mapping ---------------------------------------------------------------
 
+/// [`with_details`]-style hydration for a whole list, in ONE child statement
+/// rather than one per record. The single-record paths keep their point
+/// queries: a `WHERE id = ?` has nothing to hoist.
+fn all_with_details(
+    conn: &Connection,
+    records: Vec<SeedTreatment>,
+) -> Result<Vec<SeedTreatmentDetail>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut plots = children_by_parent(
+        conn,
+        "SELECT * FROM seed_treatment_plot WHERE seed_treatment_id IN ({ids}) ORDER BY seed_treatment_id, id",
+        &ids,
+        map_plot,
+        |p| p.seed_treatment_id.clone(),
+    )?;
+    Ok(records
+        .into_iter()
+        .map(|record| SeedTreatmentDetail {
+            plots: plots.remove(&record.id).unwrap_or_default(),
+            record,
+        })
+        .collect())
+}
+
 fn plots_of(conn: &Connection, seed_treatment_id: &str) -> Result<Vec<SeedTreatmentPlot>> {
     let mut stmt =
         conn.prepare("SELECT * FROM seed_treatment_plot WHERE seed_treatment_id = ?1 ORDER BY id")?;
@@ -571,6 +688,8 @@ fn map_record(row: &Row) -> rusqlite::Result<SeedTreatment> {
         seed_quantity_kg: row.get("seed_quantity_kg")?,
         seed_lot: row.get("seed_lot")?,
         treatment_kind_code: row.get("treatment_kind_code")?,
+        acquired_on: row.get("acquired_on")?,
+        sowing_record_id: row.get("sowing_record_id")?,
         product_name: row.get("product_name")?,
         product_registration_number: row.get("product_registration_number")?,
         product_active_substance: row.get("product_active_substance")?,

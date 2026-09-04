@@ -37,6 +37,7 @@ export function emptyDraft() {
     // wall-clock HH:MM — never converted, because the hour on the ground is
     // what makes it relevant.
     applicationTime: "",
+    dryingDate: "",
     productId: "",
     doseValue: "",
     doseUnit: "l_ha",
@@ -76,6 +77,7 @@ export function draftFrom(entry) {
     applicationDate: entry.record.application_date,
     applicationEndDate: entry.record.application_end_date ?? "",
     applicationTime: entry.record.application_time ?? "",
+    dryingDate: entry.record.drying_date ?? "",
     productId: entry.record.product_id ?? "",
     doseValue: entry.record.dose_value ?? "",
     doseUnit: entry.record.dose_unit_code ?? "l_ha",

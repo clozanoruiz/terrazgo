@@ -20,10 +20,12 @@ use crate::models::{
     FertilisationPlot, FertilisationRecord, FertilisationRecordDetail, NewFertilisationPlot,
     NewFertilisationRecord, UpdateFertilisationRecord,
 };
+use crate::siex::NO_PRACTICES_CODE;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
 use std::collections::HashSet;
 use terrazgo_core::date::now_utc_iso;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 /// The four rates Anexo III C.j's "por hectárea" can be stated in. The column
@@ -56,6 +58,13 @@ pub fn insert_fertilisation_record(
         &new.application_method_code,
     )?;
     validate_machinery(&tx, new.machinery_id.as_deref(), &new.farm_id)?;
+    validate_fertigation_link(
+        &tx,
+        new.irrigation_record_id.as_deref(),
+        &new.application_method_code,
+        &new.farm_id,
+        &new.season_id,
+    )?;
     let snapshot = material_snapshot(&tx, &new.fertiliser_material_id)?;
     let plots = validated_plots(&tx, &new.farm_id, &new.plots)?;
     let practices = validated_practices(&new.practices)?;
@@ -78,7 +87,9 @@ pub fn insert_fertilisation_record(
         richness_p2o5_snapshot: snapshot.p2o5,
         richness_k2o_snapshot: snapshot.k2o,
         sludge_application: new.sludge_application,
+        sustainable_input_management: new.sustainable_input_management,
         machinery_id: blank_to_none(new.machinery_id),
+        irrigation_record_id: blank_to_none(new.irrigation_record_id),
         service_company: blank_to_none(new.service_company),
         service_regfer_number: blank_to_none(new.service_regfer_number),
         delivery_note_ref: blank_to_none(new.delivery_note_ref),
@@ -108,7 +119,9 @@ pub fn insert_fertilisation_record(
             record.richness_p2o5_snapshot,
             record.richness_k2o_snapshot,
             record.sludge_application,
+            record.sustainable_input_management,
             record.machinery_id,
+            record.irrigation_record_id,
             record.service_company,
             record.service_regfer_number,
             record.delivery_note_ref,
@@ -185,6 +198,15 @@ pub fn update_fertilisation_record(
         .optional()?
         .ok_or(FertilisationError::NotFound)?;
     validate_machinery(&tx, update.machinery_id.as_deref(), &before.farm_id)?;
+    // Against the SUBMITTED method, not the stored one: a correction that turns
+    // a fertigation into a broadcast must drop the link in the same edit.
+    validate_fertigation_link(
+        &tx,
+        update.irrigation_record_id.as_deref(),
+        &update.application_method_code,
+        &before.farm_id,
+        &before.season_id,
+    )?;
     let plots = validated_plots(&tx, &before.farm_id, &update.plots)?;
     let practices = validated_practices(&update.practices)?;
 
@@ -205,7 +227,9 @@ pub fn update_fertilisation_record(
     }
     after.fertiliser_material_id = update.fertiliser_material_id;
     after.sludge_application = update.sludge_application;
+    after.sustainable_input_management = update.sustainable_input_management;
     after.machinery_id = blank_to_none(update.machinery_id);
+    after.irrigation_record_id = blank_to_none(update.irrigation_record_id);
     after.service_company = blank_to_none(update.service_company);
     after.service_regfer_number = blank_to_none(update.service_regfer_number);
     after.delivery_note_ref = blank_to_none(update.delivery_note_ref);
@@ -221,10 +245,11 @@ pub fn update_fertilisation_record(
             fertiliser_material_id = ?8, material_name_snapshot = ?9,
             material_code_snapshot = ?10, richness_n_snapshot = ?11,
             richness_p2o5_snapshot = ?12, richness_k2o_snapshot = ?13,
-            sludge_application = ?14, machinery_id = ?15, service_company = ?16,
-            service_regfer_number = ?17, delivery_note_ref = ?18,
-            yield_estimated_kg_ha = ?19, yield_final_kg_ha = ?20, notes = ?21,
-            updated_at = ?22
+            sludge_application = ?14, sustainable_input_management = ?15,
+            machinery_id = ?16, irrigation_record_id = ?17, service_company = ?18,
+            service_regfer_number = ?19, delivery_note_ref = ?20,
+            yield_estimated_kg_ha = ?21, yield_final_kg_ha = ?22, notes = ?23,
+            updated_at = ?24
          WHERE id = ?1",
         params![
             id,
@@ -241,7 +266,9 @@ pub fn update_fertilisation_record(
             after.richness_p2o5_snapshot,
             after.richness_k2o_snapshot,
             after.sludge_application,
+            after.sustainable_input_management,
             after.machinery_id,
+            after.irrigation_record_id,
             after.service_company,
             after.service_regfer_number,
             after.delivery_note_ref,
@@ -324,6 +351,26 @@ pub fn get_fertilisation_record(conn: &Connection, id: &str) -> Result<Fertilisa
 }
 
 /// Oldest first, the order a record book reads in.
+/// Every fertilisation record of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_fertilisation_records_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<FertilisationRecordDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM fertilisation_record
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY applied_on, id",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_with_details(conn, records)
+}
+
 pub fn list_fertilisation_records(
     conn: &Connection,
     season_id: &str,
@@ -337,18 +384,7 @@ pub fn list_fertilisation_records(
     let records = stmt
         .query_map(params![season_id, farm_id], map_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| {
-            let plots = plots_of(conn, &record.id)?;
-            let practices = practices_of(conn, &record.id)?;
-            Ok(FertilisationRecordDetail {
-                record,
-                plots,
-                practices,
-            })
-        })
-        .collect()
+    all_with_details(conn, records)
 }
 
 /// Whether any fertilisation record hangs off this season. Soft-deleted rows
@@ -671,6 +707,54 @@ fn validate_machinery(tx: &Transaction, machinery_id: Option<&str>, farm_id: &st
     Ok(())
 }
 
+/// The linked watering must exist, be live, be on the SAME farm and campaign,
+/// and — the part that makes the link mean something — the application must
+/// actually be a fertigation.
+///
+/// The link exists so `Fertilizacion.Fertirrigacion` can be built from the
+/// register that holds the water (the decree splits one act across arts. 5.d
+/// and 5.e). On any other application method it would assert a fertigation that
+/// did not happen, which is why the method decides rather than the farmer.
+/// `is_fertigation` is read from the lookup rather than matched on the code, so
+/// the rule follows the data.
+fn validate_fertigation_link(
+    tx: &Transaction,
+    irrigation_record_id: Option<&str>,
+    application_method_code: &str,
+    farm_id: &str,
+    season_id: &str,
+) -> Result<()> {
+    let Some(id) = irrigation_record_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    else {
+        return Ok(());
+    };
+    let is_fertigation: bool = tx
+        .query_row(
+            "SELECT is_fertigation FROM application_method WHERE code = ?1",
+            [application_method_code],
+            |r| r.get(0),
+        )
+        .map_err(no_rows_to_not_found)?;
+    if !is_fertigation {
+        return Err(FertilisationError::Invalid("link_needs_fertigation"));
+    }
+    let found: Option<(String, String)> = tx
+        .query_row(
+            "SELECT farm_id, season_id FROM irrigation_record
+             WHERE id = ?1 AND deleted_at IS NULL",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match found {
+        Some((owner, campaign)) if owner == farm_id && campaign == season_id => Ok(()),
+        Some(_) => Err(FertilisationError::Invalid("irrigation_not_on_farm")),
+        None => Err(FertilisationError::NotFound),
+    }
+}
+
 /// Every fertilised plot must exist and be on this farm. Duplicates fold — the
 /// UNIQUE index would reject them anyway, and a form listing a plot twice means
 /// one application.
@@ -723,6 +807,14 @@ fn validated_plots(
 ///
 /// Duplicates fold, and the result is sorted numerically so a freshly written
 /// record and one read back list its practices identically.
+///
+/// One pair IS refused. Code "0" is spelled "No realiza buenas prácticas", so a
+/// record holding it beside any other code says both that no practice was
+/// carried out and which ones were. That is not an unknown code — the objection
+/// the picker-narrows-never-the-repository rule exists for, since a catalogue
+/// grows between releases and refusing an unlisted code would make a lawful
+/// practice unrecordable. This is a contradictory pair of KNOWN codes whose
+/// meanings cannot drift, and a register that can hold it exports it.
 fn validated_practices(codes: &[String]) -> Result<Vec<String>> {
     let mut seen = HashSet::new();
     let mut kept = Vec::new();
@@ -735,6 +827,9 @@ fn validated_practices(codes: &[String]) -> Result<Vec<String>> {
             continue;
         }
         kept.push(code.to_string());
+    }
+    if kept.len() > 1 && kept.iter().any(|code| code == NO_PRACTICES_CODE) {
+        return Err(FertilisationError::Invalid("practices_contradict_none"));
     }
     // Provider codes are integers published in a deliberate order; a code that
     // does not parse sorts last rather than derailing the comparison.
@@ -761,13 +856,61 @@ const INSERT_SQL: &str = "INSERT INTO fertilisation_record (
         fertilisation_type_code, application_method_code, dose_value, dose_unit_code,
         fertiliser_material_id, material_name_snapshot, material_code_snapshot,
         richness_n_snapshot, richness_p2o5_snapshot, richness_k2o_snapshot,
-        sludge_application, machinery_id, service_company, service_regfer_number,
+        sludge_application, sustainable_input_management, machinery_id,
+        irrigation_record_id, service_company, service_regfer_number,
         delivery_note_ref, yield_estimated_kg_ha, yield_final_kg_ha, notes,
         created_at, updated_at
      ) VALUES (
         ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
-        ?19, ?20, ?21, ?22, ?23, ?24, ?25
+        ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27
      )";
+
+/// Hydration for a whole list, in two child statements rather than two per
+/// record. The single-record paths keep their point queries.
+///
+/// The practices query keeps its numeric ordering: the codes are catalogue
+/// integers stored as text, so ordering by the column would print 10 before 2.
+fn all_with_details(
+    conn: &Connection,
+    records: Vec<FertilisationRecord>,
+) -> Result<Vec<FertilisationRecordDetail>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut plots = children_by_parent(
+        conn,
+        "SELECT * FROM fertilisation_plot WHERE fertilisation_record_id IN ({ids})
+         ORDER BY fertilisation_record_id, id",
+        &ids,
+        map_plot,
+        |p| p.fertilisation_record_id.clone(),
+    )?;
+    let mut practices = children_by_parent(
+        conn,
+        "SELECT fertilisation_record_id, practice_code FROM fertilisation_practice
+         WHERE fertilisation_record_id IN ({ids})
+         ORDER BY fertilisation_record_id, CAST(practice_code AS INTEGER), practice_code",
+        &ids,
+        |row| {
+            Ok((
+                row.get::<_, String>("fertilisation_record_id")?,
+                row.get::<_, String>("practice_code")?,
+            ))
+        },
+        |(record_id, _)| record_id.clone(),
+    )?;
+    Ok(records
+        .into_iter()
+        .map(|record| FertilisationRecordDetail {
+            plots: plots.remove(&record.id).unwrap_or_default(),
+            practices: practices
+                .remove(&record.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, code)| code)
+                .collect(),
+            record,
+        })
+        .collect())
+}
 
 fn plots_of(conn: &Connection, record_id: &str) -> Result<Vec<FertilisationPlot>> {
     let mut stmt = conn.prepare(
@@ -832,6 +975,8 @@ fn map_record(row: &Row<'_>) -> rusqlite::Result<FertilisationRecord> {
         richness_p2o5_snapshot: row.get("richness_p2o5_snapshot")?,
         richness_k2o_snapshot: row.get("richness_k2o_snapshot")?,
         sludge_application: row.get("sludge_application")?,
+        sustainable_input_management: row.get("sustainable_input_management")?,
+        irrigation_record_id: row.get("irrigation_record_id")?,
         machinery_id: row.get("machinery_id")?,
         service_company: row.get("service_company")?,
         service_regfer_number: row.get("service_regfer_number")?,

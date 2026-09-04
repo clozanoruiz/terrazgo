@@ -108,9 +108,9 @@ export default {
   "material.fill": "Emplena des del catàleg",
   "material.fill_hint":
     "Pren la composició que el catàleg publica per al producte triat, sense tocar les línies que ja hàgiu anotat. Comproveu-la amb l'etiqueta: els metalls pesants no s'emplenen mai, perquè el catàleg barreja percentatges i mg/kg a les mateixes columnes.",
-  "material.filled": "S'han afegit {count} línies de composició.",
+  "material.filled.one": "S'ha afegit una línia de composició.",
+  "material.filled.other": "S'han afegit {count} línies de composició.",
   "material.filled_none": "El catàleg no afegeix res que no estigués ja anotat.",
-  "material.richness_detail": "N {n} · P₂O₅ {p} · K₂O {k}",
   "material.supplier_registry": "Registre",
   "material.supplier_number": "Núm. d'identificació",
   "material.empty": "Encara no hi ha materials fertilitzants registrats.",
@@ -134,6 +134,11 @@ export default {
   "fertilisation.dose_unit": "Unitat",
   "fertilisation.dose_detail": "{dose} {unit}",
   "fertilisation.sludge": "Aplicació de llots de depuradora",
+  "fertilisation.sustainable_inputs": "Gesti\u00f3 sostenible d'insums",
+  "fertilisation.irrigation_link": "Reg amb qu\u00e8 es va fertirrigar",
+  "fertilisation.irrigation_link_hint":
+    "Enlla\u00e7eu-lo amb el registre de reg de la pesta\u00f1a Reg: \u00e9s el mateix acte, anotat als dos registres que exigeix el reial decret.",
+  "fertilisation.irrigation_link_none": "Sense enlla\u00e7ar",
   "fertilisation.machinery": "Maquinària",
   "fertilisation.machinery_hint": "Opcional (annex III C.g).",
   "fertilisation.service_section": "Empresa de serveis",
@@ -149,6 +154,9 @@ export default {
   "fertilisation.practices_section": "Bones pràctiques",
   "fertilisation.practices_hint":
     "El model imprès no les recull; s'anoten perquè el quadern digital les demana.",
+  "fertilisation.practices_none": "Cap de seleccionada",
+  "fertilisation.practices_selected.one": "1 de seleccionada",
+  "fertilisation.practices_selected.other": "{count} de seleccionades",
   "fertilisation.delete_confirm": "Voleu suprimir aquesta fertilització del registre?",
   "plan.title": "7.1 Pla d'adobat",
   "plan.intro":

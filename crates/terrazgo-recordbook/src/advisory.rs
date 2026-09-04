@@ -19,7 +19,7 @@
 //! consumer crate above them (the placement rule of the recordbook extraction).
 
 use crate::error::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
 /// A treatment the advisory points at, with enough to render a list row.
@@ -46,6 +46,25 @@ pub struct TreatedPlotRef {
 pub struct OperatorRef {
     pub operator_id: String,
     pub full_name: String,
+}
+
+/// A soil cover the advisory points at, with enough to find it in the register.
+///
+/// `practice_code` rides along because the two cover pages answer to different
+/// articles — 9.4's cover is art. 42's live one and 9.5's is art. 43's inert
+/// one — so a renderer that wants to name the article has it.
+#[derive(Debug, Clone, Serialize)]
+pub struct CoverRef {
+    pub soil_cover_id: String,
+    pub practice_code: String,
+    pub established_on: String,
+}
+
+/// A grazing whose annotation the book cannot state is complete.
+#[derive(Debug, Clone, Serialize)]
+pub struct GrazingRef {
+    pub grazing_record_id: String,
+    pub started_on: String,
 }
 
 /// How RD 1051/2022 art. 4.1's exemption looks on the figures the app holds.
@@ -112,6 +131,22 @@ pub struct BookAdvisory {
     pub fertilisation_absent: Option<SectionGap>,
     /// Model section 8, art. 5.e — the same duty, in the same article.
     pub irrigation_absent: Option<SectionGap>,
+    /// RD 1048/2022 art. 42.1.e / 43.1.b: a cover whose two widths have not
+    /// been stated. **Not a lateness finding** — that annotation falls due
+    /// later than the establishment one, so a cover between the two is a
+    /// complete record with an annotation still to make.
+    pub covers_missing_widths: Vec<CoverRef>,
+    /// Art. 43.1.a's hard limit: an inert cover established after 15 April.
+    /// The strongest finding in the set, and still advisory — the book records
+    /// what happened and does not decide whether an aid was earned.
+    pub inert_covers_established_late: Vec<CoverRef>,
+    /// Art. 42.1.c: a live cover with no maintenance recorded against it.
+    /// Inert covers are never here — art. 43 asks for no maintenance at all.
+    pub covers_missing_maintenance: Vec<CoverRef>,
+    /// Art. 30.2 ter: a grazing still open after its campaign closed. Not a
+    /// missed deadline — the month runs from the end of grazing, so the honest
+    /// statement is that the book cannot show the annotation is finished.
+    pub grazing_records_without_end: Vec<GrazingRef>,
 }
 
 impl BookAdvisory {
@@ -125,6 +160,10 @@ impl BookAdvisory {
             && self.registers_undeclared.is_empty()
             && self.fertilisation_absent.is_none()
             && self.irrigation_absent.is_none()
+            && self.covers_missing_widths.is_empty()
+            && self.inert_covers_established_late.is_empty()
+            && self.covers_missing_maintenance.is_empty()
+            && self.grazing_records_without_end.is_empty()
     }
 }
 
@@ -238,6 +277,44 @@ pub(crate) fn nutrient_duty(plots: &[PlotFacts]) -> SectionGap {
     }
 }
 
+/// RD 1048/2022 art. 43.1.a on the inert cover's establishment date:
+///
+/// > la fecha de establecimiento de la cubierta inerte […] que no podrá ser
+/// > posterior al 15 de abril
+///
+/// The day itself is inside the limit. The boundary is read from the record's
+/// **own** year and never from `season.label`, which is free text a farmer
+/// types — and a campaign spans two calendar years, so the label could not
+/// answer this even if it were structured.
+///
+/// A date the parser rejects is not reported: dates are validated on write, and
+/// "established late" would be a claim the data does not support.
+fn inert_cover_is_late(established_on: &str) -> bool {
+    const LIMIT: (i8, i8) = (4, 15);
+    let Ok(date) = terrazgo_core::date::parse_date(established_on) else {
+        return false;
+    };
+    (date.month(), date.day()) > LIMIT
+}
+
+/// Whether the book can still show a grazing's annotation as finished.
+///
+/// RD 1048/2022 art. 30.2 ter annotates the grazing dates within a month, and
+/// model 9.1's own footnote counts that month **from the end of grazing**. So an
+/// open record is not late, it is unfinished — and it only becomes worth saying
+/// once the campaign it belongs to has closed. A season with no `ends_on` says
+/// nothing about that, so it produces no finding.
+///
+/// The dates compare as strings because ISO-8601 `YYYY-MM-DD` sorts
+/// chronologically, which is the whole reason the schema stores that shape.
+fn grazing_annotation_unfinished(
+    ended_on: Option<&str>,
+    season_ends_on: Option<&str>,
+    today: &str,
+) -> bool {
+    ended_on.is_none() && season_ends_on.is_some_and(|closed_on| closed_on < today)
+}
+
 /// The four conditional registers, in the order the book prints them. Each
 /// prints in three states — rows, a stated "NO", or neither — and only the
 /// third is a finding.
@@ -249,7 +326,15 @@ const CONDITIONAL_REGISTERS: &[&str] = &[
 ];
 
 /// Read the whole book and report what it is missing.
-pub fn book_advisory(conn: &Connection, season_id: &str, farm_id: &str) -> Result<BookAdvisory> {
+///
+/// `today` is passed in rather than read from the clock, so the one check that
+/// depends on it is testable — the `refresh_alerts` precedent.
+pub fn book_advisory(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+    today: &str,
+) -> Result<BookAdvisory> {
     let farm = terrazgo_core::repository::get_farm(conn, farm_id)?;
 
     // Anexo III Parte I A.1.a-b. The farm NAME is NOT NULL in the schema, so
@@ -382,6 +467,62 @@ pub fn book_advisory(conn: &Connection, season_id: &str, farm_id: &str) -> Resul
             .is_empty()
             .then(|| nutrient_duty(&plot_facts));
 
+    // Section 9, RD 1048/2022. Every check below keys off a record the farmer
+    // CHOSE to create, so none of them reaches a holding outside the regime:
+    // the app cannot know which eco-schemes were claimed in the solicitud
+    // única, so an empty section 9 is the normal state of most holdings and is
+    // never a finding. There is deliberately no `SectionGap` here.
+    let mut covers_missing_widths = Vec::new();
+    let mut inert_covers_established_late = Vec::new();
+    let mut covers_missing_maintenance = Vec::new();
+    for detail in module_ecoscheme::repository::list_soil_covers(conn, season_id, farm_id)? {
+        let record = &detail.record;
+        let reference = || CoverRef {
+            soil_cover_id: record.id.clone(),
+            practice_code: record.practice_code.clone(),
+            established_on: record.established_on.clone(),
+        };
+        // The all-or-none triple means the stated-on date answers for all three
+        // (arts. 42.1.e / 43.1.b), and it is what separates a width measured in
+        // June from one never measured at all.
+        if record.widths_stated_on.is_none() {
+            covers_missing_widths.push(reference());
+        }
+        if record.practice_code == "inert_cover" {
+            if inert_cover_is_late(&record.established_on) {
+                inert_covers_established_late.push(reference());
+            }
+        } else if detail.maintenance.is_empty() {
+            // Art. 42.1.c, live covers only — art. 43 asks for no maintenance,
+            // and the register refuses a line against an inert cover.
+            covers_missing_maintenance.push(reference());
+        }
+    }
+
+    let season_ends_on: Option<String> = conn
+        .query_row(
+            "SELECT ends_on FROM season WHERE id = ?1",
+            [season_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    let grazing_records_without_end =
+        module_ecoscheme::repository::list_grazing_records(conn, season_id, farm_id)?
+            .into_iter()
+            .filter(|detail| {
+                grazing_annotation_unfinished(
+                    detail.record.ended_on.as_deref(),
+                    season_ends_on.as_deref(),
+                    today,
+                )
+            })
+            .map(|detail| GrazingRef {
+                grazing_record_id: detail.record.id,
+                started_on: detail.record.started_on,
+            })
+            .collect();
+
     Ok(BookAdvisory {
         farm_missing_fields,
         treatments_missing_crop,
@@ -390,6 +531,10 @@ pub fn book_advisory(conn: &Connection, season_id: &str, farm_id: &str) -> Resul
         registers_undeclared,
         fertilisation_absent,
         irrigation_absent,
+        covers_missing_widths,
+        inert_covers_established_late,
+        covers_missing_maintenance,
+        grazing_records_without_end,
     })
 }
 
@@ -527,6 +672,86 @@ mod tests {
             ..PlotFacts::default()
         };
         assert_eq!(nutrient_duty(&[under_glass, unknown]).duty, Duty::Binding);
+    }
+
+    // --- RD 1048/2022, the eco-scheme registers ---------------------------
+
+    #[test]
+    fn an_inert_cover_established_after_15_april_is_late() {
+        // Art. 43.1.a: the establishment date of the inert cover "no podrá ser
+        // posterior al 15 de abril". The 16th is the first day that is.
+        assert!(inert_cover_is_late("2026-04-16"));
+        assert!(inert_cover_is_late("2026-05-01"));
+        assert!(inert_cover_is_late("2026-12-31"));
+    }
+
+    #[test]
+    fn the_15_april_limit_includes_the_day_itself() {
+        // "no posterior al 15 de abril" — the 15th is within the limit.
+        assert!(!inert_cover_is_late("2026-04-15"));
+        assert!(!inert_cover_is_late("2026-04-14"));
+        assert!(!inert_cover_is_late("2026-01-09"));
+    }
+
+    #[test]
+    fn the_limit_is_read_from_the_records_own_year() {
+        // A campaign spans two calendar years and `season.label` is free text a
+        // farmer types, so the boundary can only come from the date itself.
+        // February of the following calendar year is inside the same campaign
+        // and is still before its own 15 April.
+        assert!(!inert_cover_is_late("2027-02-20"));
+        // And a leap year moves nothing: 15 April is 15 April.
+        assert!(!inert_cover_is_late("2028-04-15"));
+        assert!(inert_cover_is_late("2028-04-16"));
+    }
+
+    #[test]
+    fn an_unreadable_establishment_date_is_not_a_finding_about_april() {
+        // Dates are validated on write, so this cannot normally happen — and if
+        // it did, "established late" would be a claim the data does not support.
+        assert!(!inert_cover_is_late("not a date"));
+    }
+
+    #[test]
+    fn an_open_grazing_is_reported_only_once_its_campaign_is_over() {
+        // Art. 30.2 ter's month runs from the date annotated, and model 9.1's
+        // own footnote counts it from the END of grazing. So an open record is
+        // not late — it is unfinished — and the honest finding is that the book
+        // cannot state the annotation complete once the campaign has closed.
+        assert!(grazing_annotation_unfinished(
+            None,
+            Some("2026-09-30"),
+            "2026-10-01"
+        ));
+        // Still inside the campaign: the animals may simply still be out.
+        assert!(!grazing_annotation_unfinished(
+            None,
+            Some("2026-09-30"),
+            "2026-06-01"
+        ));
+        // The last day of the campaign is not past it.
+        assert!(!grazing_annotation_unfinished(
+            None,
+            Some("2026-09-30"),
+            "2026-09-30"
+        ));
+    }
+
+    #[test]
+    fn a_closed_grazing_is_never_reported() {
+        assert!(!grazing_annotation_unfinished(
+            Some("2026-06-15"),
+            Some("2026-09-30"),
+            "2027-01-01"
+        ));
+    }
+
+    #[test]
+    fn a_season_with_no_end_date_says_nothing_about_open_grazings() {
+        // `ends_on` is nullable. Without one, nothing in the book says the
+        // campaign is over, so claiming the annotation is overdue would be an
+        // invention rather than a finding.
+        assert!(!grazing_annotation_unfinished(None, None, "2030-01-01"));
     }
 
     #[test]

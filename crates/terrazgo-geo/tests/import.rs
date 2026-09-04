@@ -13,27 +13,13 @@
 
 use rusqlite::Connection;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use terrazgo_geo::GeoError;
 use terrazgo_geo::import::{list_boundary_file, read_boundary_geometry};
-
-/// Unique temp path per test (std temp dir; no tempfile dev-dependency).
-fn temp_path(name: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("terrazgo-geo-test-{}-{name}", std::process::id()))
-}
-
-struct TempFile(PathBuf);
-impl Drop for TempFile {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
-}
-
-fn write_temp(name: &str, contents: &str) -> TempFile {
-    let path = temp_path(name);
-    std::fs::write(&path, contents).unwrap();
-    TempFile(path)
-}
+// The RAII temp-path guard this file introduced, now shared: core's and
+// module-cue's backup tests had the same need and were removing their files by
+// hand, which a failing assertion skips.
+use terrazgo_testkit::TempFile;
 
 // ---------------------------------------------------------------------------
 // GeoJSON
@@ -58,8 +44,8 @@ const COLLECTION: &str = r#"{
 
 #[test]
 fn geojson_collection_lists_only_polygons_with_stable_ids() {
-    let file = write_temp("collection.geojson", COLLECTION);
-    let entries = list_boundary_file(&file.0).unwrap();
+    let file = TempFile::written("collection.geojson", COLLECTION);
+    let entries = list_boundary_file(file.path()).unwrap();
 
     // The Point feature is skipped, not an error; indexes stay document-based.
     assert_eq!(entries.len(), 2);
@@ -69,7 +55,7 @@ fn geojson_collection_lists_only_polygons_with_stable_ids() {
     assert_eq!(entries[1].id, "geojson:2");
     assert_eq!(entries[1].name.as_deref(), Some("El otro")); // NOMBRE, any case
 
-    let geometry = read_boundary_geometry(&file.0, "geojson:2").unwrap();
+    let geometry = read_boundary_geometry(file.path(), "geojson:2").unwrap();
     let value: Value = serde_json::from_str(&geometry).unwrap();
     assert_eq!(value["type"], "Polygon");
     assert_eq!(value["coordinates"][0][0][0], -4.62);
@@ -77,48 +63,48 @@ fn geojson_collection_lists_only_polygons_with_stable_ids() {
 
 #[test]
 fn geojson_bare_geometry_and_single_feature_work() {
-    let bare = write_temp(
+    let bare = TempFile::written(
         "bare.json",
         r#"{"type":"Polygon","coordinates":[[[-4.72,41.65],[-4.71,41.65],[-4.71,41.66],[-4.72,41.65]]]}"#,
     );
-    let entries = list_boundary_file(&bare.0).unwrap();
+    let entries = list_boundary_file(bare.path()).unwrap();
     assert_eq!(entries.len(), 1);
-    assert!(read_boundary_geometry(&bare.0, "geojson:0").is_ok());
+    assert!(read_boundary_geometry(bare.path(), "geojson:0").is_ok());
 
-    let feature = write_temp(
+    let feature = TempFile::written(
         "feature.json",
         r#"{"type":"Feature","properties":{"name":"Solo"},"geometry":
             {"type":"Polygon","coordinates":[[[-4.72,41.65],[-4.71,41.65],[-4.71,41.66],[-4.72,41.65]]]}}"#,
     );
-    let entries = list_boundary_file(&feature.0).unwrap();
+    let entries = list_boundary_file(feature.path()).unwrap();
     assert_eq!(entries[0].name.as_deref(), Some("Solo"));
 }
 
 #[test]
 fn unsupported_and_empty_files_are_rejected_with_stable_codes() {
-    let garbage = write_temp("garbage.bin", "not geodata of any kind");
+    let garbage = TempFile::written("garbage.bin", "not geodata of any kind");
     assert!(matches!(
-        list_boundary_file(&garbage.0),
+        list_boundary_file(garbage.path()),
         Err(GeoError::Invalid("boundary_file_unsupported"))
     ));
 
-    let empty = write_temp(
+    let empty = TempFile::written(
         "empty.geojson",
         r#"{"type":"FeatureCollection","features":[]}"#,
     );
     assert!(matches!(
-        list_boundary_file(&empty.0),
+        list_boundary_file(empty.path()),
         Err(GeoError::Invalid("boundary_file_empty"))
     ));
 
     // Points only: nothing usable as a boundary.
-    let points = write_temp(
+    let points = TempFile::written(
         "points.geojson",
         r#"{"type":"FeatureCollection","features":[
             {"type":"Feature","geometry":{"type":"Point","coordinates":[-4.7,41.6]}}]}"#,
     );
     assert!(matches!(
-        list_boundary_file(&points.0),
+        list_boundary_file(points.path()),
         Err(GeoError::Invalid("boundary_file_empty"))
     ));
 }
@@ -197,11 +183,10 @@ fn build_gpkg(path: &Path, srs_id: i32) {
 
 #[test]
 fn gpkg_lists_features_with_attributes_and_reads_geometry() {
-    let path = temp_path("recintos-4258.gpkg");
-    let file = TempFile(path.clone());
-    build_gpkg(&path, 4258); // ETRS89 geographic — the SIGPAC case
+    let file = TempFile::reserve("recintos-4258.gpkg");
+    build_gpkg(file.path(), 4258); // ETRS89 geographic — the SIGPAC case
 
-    let entries = list_boundary_file(&file.0).unwrap();
+    let entries = list_boundary_file(file.path()).unwrap();
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[0].id, "gpkg:recinto:1");
     // Attributes surface for UI filtering (SIGPAC ref columns findable).
@@ -210,7 +195,7 @@ fn gpkg_lists_features_with_attributes_and_reads_geometry() {
     // The geometry blob is not leaked into properties.
     assert!(entries[0].properties.get("geom").is_none());
 
-    let geometry = read_boundary_geometry(&file.0, "gpkg:recinto:1").unwrap();
+    let geometry = read_boundary_geometry(file.path(), "gpkg:recinto:1").unwrap();
     let value: Value = serde_json::from_str(&geometry).unwrap();
     assert_eq!(value["type"], "Polygon");
     let ring = value["coordinates"][0].as_array().unwrap();
@@ -221,44 +206,41 @@ fn gpkg_lists_features_with_attributes_and_reads_geometry() {
 
 #[test]
 fn gpkg_with_regcan95_is_accepted() {
-    let path = temp_path("recintos-4081.gpkg");
-    let file = TempFile(path.clone());
+    let file = TempFile::reserve("recintos-4081.gpkg");
     // REGCAN95 geographic — Canary SIGPAC files. The EPSG-registered
     // transformation REGCAN95 → WGS84 is 0,0,0 (both ITRF-based), so
     // identity is the correct handling, not an approximation.
-    build_gpkg(&path, 4081);
+    build_gpkg(file.path(), 4081);
 
-    let entries = list_boundary_file(&file.0).unwrap();
+    let entries = list_boundary_file(file.path()).unwrap();
     assert_eq!(entries.len(), 2);
-    let geometry = read_boundary_geometry(&file.0, "gpkg:recinto:1").unwrap();
+    let geometry = read_boundary_geometry(file.path(), "gpkg:recinto:1").unwrap();
     let value: Value = serde_json::from_str(&geometry).unwrap();
     assert_eq!(value["type"], "Polygon");
 }
 
 #[test]
 fn gpkg_with_projected_srs_is_rejected() {
-    let path = temp_path("recintos-25830.gpkg");
-    let file = TempFile(path.clone());
-    build_gpkg(&path, 25830); // ETRS89 / UTM 30N — the proj4rs contingency
+    let file = TempFile::reserve("recintos-25830.gpkg");
+    build_gpkg(file.path(), 25830); // ETRS89 / UTM 30N — the proj4rs contingency
 
     assert!(matches!(
-        list_boundary_file(&file.0),
+        list_boundary_file(file.path()),
         Err(GeoError::Invalid("gpkg_unsupported_srs"))
     ));
 }
 
 #[test]
 fn gpkg_unknown_entry_id_is_not_found() {
-    let path = temp_path("recintos-lookup.gpkg");
-    let file = TempFile(path.clone());
-    build_gpkg(&path, 4326);
+    let file = TempFile::reserve("recintos-lookup.gpkg");
+    build_gpkg(file.path(), 4326);
 
     assert!(matches!(
-        read_boundary_geometry(&file.0, "gpkg:recinto:99"),
+        read_boundary_geometry(file.path(), "gpkg:recinto:99"),
         Err(GeoError::NotFound)
     ));
     assert!(matches!(
-        read_boundary_geometry(&file.0, "nonsense"),
+        read_boundary_geometry(file.path(), "nonsense"),
         Err(GeoError::NotFound)
     ));
 }

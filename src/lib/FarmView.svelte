@@ -4,16 +4,26 @@
 <script>
   // Farm detail: edit form, plots list and the shared create/edit plot form.
   // The SIGPAC/REGA fieldsets only apply to Spanish farms.
-  import { t, tCode } from "../i18n.js";
+  import TzTooltip from "./TzTooltip.svelte";
+  import { TriangleAlert } from "@lucide/svelte";
+  import { formatCoordinates, formatNumber, formatPercent, t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { sortedBy } from "./collate.js";
   import { lookups, loadLookups } from "./lookups.svelte.js";
+  import TzCheckbox from "./TzCheckbox.svelte";
+  import NumberInput from "./NumberInput.svelte";
   import DateInput from "./DateInput.svelte";
   import MapCanvas from "./MapCanvas.svelte";
   import { notify, run } from "./notifications.svelte.js";
+  import RegistryHint from "./RegistryHint.svelte";
   import Skeleton from "./Skeleton.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
 
   let { farmId } = $props();
 
@@ -181,15 +191,12 @@
       if (feature.source === "sigpac" && feature.plot_id) next[feature.plot_id] = feature;
     }
     sigpacFeatures = next;
-    // Zone chips: the latest campaign's 'inside' flags per plot (rows arrive
-    // campaign-descending, so the first flag per (plot, type) wins).
+    // Zone chips. The backend already answers with each plot's CURRENT standing
+    // — one row per (plot, zone type) — so there is nothing to deduplicate
+    // here; a chip is drawn for each of them that says 'inside'.
     const flags = await invoke("list_zone_flags", { farmId });
     const zones = {};
-    const seen = {};
     for (const flag of flags) {
-      const key = `${flag.plot_id}/${flag.zone_type_code}`;
-      if (seen[key]) continue;
-      seen[key] = true;
       if (flag.status === "inside") (zones[flag.plot_id] ??= []).push(flag);
     }
     zoneFlags = zones;
@@ -233,8 +240,7 @@
     };
   }
 
-  function submitFarm(event) {
-    event.preventDefault();
+  async function submitFarm() {
     const update = {
       name: name.trim(),
       owner_name: ownerName.trim() || null,
@@ -252,17 +258,13 @@
       es: collectFarmEs(),
       representative: collectRepresentative(),
     };
-    run(async () => {
-      fillFarmForm(await invoke("update_farm", { farmId, update }));
-      notify(t("message.farm_saved", { name: update.name }));
-    });
+    fillFarmForm(await invoke("update_farm", { farmId, update }));
   }
 
   function deleteFarm() {
     run(async () => {
       if (!(await confirmDialog(t("farm.delete_confirm", { name: farm.name })))) return;
       await invoke("delete_farm", { farmId });
-      notify(t("message.farm_deleted"));
       location.hash = "#/farms";
     });
   }
@@ -274,7 +276,6 @@
   function saveFarmAdvisor(advisorId, gipSystemCode) {
     run(async () => {
       await invoke("set_farm_advisor", { farmId, advisorId, gipSystemCode });
-      notify(t("message.farm_advisor_saved"));
       await reloadAdvisors();
     });
   }
@@ -285,6 +286,7 @@
     const gip = newGipCode || null;
     newAdvisorId = "";
     newGipCode = "";
+    advisorPanel = null;
     saveFarmAdvisor(advisorId, gip);
   }
 
@@ -293,13 +295,22 @@
       if (!(await confirmDialog(t("farm.advisor_remove_confirm", { name: detail.advisor.name }))))
         return;
       await invoke("remove_farm_advisor", { linkId: detail.link.id });
-      notify(t("message.farm_advisor_removed"));
+      advisorPanel = null;
       await reloadAdvisors();
     });
   }
 
-  function advisorDetail(advisor) {
-    return [advisor.tax_id, advisor.registration_number].filter(Boolean).join(" · ");
+  // Which advisory link the pane is showing: null when closed, "new" while
+  // linking one, or the link's own id. A link has exactly one editable field —
+  // the GIP framework, which saves on change — so the pane states the advisor
+  // and offers that one control, rather than a form with nothing to submit.
+  let advisorPanel = $state(null);
+  const editingAdvisor = $derived(farmAdvisors.find((d) => d.link.id === advisorPanel) ?? null);
+
+  function showAdvisorPanel(detail = null) {
+    newAdvisorId = "";
+    newGipCode = "";
+    advisorPanel = detail?.link.id ?? "new";
   }
 
   // --- water abstraction points (model 2.2) ------------------------------------
@@ -320,8 +331,7 @@
     editingWaterPointId = null;
   }
 
-  function submitWaterPoint(event) {
-    event.preventDefault();
+  async function submitWaterPoint() {
     const denomination = waterDenomination.trim();
     // A point inside the plot has no distance to state; sending one is refused
     // by the backend, because it contradicts the answer beside it.
@@ -332,21 +342,18 @@
       latitude: numberOrNull(waterLatitude),
       longitude: numberOrNull(waterLongitude),
     };
-    run(async () => {
-      if (editingWaterPointId) {
-        await invoke("update_water_point", {
-          waterPointId: editingWaterPointId,
-          update: payload,
-        });
-      } else {
-        await invoke("create_water_point", {
-          waterPoint: { plot_id: waterPlotId, ...payload },
-        });
-      }
-      notify(t("message.water_point_saved", { name: denomination }));
-      hideWaterForm();
-      await reloadWater();
-    });
+    if (editingWaterPointId) {
+      await invoke("update_water_point", {
+        waterPointId: editingWaterPointId,
+        update: payload,
+      });
+    } else {
+      await invoke("create_water_point", {
+        waterPoint: { plot_id: waterPlotId, ...payload },
+      });
+    }
+    hideWaterForm();
+    await reloadWater();
   }
 
   function deleteWaterPoint(point) {
@@ -354,7 +361,7 @@
       if (!(await confirmDialog(t("water_point.delete_confirm", { name: point.denomination }))))
         return;
       await invoke("delete_water_point", { waterPointId: point.id });
-      notify(t("message.water_point_deleted"));
+      hideWaterForm();
       await reloadWater();
     });
   }
@@ -365,7 +372,6 @@
   function toggleWaterDeclaration(plotId, declared) {
     run(async () => {
       await invoke("set_water_declaration", { plotId, declared });
-      notify(t(declared ? "message.water_declared" : "message.water_declaration_cleared"));
       await reloadWater();
     });
   }
@@ -374,17 +380,11 @@
     return plots.find((p) => p.plot.id === plotId)?.plot.name ?? "";
   }
 
-  function waterDetail(point) {
-    return [
-      plotNameOf(point.plot_id),
-      point.inside_plot
-        ? t("water_point.inside_yes")
-        : t("water_point.outside_at", { distance: point.distance_m ?? "—" }),
-      point.latitude != null ? `${point.latitude}, ${point.longitude}` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
+  /// The point the inspector is showing, so its delete button knows which one
+  /// it is about. Null while creating.
+  const editingWaterPoint = $derived(
+    waterPoints.find((point) => point.id === editingWaterPointId) ?? null,
+  );
 
   // --- plots -------------------------------------------------------------------
 
@@ -465,61 +465,53 @@
     return any ? es : null;
   }
 
-  function submitPlot(event) {
-    event.preventDefault();
+  async function submitPlot() {
     const trimmed = plotName.trim();
     const payload = {
       name: trimmed,
       area_ha: numberOrNull(plotArea),
       es: collectSigpac(),
     };
-    run(async () => {
-      let plotId = editingPlotId;
-      if (editingPlotId) {
-        await invoke("update_plot", { plotId: editingPlotId, update: payload });
-      } else {
-        plotId = (await invoke("create_plot", { plot: { farm_id: farmId, ...payload } })).id;
-      }
-      notify(t("message.plot_saved", { name: trimmed }));
-      // A successful in-form lookup means the response is already cached, so
-      // storing the official boundary now works offline too. Skipped if the
-      // reference was edited after the lookup.
-      if (sigpacLookup?.recinto && sigpacLookup.parts === sigpacParts().join("/")) {
-        const verified = await invoke("sigpac_verify_plot", { plotId, refresh: false });
-        notify(t("message.sigpac_boundary_saved", { name: trimmed }));
-        if (verified?.zone_check_error) notify(t("plot.zones_unchecked"), true);
-      }
-      hidePlotForm();
-      await reloadPlots();
-    });
+    let plotId = editingPlotId;
+    if (editingPlotId) {
+      await invoke("update_plot", { plotId: editingPlotId, update: payload });
+    } else {
+      plotId = (await invoke("create_plot", { plot: { farm_id: farmId, ...payload } })).id;
+    }
+    // A successful in-form lookup means the response is already cached, so
+    // storing the official boundary now works offline too. Skipped if the
+    // reference was edited after the lookup.
+    if (sigpacLookup?.recinto && sigpacLookup.parts === sigpacParts().join("/")) {
+      const verified = await invoke("sigpac_verify_plot", { plotId, refresh: false });
+      notify(t("message.sigpac_boundary_saved", { name: trimmed }));
+      if (verified?.zone_check_error) notify(t("plot.zones_unchecked"), true);
+    }
+    hidePlotForm();
+    await reloadPlots();
   }
 
   function deletePlot(plot) {
     run(async () => {
       if (!(await confirmDialog(t("plot.delete_confirm", { name: plot.name })))) return;
       await invoke("delete_plot", { plotId: plot.id });
-      notify(t("message.plot_deleted"));
+      hidePlotForm();
       await reloadPlots();
     });
   }
 
-  // Compact "47:122:0:0:5:23:1" style SIGPAC reference for the plot card.
+  // Compact "47:122:0:0:5:23:1" style SIGPAC reference, as the table's own
+  // cell. The "SIGPAC" prefix the card line carried is gone: the column is
+  // headed with it.
   function sigpacSummary(es) {
     if (!es) return null;
     const parts = SIGPAC_FIELDS.map((field) => es[field]);
-    return parts.some((p) => p) ? `SIGPAC ${parts.map((p) => p ?? "·").join(":")}` : null;
+    return parts.some((p) => p) ? parts.map((p) => p ?? "·").join(":") : null;
   }
 
-  function plotDetail(plot, es) {
-    const official = sigpacFeatures[plot.id]?.official_area_ha;
-    return [
-      plot.area_ha != null ? `${plot.area_ha} ha` : null,
-      sigpacSummary(es),
-      official != null ? t("plot.sigpac_official", { area: official }) : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
+  /// The plot the inspector is editing, so the delete button and the two
+  /// per-plot actions beside the form know which one they are about. Null
+  /// while creating.
+  const editingPlot = $derived(plots.find(({ plot }) => plot.id === editingPlotId) ?? null);
 </script>
 
 <section class="view">
@@ -531,44 +523,38 @@
       <button type="button" class="btn-danger" onclick={deleteFarm}>{t("farm.delete")}</button>
     </div>
 
-    <form onsubmit={submitFarm}>
+    <TzForm onsubmit={submitFarm}>
       <div class="form-grid">
-        <label><span>{t("farm.name")}</span><input required bind:value={name} /></label>
-        <label><span>{t("farm.owner")}</span><input bind:value={ownerName} /></label>
-        <label><span>{t("farm.owner_tax_id")}</span><input bind:value={ownerTaxId} /></label>
+        <TextInput label={t("farm.name")} required bind:value={name} />
+        <TextInput label={t("farm.owner")} bind:value={ownerName} />
+        <TextInput label={t("farm.owner_tax_id")} bind:value={ownerTaxId} />
         <TzSelect
           label={t("farm.country")}
           items={codeItems(countries, "country")}
           bind:value={countryCode}
         />
-        <label><span>{t("farm.address")}</span><input bind:value={address} /></label>
-        <label><span>{t("farm.location")}</span><input bind:value={locationText} /></label>
-        <label><span>{t("farm.postal_code")}</span><input bind:value={postalCode} /></label>
-        <label><span>{t("farm.phone_fixed")}</span><input bind:value={phoneFixed} /></label>
-        <label><span>{t("farm.phone_mobile")}</span><input bind:value={phoneMobile} /></label>
-        <label><span>{t("farm.email")}</span><input type="email" bind:value={email} /></label>
+        <TextInput label={t("farm.address")} bind:value={address} />
+        <TextInput label={t("farm.location")} bind:value={locationText} />
+        <TextInput label={t("farm.postal_code")} bind:value={postalCode} />
+        <TextInput label={t("farm.phone_fixed")} bind:value={phoneFixed} />
+        <TextInput label={t("farm.phone_mobile")} bind:value={phoneMobile} />
+        <TextInput label={t("farm.email")} type="email" bind:value={email} />
         <DateInput
           label={t("farm.opened_on")}
           hint={t("farm.opened_on_hint")}
           bind:value={openedOn}
         />
-        <label
-          ><span>{t("farm.latitude")}</span>
-          <input type="number" step="any" min="-90" max="90" bind:value={latitude} />
-        </label>
-        <label
-          ><span>{t("farm.longitude")}</span>
-          <input type="number" step="any" min="-180" max="180" bind:value={longitude} />
-        </label>
+        <NumberInput label={t("farm.latitude")} min={-90} max={90} bind:value={latitude} />
+        <NumberInput label={t("farm.longitude")} min={-180} max={180} bind:value={longitude} />
       </div>
       {#if countryCode === "es"}
         <fieldset class="es-only">
           <legend>{t("farm.es_section")}</legend>
           <div class="form-grid">
-            <label><span>{t("farm.siex")}</span><input bind:value={siexCode} /></label>
-            <label><span>{t("farm.rea")}</span><input bind:value={reaCode} /></label>
-            <label><span>{t("farm.rega")}</span><input bind:value={regaCode} /></label>
-            <label><span>{t("farm.province")}</span><input bind:value={provinceCode} /></label>
+            <TextInput label={t("farm.siex")} bind:value={siexCode} />
+            <TextInput label={t("farm.rea")} bind:value={reaCode} />
+            <TextInput label={t("farm.rega")} bind:value={regaCode} />
+            <TextInput label={t("farm.province")} bind:value={provinceCode} />
           </div>
         </fieldset>
       {/if}
@@ -576,169 +562,289 @@
         <legend>{t("farm.representative_section")}</legend>
         <p class="detail">{t("farm.representative_hint")}</p>
         <div class="form-grid">
-          <label><span>{t("farm.rep_name")}</span><input bind:value={repName} /></label>
-          <label><span>{t("farm.rep_tax_id")}</span><input bind:value={repTaxId} /></label>
-          <label><span>{t("farm.rep_kind")}</span><input bind:value={repKind} /></label>
-          <label><span>{t("farm.rep_address")}</span><input bind:value={repAddress} /></label>
-          <label><span>{t("farm.rep_locality")}</span><input bind:value={repLocality} /></label>
-          <label><span>{t("farm.rep_province")}</span><input bind:value={repProvince} /></label>
-          <label><span>{t("farm.rep_postal_code")}</span><input bind:value={repPostalCode} /></label
-          >
-          <label><span>{t("farm.rep_phone")}</span><input bind:value={repPhone} /></label>
-          <label
-            ><span>{t("farm.rep_email")}</span><input type="email" bind:value={repEmail} /></label
-          >
+          <TextInput label={t("farm.rep_name")} bind:value={repName} />
+          <TextInput label={t("farm.rep_tax_id")} bind:value={repTaxId} />
+          <TextInput label={t("farm.rep_kind")} bind:value={repKind} />
+          <TextInput label={t("farm.rep_address")} bind:value={repAddress} />
+          <TextInput label={t("farm.rep_locality")} bind:value={repLocality} />
+          <TextInput label={t("farm.rep_province")} bind:value={repProvince} />
+          <TextInput label={t("farm.rep_postal_code")} bind:value={repPostalCode} />
+          <TextInput label={t("farm.rep_phone")} bind:value={repPhone} />
+          <TextInput label={t("farm.rep_email")} type="email" bind:value={repEmail} />
         </div>
       </fieldset>
       <div class="form-actions">
         <button type="submit">{t("form.save")}</button>
       </div>
-    </form>
+    </TzForm>
 
     <div class="view-head">
       <h3>{t("farm.advisors_section")}</h3>
+      <button
+        type="button"
+        disabled={linkableAdvisors.length === 0}
+        onclick={() => showAdvisorPanel()}
+      >
+        {t("farm.advisor_add")}
+      </button>
     </div>
     <p class="detail">{t("farm.advisors_hint")}</p>
-    <ul class="card-list">
-      {#each sortedFarmAdvisors as detail (detail.link.id)}
-        <li class="card">
-          <strong>{detail.advisor.name}</strong>
-          <span class="detail">{advisorDetail(detail.advisor)}</span>
-          <TzSelect
-            class="card-field"
-            label={t("advisor.gip_system")}
-            items={codeItems(gipSystems, "gip_system")}
-            nullable
-            value={detail.link.gip_system_code ?? ""}
-            onchange={(code) => saveFarmAdvisor(detail.advisor.id, code || null)}
-          />
-          <button type="button" class="btn-danger" onclick={() => unlinkAdvisor(detail)}>
-            {t("farm.advisor_remove")}
-          </button>
-        </li>
-      {/each}
-    </ul>
-    {#if farmAdvisors.length === 0}
-      <p>{t("farm.advisors_empty")}</p>
-    {/if}
     {#if advisors.length === 0}
       <p class="detail">{t("farm.advisors_none_available")}</p>
-    {:else if linkableAdvisors.length > 0}
-      <div class="form-grid advisor-add">
-        <TzSelect
-          label={t("advisors.title")}
-          items={nameItems(linkableAdvisors)}
-          nullable
-          bind:value={newAdvisorId}
-        />
-        <TzSelect
-          label={t("advisor.gip_system")}
-          items={codeItems(gipSystems, "gip_system")}
-          nullable
-          bind:value={newGipCode}
-        />
-        <button type="button" disabled={!newAdvisorId} onclick={linkAdvisor}>
-          {t("farm.advisor_add")}
-        </button>
-      </div>
-    {:else}
+    {:else if linkableAdvisors.length === 0 && farmAdvisors.length > 0}
       <p class="detail">{t("farm.advisors_all_linked")}</p>
     {/if}
+
+    <TzWorkspace
+      open={advisorPanel !== null}
+      title={editingAdvisor ? editingAdvisor.advisor.name : t("farm.advisor_add")}
+      onclose={() => (advisorPanel = null)}
+      ondelete={editingAdvisor ? () => unlinkAdvisor(editingAdvisor) : null}
+      deleteLabel={t("farm.advisor_remove")}
+    >
+      {#snippet list()}
+        {#if farmAdvisors.length === 0}
+          <p class="table-empty">{t("farm.advisors_empty")}</p>
+        {:else}
+          <div class="table-wrap">
+            <table class="data-table" use:resizableColumns={"farm-advisors"}>
+              <thead>
+                <tr>
+                  <th>{t("column.name")}</th>
+                  <th>{t("column.tax_id")}</th>
+                  <th>{t("column.registration_number")}</th>
+                  <th>{t("column.gip")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each sortedFarmAdvisors as detail (detail.link.id)}
+                  <tr
+                    class:selected={advisorPanel === detail.link.id}
+                    onclick={(e) => opensRow(e) && showAdvisorPanel(detail)}
+                  >
+                    <td class="col-name">
+                      <button
+                        type="button"
+                        class="row-open"
+                        onclick={() => showAdvisorPanel(detail)}
+                      >
+                        {detail.advisor.name}
+                      </button>
+                    </td>
+                    <td class="col-muted">{detail.advisor.tax_id ?? ""}</td>
+                    <td class="col-muted">{detail.advisor.registration_number ?? ""}</td>
+                    <td class="col-muted">
+                      {detail.link.gip_system_code
+                        ? tCode("gip_system", detail.link.gip_system_code)
+                        : ""}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      {/snippet}
+
+      {#snippet inspector()}
+        {#if editingAdvisor}
+          <!-- The framework is the only thing a link holds, and it saves on
+               change: the select IS the statement, so there is nothing to
+               submit and no form to wrap it in. -->
+          <div class="form-grid">
+            <TzSelect
+              label={t("advisor.gip_system")}
+              items={codeItems(gipSystems, "gip_system")}
+              nullable
+              value={editingAdvisor.link.gip_system_code ?? ""}
+              onchange={(code) => saveFarmAdvisor(editingAdvisor.advisor.id, code || null)}
+            />
+          </div>
+        {:else}
+          <div class="form-grid">
+            <TzSelect
+              label={t("advisors.title")}
+              items={nameItems(linkableAdvisors)}
+              nullable
+              bind:value={newAdvisorId}
+            />
+            <TzSelect
+              label={t("advisor.gip_system")}
+              items={codeItems(gipSystems, "gip_system")}
+              nullable
+              bind:value={newGipCode}
+            />
+          </div>
+        {/if}
+      {/snippet}
+
+      <!-- Guarded, and the guard is the one this row already had before it moved
+           into the pinned bar: an EXISTING link has nothing to add and saves on
+           change, so the panel offers it nothing to press. -->
+      {#snippet actions()}
+        {#if !editingAdvisor}
+          <div class="form-actions">
+            <button type="button" disabled={!newAdvisorId} onclick={linkAdvisor}>
+              {t("farm.advisor_add")}
+            </button>
+            <button type="button" class="btn-cancel" onclick={() => (advisorPanel = null)}>
+              {t("form.cancel")}
+            </button>
+          </div>
+        {/if}
+      {/snippet}
+    </TzWorkspace>
 
     <div class="view-head">
       <h3>{t("plots.title")}</h3>
       <button type="button" onclick={() => showPlotForm()}>{t("plots.new")}</button>
     </div>
 
-    {#if plotFormOpen}
-      <form onsubmit={submitPlot}>
-        <div class="form-grid">
-          <label><span>{t("plot.name")}</span><input required bind:value={plotName} /></label>
-          <label
-            ><span>{t("plot.area")}</span>
-            <input type="number" step="any" min="0.01" bind:value={plotArea} />
-          </label>
-        </div>
-        {#if farm.country_code === "es"}
-          <fieldset class="es-only">
-            <legend>{t("plot.sigpac_section")}</legend>
-            <div class="form-grid sigpac-grid">
-              {#each SIGPAC_FIELDS as field (field)}
-                <label><span>{t(`plot.${field}`)}</span><input bind:value={sigpac[field]} /></label>
-              {/each}
-            </div>
-            <div class="sigpac-lookup">
-              <button type="button" disabled={!sigpacComplete} onclick={lookupSigpac}>
-                {t("plot.sigpac_verify")}
-              </button>
-              {#if sigpacLookup?.notFound}
-                <p class="detail">{t("plot.sigpac_not_found")}</p>
-              {:else if sigpacLookup?.recinto}
-                <p class="detail">
-                  {t("plot.sigpac_found", {
-                    area: sigpacLookup.recinto.properties.superficie,
-                    use: sigpacLookup.recinto.properties.uso_sigpac,
-                  })}
-                  <button
-                    type="button"
-                    onclick={() => (plotArea = sigpacLookup.recinto.properties.superficie)}
+    <TzWorkspace
+      open={plotFormOpen}
+      title={editingPlotId ? plotName : t("plots.new")}
+      onclose={hidePlotForm}
+      ondelete={editingPlot ? () => deletePlot(editingPlot.plot) : null}
+      deleteLabel={t("plot.delete")}
+    >
+      {#snippet list()}
+        {#if loading}
+          <Skeleton />
+        {:else if plots.length === 0}
+          <p class="table-empty">{t("plots.empty")}</p>
+        {:else}
+          <div class="table-wrap">
+            <table class="data-table" use:resizableColumns={"plots"}>
+              <thead>
+                <tr>
+                  <th>{t("column.name")}</th>
+                  <th class="col-num">{t("column.area_ha")}</th>
+                  <th>{t("column.sigpac")}</th>
+                  <th class="col-num">{t("column.official_area")}</th>
+                  <th>{t("column.zones")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each plots as { plot, es } (plot.id)}
+                  <tr
+                    class:selected={editingPlotId === plot.id}
+                    onclick={(e) => opensRow(e) && showPlotForm(plot, es)}
                   >
-                    {t("plot.sigpac_use_area")}
-                  </button>
-                </p>
-                {#each sigpacDuplicates as match (match.plot_id)}
-                  <p class="detail">
-                    ⚠ {t("plot.sigpac_already_on", {
-                      plot: match.plot_name,
-                      farm: match.farm_name,
-                    })}
-                  </p>
+                    <td class="col-name">
+                      <button type="button" class="row-open" onclick={() => showPlotForm(plot, es)}>
+                        {plot.name}
+                      </button>
+                    </td>
+                    <td class="col-muted col-num">
+                      {plot.area_ha == null ? "" : formatNumber(plot.area_ha)}
+                    </td>
+                    <td class="col-muted">{sigpacSummary(es) ?? ""}</td>
+                    <td class="col-muted col-num">
+                      {sigpacFeatures[plot.id]?.official_area_ha == null
+                        ? ""
+                        : formatNumber(sigpacFeatures[plot.id].official_area_ha)}
+                    </td>
+                    <td>
+                      {#each zoneFlags[plot.id] ?? [] as zone (zone.zone_type_code)}
+                        <TzTooltip label={zone.detail ?? ""}>
+                          {#snippet trigger(props)}
+                            <span {...props} class="zone-chip">
+                              {tCode("zone", zone.zone_type_code)}{zone.coverage_pct != null &&
+                              zone.coverage_pct < 99.95
+                                ? ` ${formatPercent(zone.coverage_pct)}`
+                                : ""}
+                            </span>
+                          {/snippet}
+                        </TzTooltip>
+                      {/each}
+                    </td>
+                  </tr>
                 {/each}
-              {/if}
-            </div>
-          </fieldset>
+              </tbody>
+            </table>
+          </div>
         {/if}
-        <div class="form-actions">
-          <button type="submit">{t("form.save")}</button>
-          <button type="button" class="btn-cancel" onclick={hidePlotForm}>{t("form.cancel")}</button
-          >
-        </div>
-      </form>
-    {/if}
+      {/snippet}
 
-    {#if loading}
-      <Skeleton />
-    {:else}
-      <ul class="card-list">
-        {#each plots as { plot, es } (plot.id)}
-          <li class="card">
-            <strong>{plot.name}</strong>
-            <span class="detail">{plotDetail(plot, es)}</span>
-            {#each zoneFlags[plot.id] ?? [] as zone (zone.zone_type_code)}
-              <span class="zone-chip" title={zone.detail ?? ""}>
-                {tCode("zone", zone.zone_type_code)}{zone.coverage_pct != null &&
-                zone.coverage_pct < 99.95
-                  ? ` ${Math.round(zone.coverage_pct)}%`
-                  : ""}
-              </span>
-            {/each}
-            <a class="card-link" href={mapHref(plot.id)}>{t("plot.on_map")}</a>
-            {#if refComplete(es)}
-              <button type="button" onclick={() => verifyPlot(plot)}>
-                {sigpacFeatures[plot.id] ? "SIGPAC ✓" : t("plot.sigpac_verify")}
+      {#snippet inspector(formId)}
+        <!-- Two things a plot can do that are neither editing nor deleting it:
+             show its boundary on the map, and ask SIGPAC for it. They were a
+             link and a button on every row; here they name the plot the pane
+             is about. -->
+        {#if editingPlot}
+          <div class="plot-actions">
+            <a href={mapHref(editingPlotId)}>{t("plot.on_map")}</a>
+            {#if refComplete(editingPlot.es)}
+              <button type="button" onclick={() => verifyPlot(editingPlot.plot)}>
+                {sigpacFeatures[editingPlotId] ? "SIGPAC ✓" : t("plot.sigpac_verify")}
               </button>
             {/if}
-            <button type="button" onclick={() => showPlotForm(plot, es)}>{t("plot.edit")}</button>
-            <button type="button" class="btn-danger" onclick={() => deletePlot(plot)}
-              >{t("plot.delete")}</button
-            >
-          </li>
-        {/each}
-      </ul>
-      {#if plots.length === 0}
-        <p>{t("plots.empty")}</p>
-      {/if}
+          </div>
+        {/if}
 
+        <TzForm id={formId} onsubmit={submitPlot}>
+          <div class="form-grid">
+            <TextInput label={t("plot.name")} required bind:value={plotName} />
+            <NumberInput label={t("plot.area")} min={0.01} bind:value={plotArea} />
+          </div>
+          {#if farm.country_code === "es"}
+            <fieldset class="es-only">
+              <legend>{t("plot.sigpac_section")}</legend>
+              <!-- One hint for the whole seven-part reference: the farmer looks
+                 the lot up in a single visit to the visor, so seven identical
+                 notes would be seven times the noise for one answer. -->
+              <RegistryHint country={farm.country_code} field="plot.sigpac" block />
+              <div class="form-grid sigpac-grid">
+                {#each SIGPAC_FIELDS as field (field)}
+                  <TextInput label={t(`plot.${field}`)} bind:value={sigpac[field]} />
+                {/each}
+              </div>
+              <div class="sigpac-lookup">
+                <button type="button" disabled={!sigpacComplete} onclick={lookupSigpac}>
+                  {t("plot.sigpac_verify")}
+                </button>
+                {#if sigpacLookup?.notFound}
+                  <p class="detail">{t("plot.sigpac_not_found")}</p>
+                {:else if sigpacLookup?.recinto}
+                  <p class="detail">
+                    {t("plot.sigpac_found", {
+                      area: formatNumber(sigpacLookup.recinto.properties.superficie),
+                      use: sigpacLookup.recinto.properties.uso_sigpac,
+                    })}
+                    <button
+                      type="button"
+                      onclick={() => (plotArea = sigpacLookup.recinto.properties.superficie)}
+                    >
+                      {t("plot.sigpac_use_area")}
+                    </button>
+                  </p>
+                  {#each sigpacDuplicates as match (match.plot_id)}
+                    <p class="detail warn">
+                      <TriangleAlert />
+                      {t("plot.sigpac_already_on", {
+                        plot: match.plot_name,
+                        farm: match.farm_name,
+                      })}
+                    </p>
+                  {/each}
+                {/if}
+              </div>
+            </fieldset>
+          {/if}
+        </TzForm>
+      {/snippet}
+
+      {#snippet actions(formId)}
+        <div class="form-actions">
+          <button type="submit" form={formId}>{t("form.save")}</button>
+          <button type="button" class="btn-cancel" onclick={hidePlotForm}>
+            {t("form.cancel")}
+          </button>
+        </div>
+      {/snippet}
+    </TzWorkspace>
+
+    {#if !loading}
       <div class="view-head">
         <h3>{t("water_points.title")}</h3>
         <button type="button" disabled={plots.length === 0} onclick={() => showWaterForm()}>
@@ -747,90 +853,154 @@
       </div>
       <p class="detail">{t("water_points.hint")}</p>
 
-      {#if waterFormOpen}
-        <form onsubmit={submitWaterPoint}>
-          <div class="form-grid">
-            <TzSelect
-              label={t("plot.name")}
-              items={nameItems(
-                plots,
-                (p) => p.plot.name,
-                (p) => p.plot.id,
-              )}
-              required
-              disabled={Boolean(editingWaterPointId)}
-              bind:value={waterPlotId}
-            />
-            <label
-              ><span>{t("water_point.denomination")}</span>
-              <input required bind:value={waterDenomination} />
-            </label>
-            <label class="check">
-              <input type="checkbox" bind:checked={waterInside} />
-              <span>{t("water_point.inside_plot")}</span>
-            </label>
-            <label
-              ><span>{t("water_point.distance")}</span>
-              <input
-                type="number"
-                step="any"
-                min="0.01"
+      <TzWorkspace
+        open={waterFormOpen}
+        title={editingWaterPointId ? waterDenomination : t("water_points.new")}
+        onclose={hideWaterForm}
+        ondelete={editingWaterPoint ? () => deleteWaterPoint(editingWaterPoint) : null}
+      >
+        {#snippet list()}
+          {#if waterPoints.length === 0}
+            <p class="table-empty">{t("water_points.empty")}</p>
+          {:else}
+            <div class="table-wrap">
+              <table class="data-table" use:resizableColumns={"water-points"}>
+                <thead>
+                  <tr>
+                    <th>{t("column.denomination")}</th>
+                    <th>{t("column.plot")}</th>
+                    <th>{t("column.inside")}</th>
+                    <th class="col-num">{t("column.distance")}</th>
+                    <th>{t("column.coordinates")}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each waterPoints as point (point.id)}
+                    <tr
+                      class:selected={editingWaterPointId === point.id}
+                      onclick={(e) => opensRow(e) && showWaterForm(point)}
+                    >
+                      <td class="col-name">
+                        <button type="button" class="row-open" onclick={() => showWaterForm(point)}>
+                          {point.denomination}
+                        </button>
+                      </td>
+                      <td class="col-muted">{plotNameOf(point.plot_id)}</td>
+                      <td class="col-muted">
+                        {point.inside_plot ? t("water_point.inside_yes") : ""}
+                      </td>
+                      <!-- Blank for a point INSIDE the plot: there is no
+                           distance to state, and a 0 would be an answer
+                           nobody gave. -->
+                      <td class="col-muted col-num">
+                        {point.distance_m == null ? "" : formatNumber(point.distance_m)}
+                      </td>
+                      <td class="col-muted">
+                        {point.latitude == null
+                          ? ""
+                          : formatCoordinates(point.latitude, point.longitude)}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {/if}
+        {/snippet}
+
+        {#snippet inspector(formId)}
+          <TzForm
+            id={formId}
+            onsubmit={submitWaterPoint}
+            anchors={{
+              "invalid.missing_distance": "distance_m",
+              "invalid.water_point_distance_inside": "distance_m",
+            }}
+          >
+            <div class="form-grid">
+              <TzSelect
+                label={t("plot.name")}
+                items={nameItems(
+                  plots,
+                  (p) => p.plot.name,
+                  (p) => p.plot.id,
+                )}
+                required
+                disabled={Boolean(editingWaterPointId)}
+                bind:value={waterPlotId}
+              />
+              <TextInput
+                label={t("water_point.denomination")}
+                required
+                bind:value={waterDenomination}
+              />
+              <TzCheckbox label={t("water_point.inside_plot")} bind:checked={waterInside} />
+              <NumberInput
+                label={t("water_point.distance")}
+                name="distance_m"
+                min={0.01}
                 required={!waterInside}
                 disabled={waterInside}
                 bind:value={waterDistance}
               />
-            </label>
-            <label
-              ><span>{t("water_point.latitude")}</span>
-              <input type="number" step="any" bind:value={waterLatitude} />
-            </label>
-            <label
-              ><span>{t("water_point.longitude")}</span>
-              <input type="number" step="any" bind:value={waterLongitude} />
-            </label>
-          </div>
+              <NumberInput
+                label={t("water_point.latitude")}
+                min={-90}
+                max={90}
+                bind:value={waterLatitude}
+              />
+              <NumberInput
+                label={t("water_point.longitude")}
+                min={-180}
+                max={180}
+                bind:value={waterLongitude}
+              />
+            </div>
+          </TzForm>
+        {/snippet}
+
+        {#snippet actions(formId)}
           <div class="form-actions">
-            <button type="submit">{t("form.save")}</button>
+            <button type="submit" form={formId}>{t("form.save")}</button>
             <button type="button" class="btn-cancel" onclick={hideWaterForm}>
               {t("form.cancel")}
             </button>
           </div>
-        </form>
-      {/if}
+        {/snippet}
+      </TzWorkspace>
 
-      <ul class="card-list">
-        {#each waterPoints as point (point.id)}
-          <li class="card">
-            <strong>{point.denomination}</strong>
-            <span class="detail">{waterDetail(point)}</span>
-            <button type="button" onclick={() => showWaterForm(point)}>{t("plot.edit")}</button>
-            <button type="button" class="btn-danger" onclick={() => deleteWaterPoint(point)}
-              >{t("plot.delete")}</button
-            >
-          </li>
-        {/each}
-      </ul>
-      {#if waterPoints.length === 0 && plots.length > 0}
-        <p>{t("water_points.empty")}</p>
-      {/if}
-
+      <!-- The stored negatives: one row per plot saying the farmer looked and
+           found nothing. `rows-static` because the checkbox IS the row — there
+           is no record here to open, and a row that offers to be clicked and
+           then does nothing is a worse row than a plain one. -->
       {#if plots.length > 0}
-        <ul class="card-list water-declarations">
-          {#each plots as { plot } (plot.id)}
-            {@const hasPoints = waterPoints.some((p) => p.plot_id === plot.id)}
-            <li class="card">
-              <label class="check">
-                <input
-                  type="checkbox"
-                  disabled={hasPoints}
-                  checked={waterDeclared.has(plot.id)}
-                  onchange={(e) => toggleWaterDeclaration(plot.id, e.currentTarget.checked)}
-                />
-                <span>{t("water_points.none_on", { plot: plot.name })}</span>
-              </label>
-            </li>
-          {/each}
-        </ul>
+        <div class="table-wrap water-declarations">
+          <table class="data-table rows-static">
+            <thead>
+              <tr>
+                <th>{t("column.plot")}</th>
+                <th>{t("water_points.none_column")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each plots as { plot } (plot.id)}
+                {@const hasPoints = waterPoints.some((p) => p.plot_id === plot.id)}
+                <tr>
+                  <td class="col-name">{plot.name}</td>
+                  <td>
+                    <TzCheckbox
+                      label={t("water_points.none_on", { plot: plot.name })}
+                      labelHidden
+                      disabled={hasPoints}
+                      checked={waterDeclared.has(plot.id)}
+                      onchange={(next) => toggleWaterDeclaration(plot.id, next)}
+                    />
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
       {/if}
 
       <div class="view-head">
@@ -848,32 +1018,44 @@
   .farm-map-embed {
     height: 24rem;
   }
-  .card-link {
-    align-self: center;
-  }
   .sigpac-lookup {
-    margin-top: 0.6rem;
+    margin-top: var(--space-2);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-2);
   }
   .sigpac-lookup .detail {
     margin: 0;
   }
-  /* A checkbox reads as one line, not as .form-grid's stacked label + field. */
-  .check {
-    flex-direction: row;
+  /* "this reference is already on another plot" — a caution, not a failure, so
+     it keeps .detail's muted size and only the icon carries the warning. */
+  .detail.warn {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+  }
+  .detail.warn :global(svg) {
+    width: 0.9rem;
+    height: 0.9rem;
+    flex: none;
+    margin-top: 0.1em;
+    color: var(--warning);
+  }
+  /* What a plot can do that is neither editing nor deleting it, at the head of
+     its pane: show its boundary on the map, and ask SIGPAC for it. */
+  .plot-actions {
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.4rem;
+    gap: var(--space-3);
+    padding-bottom: var(--space-2);
   }
-  .check span {
-    font-size: 0.875rem;
-  }
-  /* The per-plot "no abstraction points" statements: a quieter list than the
-     points themselves, because most of it is normally unticked. */
-  .water-declarations .card {
-    padding-block: 0.35rem;
+  /* The declarations follow the points in the same section, and two tables
+     whose header rows touch read as one table with a stray heading in the
+     middle. This is the gap that says they are two answers to one question. */
+  .water-declarations {
+    margin-top: var(--space-5);
   }
   .zone-chip {
     align-self: center;

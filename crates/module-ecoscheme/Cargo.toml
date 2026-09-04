@@ -1,0 +1,29 @@
+[package]
+name = "module-ecoscheme"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo eco-scheme module — grazing, cultural operations and soil covers (RD 1048/2022)"
+
+[lints]
+workspace = true
+
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+terrazgo-core = { workspace = true }
+rusqlite = { workspace = true }
+rusqlite_migration = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Integration tests are separate crates, so serde_json must also be a
+# dev-dependency for tests/ to inspect record_change payloads.
+[dev-dependencies]
+serde_json = { workspace = true }
+# Shared fixtures. It depends on terrazgo-core alone, so taking it here does
+# NOT put another module's schema in this crate's test graph —
+# `the_module_runs_on_core_alone` stays a real guard.
+terrazgo-testkit = { workspace = true }

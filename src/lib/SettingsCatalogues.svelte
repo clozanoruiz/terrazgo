@@ -20,6 +20,9 @@
   import { invalidateLookups } from "./lookups.svelte.js";
   import Skeleton from "./Skeleton.svelte";
 
+  /// The DOM id the settings contents list scrolls to (settingsTree.js).
+  let { anchorId = "" } = $props();
+
   let status = $state([]);
   let loading = $state(true);
   let busy = $state(false);
@@ -76,7 +79,9 @@
   }
 </script>
 
-<h3>{t("settings.catalogues")}</h3>
+<div class="view-head" id={anchorId}>
+  <h4>{t("settings.catalogues")}</h4>
+</div>
 <p>{t("catalogues.hint")}</p>
 {#if loading}
   <Skeleton />
@@ -104,9 +109,13 @@
               added: report.outcome.added,
               corrected: report.outcome.corrected,
             })}
+            {#if report.outcome.withdrawn}
+              · {t("catalogues.withdrawn", { count: report.outcome.withdrawn })}
+            {/if}
             {#if report.outcome.extra_columns.length}
               · {t("catalogues.extra_columns", {
                 columns: report.outcome.extra_columns.join(", "),
+                count: report.outcome.extra_columns.length,
               })}
             {/if}
           {:else}

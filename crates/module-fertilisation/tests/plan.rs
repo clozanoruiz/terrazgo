@@ -8,13 +8,19 @@
 //! stored here, and each test names its source.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::{FarmWithPlots, PlotSpec, farm_with_plots, last_change};
 use module_fertilisation::models::*;
 use module_fertilisation::open_in_memory;
 use module_fertilisation::repository as repo;
 use rusqlite::Connection;
-use terrazgo_core::models::{NewCrop, NewFarm, NewPlot, NewSeason};
+use terrazgo_core::models::{NewCrop, NewSeason};
 use terrazgo_core::repository as core_repo;
 
+/// A plan covers crops, not plots, so this fixture is the shared land with a
+/// crop on each plot — plus a SECOND campaign, which is what the "at most one
+/// live plan per crop" rule is scoped by.
 struct Fixture {
     season_id: String,
     other_season_id: String,
@@ -26,58 +32,25 @@ struct Fixture {
 }
 
 fn fixture(conn: &mut Connection) -> Fixture {
-    let season = |conn: &mut Connection, year: i64, label: &str| {
-        core_repo::insert_season(
-            conn,
-            NewSeason {
-                campaign_year: year,
-                label: label.into(),
-                starts_on: None,
-                ends_on: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let season_id = season(conn, 2026, "2025/2026");
-    let other_season_id = season(conn, 2027, "2026/2027");
-
-    let farm = |conn: &mut Connection, name: &str| {
-        core_repo::insert_farm(
-            conn,
-            NewFarm {
-                name: name.into(),
-                owner_name: None,
-                owner_tax_id: None,
-                country_code: "es".into(),
-                es: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let farm_id = farm(conn, "Finca La Vega");
-    let other_farm = farm(conn, "Finca del Vecino");
-
-    let plot = |conn: &mut Connection, farm_id: &str, name: &str| {
-        core_repo::insert_plot(
-            conn,
-            NewPlot {
-                farm_id: farm_id.to_string(),
-                name: name.into(),
-                area_ha: Some(4.0),
-                es: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let plot_a = plot(conn, &farm_id, "El Prado");
-    let plot_b = plot(conn, &farm_id, "La Loma");
-    let foreign_plot = plot(conn, &other_farm, "Ajena");
+    let core = farm_with_plots(
+        conn,
+        FarmWithPlots {
+            other_farm_plot: PlotSpec::new("Ajena", 4.0),
+            ..Default::default()
+        },
+    );
+    let other_season_id = core_repo::insert_season(
+        conn,
+        NewSeason {
+            campaign_year: 2027,
+            label: "2026/2027".into(),
+            starts_on: None,
+            ends_on: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
 
     let crop = |conn: &mut Connection, plot_id: &str, season_id: &str, species: &str| {
         core_repo::insert_crop(
@@ -88,7 +61,6 @@ fn fixture(conn: &mut Connection) -> Fixture {
                 species_name: species.into(),
                 variety: None,
                 production_system_code: None,
-                sown_on: None,
                 area_ha: None,
                 irrigation_code: None,
                 growing_environment_code: None,
@@ -105,13 +77,13 @@ fn fixture(conn: &mut Connection) -> Fixture {
     };
 
     Fixture {
-        wheat: crop(conn, &plot_a, &season_id, "trigo blando"),
-        barley: crop(conn, &plot_b, &season_id, "cebada"),
-        other_farm_crop: crop(conn, &foreign_plot, &season_id, "maíz"),
-        other_season_crop: crop(conn, &plot_a, &other_season_id, "girasol"),
-        season_id,
+        wheat: crop(conn, &core.plot_a, &core.season_id, "trigo blando"),
+        barley: crop(conn, &core.plot_b, &core.season_id, "cebada"),
+        other_farm_crop: crop(conn, &core.other_farm_plot, &core.season_id, "maíz"),
+        other_season_crop: crop(conn, &core.plot_a, &other_season_id, "girasol"),
+        season_id: core.season_id,
         other_season_id,
-        farm_id,
+        farm_id: core.farm_id,
     }
 }
 
@@ -130,18 +102,6 @@ fn sample(fx: &Fixture) -> NewFertilisationPlan {
         notes: None,
         crop_ids: vec![fx.wheat.clone()],
     }
-}
-
-fn last_change(conn: &Connection, table: &str, id: &str) -> (String, serde_json::Value) {
-    conn.query_row(
-        "SELECT operation, payload FROM record_change
-         WHERE entity_table = ?1 AND entity_id = ?2
-         ORDER BY changed_at DESC, id DESC LIMIT 1",
-        [table, id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    )
-    .map(|(op, payload)| (op, serde_json::from_str(&payload).unwrap()))
-    .unwrap()
 }
 
 #[test]
@@ -318,10 +278,10 @@ fn adjusting_a_plan_mid_campaign_is_a_correction_with_a_new_date() {
     assert!(detail.plan.tool_generated);
     assert_eq!(detail.crop_ids.len(), 2);
 
-    let (op, payload) = last_change(&conn, "fertilisation_plan", &created.plan.id);
+    let (op, before, after) = last_change(&conn, "fertilisation_plan", &created.plan.id);
     assert_eq!(op, "update");
-    assert_eq!(payload["before"]["needs_n_kg_ha"], 140.0);
-    assert_eq!(payload["after"]["needs_n_kg_ha"], 110.0);
+    assert_eq!(before["needs_n_kg_ha"], 140.0);
+    assert_eq!(after["needs_n_kg_ha"], 110.0);
 }
 
 #[test]
@@ -330,10 +290,10 @@ fn logs_a_complete_row_image_for_the_plan_and_each_covered_crop() {
     let fx = fixture(&mut conn);
     let detail = repo::insert_fertilisation_plan(&mut conn, sample(&fx), Some("user-1")).unwrap();
 
-    let (op, payload) = last_change(&conn, "fertilisation_plan", &detail.plan.id);
+    let (op, _, after) = last_change(&conn, "fertilisation_plan", &detail.plan.id);
     assert_eq!(op, "insert");
-    assert_eq!(payload["after"]["needs_n_kg_ha"], 140.0);
-    assert_eq!(payload["after"]["season_id"], detail.plan.season_id);
+    assert_eq!(after["needs_n_kg_ha"], 140.0);
+    assert_eq!(after["season_id"], detail.plan.season_id);
 
     let row_id: String = conn
         .query_row(
@@ -342,12 +302,12 @@ fn logs_a_complete_row_image_for_the_plan_and_each_covered_crop() {
             |r| r.get(0),
         )
         .unwrap();
-    let (op, payload) = last_change(&conn, "fertilisation_plan_crop", &row_id);
+    let (op, _, after) = last_change(&conn, "fertilisation_plan_crop", &row_id);
     assert_eq!(op, "insert");
     // The junction has no model struct, so the log image must carry the parent
     // id: a receiving device rebuilds the row from `after` alone.
-    assert_eq!(payload["after"]["fertilisation_plan_id"], detail.plan.id);
-    assert_eq!(payload["after"]["crop_id"], fx.wheat);
+    assert_eq!(after["fertilisation_plan_id"], detail.plan.id);
+    assert_eq!(after["crop_id"], fx.wheat);
 }
 
 #[test]

@@ -5,7 +5,7 @@
 //! migrations), for the fertilisation and irrigation form selectors.
 
 use crate::error::Result;
-use crate::models::Lookup;
+use crate::models::{ApplicationMethod, Lookup};
 use rusqlite::Connection;
 
 /// The eight irrigation systems of model section 8's footnote (FEGA
@@ -40,11 +40,19 @@ pub fn list_fertilisation_types(conn: &Connection) -> Result<Vec<Lookup>> {
 
 /// Anexo III C.f's seven (FEGA `METODO_APLICACION_FERTILIZANTE`), two of them
 /// fertigation.
-pub fn list_application_methods(conn: &Connection) -> Result<Vec<Lookup>> {
-    rows(
-        conn,
-        "SELECT code, i18n_key FROM application_method ORDER BY rowid",
-    )
+pub fn list_application_methods(conn: &Connection) -> Result<Vec<ApplicationMethod>> {
+    let mut stmt = conn
+        .prepare("SELECT code, i18n_key, is_fertigation FROM application_method ORDER BY rowid")?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ApplicationMethod {
+                code: row.get(0)?,
+                i18n_key: row.get(1)?,
+                is_fertigation: row.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// What the manure received before it was spread (FEGA `TRAT_ESTIERCOLES`) —

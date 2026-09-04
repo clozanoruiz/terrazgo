@@ -98,6 +98,8 @@ pub struct Labels {
     pub s6: S6,
     pub s71: S71,
     pub s8: S8,
+    pub s9: S9,
+    pub s10: S10,
     pub annex: Annex,
     pub value: Values,
     /// Spreadsheet-only wording (tab names, the 1.1 label column, and the
@@ -475,6 +477,188 @@ pub struct S8 {
     pub note_water_quality: &'static str,
 }
 
+/// Section 9 — the eco-scheme registers. The book's THIRD decree
+/// (RD 1048/2022), reaching the cuaderno through RD 1054/2022 anexo II item 4,
+/// so its notes cite that one.
+///
+/// The section's sub-registers each bring their own labels as they land; what
+/// lives here is the section's own furniture — the heading and the line that
+/// says whom the section is addressed to. That line matters more here than
+/// elsewhere: unlike every other section of the book, section 9 is empty for
+/// most holdings, because the duties exist only for those claiming an
+/// ecorrégimen. An empty page with no explanation reads as a book with a gap.
+#[derive(Serialize)]
+pub struct S9 {
+    pub section_title: &'static str,
+    pub intro: &'static str,
+    pub s91: S91,
+    pub s92: S92,
+    pub s93: S93,
+    pub s94: S94,
+    pub s95: S95,
+    pub s96: S96,
+}
+
+/// Model 9.4 — cubiertas vegetales en cultivos leñosos (P6, RD 1048/2022
+/// art. 42).
+///
+/// **The row here is the COVER, not the plot**, unlike 9.2 and 9.3: a cover has
+/// one establishment date and one pair of widths however many plots it was
+/// established over, so there is nothing to pivot.
+///
+/// Art. 42.1 is three annotations on three different deadlines, which this
+/// single row of columns collapses — the establishment date within a month, the
+/// widths within the month before the four-month live-cover period ends, and
+/// the maintenance within the month before the solicitud-única modification
+/// period ends. The widths therefore print blank on a cover whose second
+/// annotation is not made yet, which is a true statement rather than a gap.
+///
+/// The three maintenance columns are filled from two OTHER registers — siega
+/// and desbroce from the cultural operations, pastoreo from the grazings —
+/// because that is what each of those activities is, and what the exchange
+/// format calls them.
+#[derive(Serialize)]
+pub struct S94 {
+    pub title: &'static str,
+    pub plot_ids: &'static str,
+    pub established_on: &'static str,
+    pub width: &'static str,
+    pub free_canopy_width: &'static str,
+    pub maintenance: &'static str,
+    pub mowing: &'static str,
+    pub brush_cutting: &'static str,
+    pub grazing: &'static str,
+    pub note_establishment: &'static str,
+    pub note_maintenance: &'static str,
+}
+
+/// Model 9.5 — cubiertas inertes de restos de poda (P7, RD 1048/2022 art. 43).
+///
+/// The same register as 9.4 under a different practice, and three columns
+/// shorter: **art. 43 asks for no maintenance at all**, only the establishment
+/// date — which may not be later than 15 April — and the same two widths.
+#[derive(Serialize)]
+pub struct S95 {
+    pub title: &'static str,
+    pub plot_ids: &'static str,
+    pub established_on: &'static str,
+    pub width: &'static str,
+    pub free_canopy_width: &'static str,
+    pub note_establishment: &'static str,
+}
+
+/// Model 9.3 — espacios de biodiversidad en cultivos bajo agua (P5,
+/// RD 1048/2022 art. 45.2).
+///
+/// **The book prints five date columns where the model prints three.** Art.
+/// 45.2 names *"las fechas de nivelación, siembra, inundación y secas, y
+/// construcción de caballones"*, and the printed form has no column for
+/// nivelación or for caballones — so a book following the form would not
+/// satisfy the article. The layout is orientativo and the content binds (the
+/// PHI-column precedent), so the two missing dates get columns.
+///
+/// They are placed where the ARTICLE names them, which happens to leave the
+/// model's own three in their original relative order: nivelación before
+/// siembra, caballones after the secas.
+#[derive(Serialize)]
+pub struct S93 {
+    pub title: &'static str,
+    pub plot_ids: &'static str,
+    pub levelling: &'static str,
+    pub sowing: &'static str,
+    pub flooding: &'static str,
+    pub drying: &'static str,
+    pub ridging: &'static str,
+    pub note_added_columns: &'static str,
+    pub note_sources: &'static str,
+}
+
+/// Model 9.1 — pastoreo extensivo (P1, RD 1048/2022 art. 30.2 ter).
+///
+/// The three footnotes are the model's own, and each carries a rule the app
+/// cannot apply for the farmer: whether the plots are more than 10 km from the
+/// livestock installation (no installation entity exists), whether nearby plots
+/// may be treated as one group, and when the annotation is due — a month from
+/// the END of grazing, which is why an unfinished grazing is not late.
+#[derive(Serialize)]
+pub struct S91 {
+    pub title: &'static str,
+    pub group_ref: &'static str,
+    pub plot_reference: &'static str,
+    pub started_on: &'static str,
+    pub ended_on: &'static str,
+    pub species: &'static str,
+    pub rega: &'static str,
+    pub animal_count: &'static str,
+    pub note_group_ref: &'static str,
+    pub note_grouping: &'static str,
+    pub note_deadline: &'static str,
+}
+
+/// Model 9.2 — siega sostenible e islas de biodiversidad (P2, RD 1048/2022
+/// arts. 31 and 31.4.d).
+///
+/// The model's row is a PLOT, identified by the same SIGPAC parts table 2.1
+/// prints, and its cells accumulate dates by activity — so the page is a pivot
+/// of the register rather than a listing of it. The last column is the only one
+/// whose footnote asks for words as well as a date, which is why
+/// `activity_description` exists.
+#[derive(Serialize)]
+pub struct S92 {
+    pub title: &'static str,
+    pub plot_ids: &'static str,
+    pub province: &'static str,
+    pub municipality: &'static str,
+    pub polygon: &'static str,
+    pub parcel: &'static str,
+    pub enclosure: &'static str,
+    pub sigpac_area: &'static str,
+    pub mowing: &'static str,
+    pub other_activities: &'static str,
+    pub tillage: &'static str,
+    pub sowing: &'static str,
+    pub maintenance: &'static str,
+    pub note_cuts: &'static str,
+    pub note_date: &'static str,
+    pub note_activity: &'static str,
+}
+
+/// The register RD 1048/2022 anexo IV orders and the printed model gives no
+/// page to: the maintenance activities carried out on each pasto comunal plot.
+///
+/// Numbered "9.6" because it belongs to section 9 and the model stops at 9.5.
+/// It is a subsection this book adds, and its footnote says so — a reader who
+/// checks our page against the official form must find the difference
+/// explained rather than be left to wonder. The invoices the annex asks for are
+/// documents to keep, so they join the conservation annex rather than becoming
+/// a column here: the book holds no attachments by design.
+#[derive(Serialize)]
+pub struct S96 {
+    pub title: &'static str,
+    pub plot_ids: &'static str,
+    pub plots: &'static str,
+    pub performed_on: &'static str,
+    pub performed_end_date: &'static str,
+    pub activity: &'static str,
+    pub note_no_model_page: &'static str,
+    pub note_invoices: &'static str,
+}
+
+/// Section 10 — determinadas ayudas asociadas.
+///
+/// **A page with no register at all**, and it prints exactly one sentence
+/// saying so. The aids require *"la aplicación de la gestión sostenible de
+/// insumos conforme a las disposiciones normativas vigentes en materia de
+/// nutrición sostenible de los suelos agrarios"* — that is RD 1051/2022
+/// compliance, which sections 3, 7 and 8 already record. Printing nothing at
+/// all was the alternative, and it was rejected: a reader who counts the
+/// section numbers would conclude the book skipped one.
+#[derive(Serialize)]
+pub struct S10 {
+    pub section_title: &'static str,
+    pub note: &'static str,
+}
+
 /// The closing page: the documents the holder must keep beside the book.
 ///
 /// A duty, not a register — RD 1311/2012 art. 16.3 obliges keeping what backs
@@ -509,7 +693,40 @@ pub struct Annex {
     pub item_plan: &'static str,
     pub item_sludge: &'static str,
     pub item_manure: &'static str,
+    /// The third decree's own document. RD 1048/2022 anexo IV asks a comunal
+    /// pasture's beneficiary to annotate the maintenance dates AND keep the
+    /// invoices proving the work — the annotation is the "9.6" register, the
+    /// invoices are a document, so they belong on this list. The book holds no
+    /// attachments by design, which is why this is a reminder and not a field.
+    pub item_communal_invoices: &'static str,
     pub retention: &'static str,
+}
+
+/// A noun that inflects with the count printed beside it: "1 día" against
+/// "21 días", "1 trampa" against "4 trampes".
+///
+/// Two forms because every language this book prints is two-form — Castilian
+/// and Catalan today, and the layout being per country (see this crate's module
+/// docs) bounds the rest to Spain's other co-official languages, Galician and
+/// Basque, which are two-form as well. A language needing `few`/`many` adds
+/// them HERE, and every language's literal then fails to compile until it fills
+/// them in — the same reason this file is a struct and not a dictionary.
+///
+/// The UI answers the same question with `Intl.PluralRules` (`src/i18n.js`),
+/// because its locale set is open and EU expansion brings four-form languages.
+/// One concept, two containers.
+#[derive(Serialize)]
+pub struct Plural {
+    pub one: &'static str,
+    pub other: &'static str,
+}
+
+impl Plural {
+    /// `one` for exactly 1 and nothing else, which is what CLDR says for both
+    /// languages and what `Intl.PluralRules` returns: "1,5 trampes" is `other`.
+    pub fn select(&self, count: f64) -> &'static str {
+        if count == 1.0 { self.one } else { self.other }
+    }
 }
 
 /// Printed VALUES rather than headings: words the renderers emit for a piece of
@@ -528,12 +745,13 @@ pub struct Values {
     /// leaves a free-text cell.
     /// Intensity units for model 3.1 bis. Unlike a dose unit — `L/ha` reads
     /// the same in every language — a count is a WORD, so these translate
-    /// rather than printing as symbols.
-    pub unit_traps: &'static str,
+    /// rather than printing as symbols. Being words, they also inflect with the
+    /// figure beside them; the `_ha` rates do not, no more than "l/ha" does.
+    pub unit_traps: Plural,
     pub unit_traps_ha: &'static str,
-    pub unit_diffusers: &'static str,
+    pub unit_diffusers: Plural,
     pub unit_diffusers_ha: &'static str,
-    pub unit_units: &'static str,
+    pub unit_units: Plural,
     pub unit_units_ha: &'static str,
     pub justification_threshold: &'static str,
     pub justification_monitoring: &'static str,
@@ -580,6 +798,11 @@ pub struct Values {
     pub seed_kind_processing_centre: &'static str,
     pub seed_kind_purchased_es: &'static str,
     pub seed_kind_purchased_abroad: &'static str,
+    /// How a crop began. The sowing register's form offers both, so the tab has
+    /// to say which one a row is — a "planting" printed as a sowing would be a
+    /// wrong statement, not a missing one.
+    pub sowing_kind_sowing: &'static str,
+    pub sowing_kind_planting: &'static str,
     /// Section 8's eight irrigation systems (FEGA SIST_RIEGO, and the model's
     /// own footnote). Distinct from 2.1's four-value plot vocabulary above:
     /// that one characterises the parcel, these describe one watering.
@@ -626,12 +849,48 @@ pub struct Values {
     pub nutrient_macro: &'static str,
     pub nutrient_micro: &'static str,
     pub nutrient_heavy_metal: &'static str,
+    /// What was done on the land — `module-ecoscheme`'s owned
+    /// `cultural_operation_kind`, printed in section 9.2's "otras actividades"
+    /// cell and in the "9.6" register anexo IV has no page for.
+    ///
+    /// These are PROSE, which is exactly why the module owns the vocabulary
+    /// rather than storing `TIPO_LABOR` verbatim: a FEGA code carries no i18n
+    /// key, so a verbatim one would print its Spanish label on the Catalan
+    /// page. `mowing` and `brush_cutting` are two of ours over the catalogue's
+    /// single "Desbroce y siega", because model 9.4 prints them as two columns.
+    pub operation_no_tillage: &'static str,
+    pub operation_tillage: &'static str,
+    pub operation_levelling: &'static str,
+    pub operation_ridging: &'static str,
+    pub operation_weeding: &'static str,
+    pub operation_mowing: &'static str,
+    pub operation_brush_cutting: &'static str,
+    pub operation_drainage: &'static str,
+    pub operation_pruning: &'static str,
+    pub operation_thinning: &'static str,
+    pub operation_staking: &'static str,
+    pub operation_grafting: &'static str,
+    pub operation_pruning_removal: &'static str,
+    pub operation_green_pruning: &'static str,
+    pub operation_rolling: &'static str,
+    /// RD 1048/2022's six annotation duties, named in the operations tab. The
+    /// PDF never prints these — which duty a row evidences is answered by which
+    /// page it is on — but one spreadsheet tab carries two pages' rows, so the
+    /// column is what tells them apart. The aid regime's siglas (P1, P2…) ride
+    /// with the name because that is how a farmer knows them from the solicitud
+    /// única; anexo IV has no sigla, so it is named by its annex.
+    pub practice_extensive_grazing: &'static str,
+    pub practice_sustainable_mowing: &'static str,
+    pub practice_flooded_biodiversity: &'static str,
+    pub practice_plant_cover: &'static str,
+    pub practice_inert_cover: &'static str,
+    pub practice_communal_pasture: &'static str,
     /// The model's own siglas for the tipo de fertilización column. Codes, not
     /// prose: they print the same in every language, like SEC/ASP/LOC/GRA.
     pub sigla_base: &'static str,
     pub sigla_top: &'static str,
     pub sigla_fertigation: &'static str,
-    pub phi_days: &'static str,
+    pub phi_days: Plural,
     pub phi_until: &'static str,
 }
 
@@ -662,6 +921,38 @@ pub struct SheetLabels {
     /// cell and prints a running total; here the sources are one filterable
     /// column and every number is a real number.
     pub tab_irrigation: &'static str,
+    pub tab_grazing: &'static str,
+    /// Section 9.2 and "9.6" share one tab: they are one register split across
+    /// two printed pages by `practice_code`, and a spreadsheet that filters on
+    /// that column serves both better than two half-empty tabs would.
+    pub tab_cultural_operations: &'static str,
+    /// The sowing register's own tab. It has no printed page — its dates
+    /// appear in 9.2's "Siembra" column and 9.3's, and its seed quantity
+    /// appears nowhere else — so this tab is where the register can be read
+    /// whole, the `tab_materials` precedent.
+    pub tab_sowing: &'static str,
+    /// Models 9.4 and 9.5 share one tab, for the same reason 9.2 and "9.6" do:
+    /// one register, split across two printed pages by `practice_code`.
+    pub tab_covers: &'static str,
+    /// Columns the covers tab adds because neither printed page has them: what
+    /// the cover is made of (`TIPO_COBERTURA_SUELO`, which the twin sends, and
+    /// which art. 42.1.a does not ask to be annotated), and the date the widths
+    /// were stated — art. 42.1.e's own annotation, which is what separates a
+    /// cover measured in June from one never measured.
+    pub cover_type: &'static str,
+    pub widths_stated_on: &'static str,
+    /// The sowing tab's own added column: sown or planted. No printed page shows
+    /// this register at all, so the tab is the only place it can be read.
+    pub sowing_kind: &'static str,
+    /// Model 9.3's drying date, in the treatments tab: the register that owns
+    /// the fact is section 3.1, because the field is dried in order to spray.
+    pub drying_date: &'static str,
+    /// Columns the operations tab adds because no printed page has them: which
+    /// duty the row evidences (the PDF answers it by which page the row is on),
+    /// and where the plant residue went — the twin's field, and the one that
+    /// turns a pruning into a P7 inert cover.
+    pub eco_practice: &'static str,
+    pub residue_destination: &'static str,
     /// Section 6's own tab, plus the tab holding the material registry the
     /// records point at — the full Anexo III C.h composition has no room in a
     /// register row and every figure there is a number worth filtering.
@@ -702,6 +993,9 @@ pub struct SheetLabels {
     pub fertilisation_type: &'static str,
     pub application_method: &'static str,
     pub sludge: &'static str,
+    /// The twin's `GestionSostInsu`, which no decree names and no printed cell
+    /// carries — so like the sludge flag it gets a column of its own here.
+    pub sustainable_inputs: &'static str,
     pub practices: &'static str,
     pub service_company: &'static str,
     pub service_regfer: &'static str,
@@ -837,13 +1131,15 @@ impl Labels {
     /// "4 trampes/ha" on a Catalan page, not "4 Trampas/ha". Unknown codes
     /// print themselves (the `material_kind` rule), so a unit added upstream
     /// cannot blank a cell.
-    pub fn intensity_unit<'a>(&self, code: &'a str) -> &'a str {
+    /// `count` is the intensity the unit sits beside, because the counted ones
+    /// are nouns: "1 trampa" against "4 trampes". The `_ha` rates ignore it.
+    pub fn intensity_unit<'a>(&self, code: &'a str, count: f64) -> &'a str {
         match code {
-            "traps" => self.value.unit_traps,
+            "traps" => self.value.unit_traps.select(count),
             "traps_ha" => self.value.unit_traps_ha,
-            "diffusers" => self.value.unit_diffusers,
+            "diffusers" => self.value.unit_diffusers.select(count),
             "diffusers_ha" => self.value.unit_diffusers_ha,
-            "units" => self.value.unit_units,
+            "units" => self.value.unit_units.select(count),
             "units_ha" => self.value.unit_units_ha,
             other => other,
         }
@@ -906,6 +1202,46 @@ impl Labels {
             "solar_drying" => self.value.manure_solar_drying,
             "stripping" => self.value.manure_stripping,
             "membrane_separation" => self.value.manure_membrane,
+            other => other,
+        }
+    }
+
+    /// What was done on the land (`module-ecoscheme`'s `cultural_operation_kind`).
+    /// Unknown codes print themselves, the `material_kind` rule — a kind added
+    /// to the seed without a translation here must not blank a cell in a legal
+    /// document, and `every_operation_kind_prints_as_prose` fails first anyway.
+    pub fn operation_kind<'a>(&self, code: &'a str) -> &'a str {
+        match code {
+            "no_tillage" => self.value.operation_no_tillage,
+            "tillage" => self.value.operation_tillage,
+            "levelling" => self.value.operation_levelling,
+            "ridging" => self.value.operation_ridging,
+            "weeding" => self.value.operation_weeding,
+            "mowing" => self.value.operation_mowing,
+            "brush_cutting" => self.value.operation_brush_cutting,
+            "drainage" => self.value.operation_drainage,
+            "pruning" => self.value.operation_pruning,
+            "thinning" => self.value.operation_thinning,
+            "staking" => self.value.operation_staking,
+            "grafting" => self.value.operation_grafting,
+            "pruning_removal" => self.value.operation_pruning_removal,
+            "green_pruning" => self.value.operation_green_pruning,
+            "rolling" => self.value.operation_rolling,
+            other => other,
+        }
+    }
+
+    /// Which of RD 1048/2022's duties a section-9 record evidences
+    /// (`module-ecoscheme`'s `eco_practice`). Unknown codes print themselves,
+    /// the `material_kind` rule.
+    pub fn eco_practice<'a>(&self, code: &'a str) -> &'a str {
+        match code {
+            "extensive_grazing" => self.value.practice_extensive_grazing,
+            "sustainable_mowing" => self.value.practice_sustainable_mowing,
+            "flooded_biodiversity" => self.value.practice_flooded_biodiversity,
+            "plant_cover" => self.value.practice_plant_cover,
+            "inert_cover" => self.value.practice_inert_cover,
+            "communal_pasture" => self.value.practice_communal_pasture,
             other => other,
         }
     }
@@ -995,6 +1331,17 @@ impl Labels {
         }
     }
 
+    /// Sown or planted. Unlike `seed_treatment_kind` this is NOT nullable — the
+    /// column is `NOT NULL`, because the exchange format has to state which it
+    /// was and there is no "unstated" answer.
+    pub fn sowing_kind<'a>(&self, code: &'a str) -> &'a str {
+        match code {
+            "sowing" => self.value.sowing_kind_sowing,
+            "planting" => self.value.sowing_kind_planting,
+            other => other,
+        }
+    }
+
     /// Carné de aplicador levels (RD 1311/2012 niveles de capacitación).
     pub fn licence_level(&self, code: Option<&str>) -> &'static str {
         match code {
@@ -1022,7 +1369,8 @@ impl Labels {
     pub fn phi_phrase(&self, days: i64, end_date: &str) -> String {
         format!(
             "{days} {} ({} {end_date})",
-            self.value.phi_days, self.value.phi_until
+            self.value.phi_days.select(days as f64),
+            self.value.phi_until
         )
     }
 
@@ -1366,6 +1714,121 @@ static ES: Labels = Labels {
                              equivalente facilita el dato; con analíticas propias es \
                              voluntario (RD 1051/2022, art. 17.2).",
     },
+    s9: S9 {
+        section_title: "9. ECORREGÍMENES",
+        intro: "Anotaciones que el RD 1048/2022 exige a las explotaciones acogidas a un \
+                ecorrégimen. Cada anotación se realiza en el plazo que fija su artículo, \
+                por regla general un mes desde la actividad. Una explotación que no se \
+                acoge a ningún ecorrégimen deja esta sección en blanco.",
+        s91: S91 {
+            title: "9.1 PASTOREO EXTENSIVO",
+            group_ref: "Id. del grupo de parcelas",
+            plot_reference: "Referencia SIGPAC de la parcela o grupo",
+            started_on: "Fecha inicio de pastoreo",
+            ended_on: "Fecha fin de pastoreo",
+            species: "Especie animal que pasta",
+            rega: "REGA",
+            animal_count: "Nº animales desplazados al pasto",
+            note_group_ref: "Se cumplimenta únicamente cuando la parcela o el grupo de \
+                             parcelas se encuentra a más de 10 km de la instalación \
+                             ganadera principal.",
+            note_grouping: "Las parcelas separadas entre sí por menos de 10 km pueden \
+                            anotarse como un grupo.",
+            note_deadline: "La anotación se realiza en el plazo de un mes desde la fecha \
+                            de FIN del pastoreo (RD 1048/2022, art. 30.2 ter). Una fecha \
+                            de fin en blanco indica que el pastoreo continúa.",
+        },
+        s92: S92 {
+            title: "9.2 SIEGA SOSTENIBLE E ISLAS DE BIODIVERSIDAD",
+            plot_ids: "Id. de parcelas",
+            province: "Provincia",
+            municipality: "Municipio",
+            polygon: "Polígono",
+            parcel: "Parcela",
+            enclosure: "Recinto",
+            sigpac_area: "Superficie SIGPAC (ha)",
+            mowing: "Siega: fecha de cortes",
+            other_activities: "Otras actividades",
+            tillage: "Laboreo",
+            sowing: "Siembra",
+            maintenance: "Otras activ. de mantenimiento",
+            note_cuts: "Se admiten hasta dos cortes al año; el umbral de altitud es de 300 m.",
+            note_date: "Indíquese la fecha.",
+            note_activity: "Indíquese la fecha y la actividad realizada (RD 1048/2022, \
+                            art. 31: «la fecha y las actividades realizadas», en el plazo \
+                            de un mes).",
+        },
+        s93: S93 {
+            title: "9.3 ESPACIOS DE BIODIVERSIDAD EN CULTIVOS BAJO AGUA",
+            plot_ids: "Id. de parcelas",
+            levelling: "Fecha de nivelación",
+            sowing: "Fecha de siembra en seco",
+            flooding: "Fecha de inundación",
+            drying: "Fecha de seca para tratamiento",
+            ridging: "Fecha de construcción de caballones",
+            note_added_columns: "El artículo 45.2 del RD 1048/2022 exige anotar las fechas \
+                                 de nivelación, siembra, inundación, secas y construcción \
+                                 de caballones. El modelo impreso solo tiene columna para \
+                                 tres de las cinco: este cuaderno añade las de nivelación \
+                                 y caballones, en el lugar que les da el artículo.",
+            note_sources: "La fecha de seca se anota en el tratamiento al que sirve \
+                           (sección 3.1); las de nivelación y caballones, como labores \
+                           (sección 9.2). Aquí se reúnen por parcela.",
+        },
+        s94: S94 {
+            title: "9.4 CUBIERTAS VEGETALES EN CULTIVOS LEÑOSOS",
+            plot_ids: "Id. Parcelas",
+            established_on: "Fecha de establecimiento",
+            width: "Anchura de la cubierta (m)",
+            free_canopy_width: "Anchura libre proyección copa (m)",
+            maintenance: "Mantenimiento por medios mecánicos",
+            mowing: "Siega",
+            brush_cutting: "Desbrozado",
+            grazing: "Pastoreo",
+            note_establishment: "Cubierta vegetal espontánea o sembrada con presencia viva \
+                                 sobre el terreno (art. 42.1.a). Las anchuras son una \
+                                 anotación distinta, con su propio plazo (art. 42.1.e): \
+                                 en blanco significa que aún no se han medido.",
+            note_maintenance: "Exigible en pendientes iguales o superiores al 10 % y en \
+                               bancales. El pastoreo se anota como tal en el registro de \
+                               pastoreo y aparece aquí porque mantiene esta cubierta; por \
+                               eso no se repite en la sección 9.1.",
+        },
+        s95: S95 {
+            title: "9.5 CUBIERTAS INERTES DE RESTOS DE PODA",
+            plot_ids: "Id. Parcelas",
+            established_on: "Fecha de establecimiento",
+            width: "Anchura de la cubierta (m)",
+            free_canopy_width: "Anchura libre proyección copa (m)",
+            note_establishment: "Cubierta inerte procedente de la trituración de restos de \
+                                 poda, que no puede establecerse después del 15 de abril \
+                                 (art. 43.1.a). El art. 43 no exige anotar mantenimiento, \
+                                 de ahí que esta tabla no tenga esas columnas.",
+        },
+        s96: S96 {
+            title: "9.6 PASTOS COMUNALES",
+            plot_ids: "Id. de parcelas",
+            plots: "Parcelas",
+            performed_on: "Fecha",
+            performed_end_date: "Fecha fin",
+            activity: "Actividad de mantenimiento",
+            note_no_model_page: "El modelo impreso no dedica ninguna página a esta \
+                                 obligación: el anexo IV del RD 1048/2022 exige anotar las \
+                                 fechas de las actividades de mantenimiento de cada \
+                                 parcela de pasto comunal, en el plazo de un mes. Este \
+                                 cuaderno le da la numeración 9.6, que el modelo no tiene.",
+            note_invoices: "Las facturas que acreditan los trabajos se conservan como \
+                            documentación, no se anotan aquí (véase el anexo de \
+                            documentación).",
+        },
+    },
+    s10: S10 {
+        section_title: "10. DETERMINADAS AYUDAS ASOCIADAS",
+        note: "Esta sección no tiene registro propio. Las ayudas asociadas exigen la gestión \
+               sostenible de insumos conforme a la normativa vigente en materia de nutrición \
+               sostenible de los suelos agrarios, que este cuaderno anota en las secciones 3, \
+               7 y 8.",
+    },
     annex: Annex {
         section_title: "DOCUMENTACIÓN A CONSERVAR",
         title: "DOCUMENTACIÓN QUE DEBE CONSERVARSE JUNTO AL CUADERNO",
@@ -1385,6 +1848,7 @@ static ES: Labels = Labels {
         item_plan: "Plan de abonado de cada unidad de producción (RD 1051/2022, art. 6).",
         item_sludge: "Documento de aplicación de los lodos expedido por el gestor autorizado (RD 1051/2022, art. 5.g; anexo III de la Orden AAA/1072/2013).",
         item_manure: "Documento con la calidad agronómica de los estiércoles recibidos de terceros (RD 1051/2022, art. 13.2); no es necesario cuando los suministra el propio titular.",
+        item_communal_invoices: "Facturas que acrediten las actividades de mantenimiento realizadas en las parcelas de pasto comunal (RD 1048/2022, anexo IV); las fechas se anotan en el registro 9.6.",
         retention: "Los documentos 1 a 6 se conservan durante al menos tres años desde su \
                     emisión (art. 16.3 del RD 1311/2012). Los justificantes de entrega de \
                     envases vacíos (4) y los documentos de venta de la cosecha (7) responden, \
@@ -1397,11 +1861,20 @@ static ES: Labels = Labels {
         no: "NO",
         cross: "X",
         manual: "Manual",
-        unit_traps: "trampas",
+        unit_traps: Plural {
+            one: "trampa",
+            other: "trampas",
+        },
         unit_traps_ha: "trampas/ha",
-        unit_diffusers: "difusores",
+        unit_diffusers: Plural {
+            one: "difusor",
+            other: "difusores",
+        },
         unit_diffusers_ha: "difusores/ha",
-        unit_units: "unidades",
+        unit_units: Plural {
+            one: "unidad",
+            other: "unidades",
+        },
         unit_units_ha: "unidades/ha",
         justification_threshold: "Superación de umbrales",
         justification_monitoring: "Monitorización",
@@ -1436,6 +1909,8 @@ static ES: Labels = Labels {
         seed_kind_processing_centre: "Tratada en un centro de acondicionamiento",
         seed_kind_purchased_es: "Adquirida tratada en España",
         seed_kind_purchased_abroad: "Adquirida tratada fuera de España",
+        sowing_kind_sowing: "Siembra",
+        sowing_kind_planting: "Plantación",
         method_surface_gravity: "Superficie o gravedad",
         method_sprinkler_fixed: "Aspersión fija",
         method_sprinkler_mobile: "Aspersión móvil",
@@ -1473,10 +1948,34 @@ static ES: Labels = Labels {
         nutrient_macro: "Macronutrientes",
         nutrient_micro: "Micronutrientes",
         nutrient_heavy_metal: "Metales pesados",
+        operation_no_tillage: "Sin laboreo",
+        operation_tillage: "Laboreo",
+        operation_levelling: "Nivelación",
+        operation_ridging: "Caballones y tablas",
+        operation_weeding: "Escarda",
+        operation_mowing: "Siega",
+        operation_brush_cutting: "Desbroce",
+        operation_drainage: "Mantenimiento del drenaje",
+        operation_pruning: "Poda",
+        operation_thinning: "Aclareo",
+        operation_staking: "Entutorado",
+        operation_grafting: "Injerto",
+        operation_pruning_removal: "Eliminación de restos de poda",
+        operation_green_pruning: "Poda en verde",
+        operation_rolling: "Rulado",
+        practice_extensive_grazing: "Pastoreo extensivo (P1)",
+        practice_sustainable_mowing: "Siega sostenible e islas de biodiversidad (P2)",
+        practice_flooded_biodiversity: "Espacios de biodiversidad en cultivos bajo agua (P5)",
+        practice_plant_cover: "Cubiertas vegetales en cultivos leñosos (P6)",
+        practice_inert_cover: "Cubiertas inertes de restos de poda (P7)",
+        practice_communal_pasture: "Pastos comunales (anexo IV)",
         sigla_base: "AF",
         sigla_top: "AC",
         sigla_fertigation: "F",
-        phi_days: "días",
+        phi_days: Plural {
+            one: "día",
+            other: "días",
+        },
         phi_until: "hasta",
     },
     sheet: SheetLabels {
@@ -1497,6 +1996,16 @@ static ES: Labels = Labels {
         tab_harvest: "5 Cosecha",
         tab_water_points: "2.2 Captaciones",
         tab_irrigation: "8 Riego",
+        tab_grazing: "9.1 Pastoreo",
+        tab_cultural_operations: "9.2 Labores",
+        tab_sowing: "Siembra",
+        tab_covers: "9.4-9.5 Cubiertas",
+        cover_type: "Tipo de cobertura",
+        sowing_kind: "Tipo",
+        widths_stated_on: "Fecha de medición de anchuras",
+        drying_date: "Fecha de seca",
+        eco_practice: "Ecorrégimen",
+        residue_destination: "Destino del resto vegetal",
         tab_fertilisation: "6 Fertilización",
         tab_plan: "7.1 Plan de abonado",
         tab_soil: "4 Suelo",
@@ -1523,6 +2032,7 @@ static ES: Labels = Labels {
         fertilisation_type: "Tipo de fertilización",
         application_method: "Forma de aplicación",
         sludge: "Aplicación de lodos",
+        sustainable_inputs: "Gestión sostenible de insumos",
         practices: "Buenas prácticas",
         service_company: "Empresa de servicios",
         service_regfer: "Nº REGFER",
@@ -1929,6 +2439,119 @@ static CA: Labels = Labels {
                              equivalent facilita la dada; amb analítiques pròpies \
                              és voluntari (RD 1051/2022, art. 17.2).",
     },
+    s9: S9 {
+        section_title: "9. ECORÈGIMS",
+        intro: "Anotacions que el RD 1048/2022 exigeix a les explotacions acollides a un \
+                ecorègim. Cada anotació es fa en el termini que fixa el seu article, en \
+                general un mes des de l'activitat. Una explotació que no s'acull a cap \
+                ecorègim deixa aquesta secció en blanc.",
+        s91: S91 {
+            title: "9.1 PASTURATGE EXTENSIU",
+            group_ref: "Id. del grup de parcel·les",
+            plot_reference: "Referència SIGPAC de la parcel·la o grup",
+            started_on: "Data d'inici de pasturatge",
+            ended_on: "Data de fi de pasturatge",
+            species: "Espècie animal que pastura",
+            rega: "REGA",
+            animal_count: "Nre. d'animals desplaçats a la pastura",
+            note_group_ref: "Només s'emplena quan la parcel·la o el grup de parcel·les es \
+                             troba a més de 10 km de la instal·lació ramadera principal.",
+            note_grouping: "Les parcel·les separades entre si per menys de 10 km es poden \
+                            anotar com un grup.",
+            note_deadline: "L'anotació es fa en el termini d'un mes des de la data de FI \
+                            del pasturatge (RD 1048/2022, art. 30.2 ter). Una data de fi \
+                            en blanc indica que el pasturatge continua.",
+        },
+        s92: S92 {
+            title: "9.2 SEGA SOSTENIBLE I ILLES DE BIODIVERSITAT",
+            plot_ids: "Id. de parcel·les",
+            province: "Província",
+            municipality: "Municipi",
+            polygon: "Polígon",
+            parcel: "Parcel·la",
+            enclosure: "Recinte",
+            sigpac_area: "Superfície SIGPAC (ha)",
+            mowing: "Sega: data dels talls",
+            other_activities: "Altres activitats",
+            tillage: "Llaurada",
+            sowing: "Sembra",
+            maintenance: "Altres activ. de manteniment",
+            note_cuts: "S'admeten fins a dos talls l'any; el llindar d'altitud és de 300 m.",
+            note_date: "Indiqueu-ne la data.",
+            note_activity: "Indiqueu la data i l'activitat realitzada (RD 1048/2022, \
+                            art. 31: «la fecha y las actividades realizadas», en el \
+                            termini d'un mes).",
+        },
+        s93: S93 {
+            title: "9.3 ESPAIS DE BIODIVERSITAT EN CULTIUS SOTA AIGUA",
+            plot_ids: "Id. de parcel·les",
+            levelling: "Data d'anivellament",
+            sowing: "Data de sembra en sec",
+            flooding: "Data d'inundació",
+            drying: "Data d'assecat per a tractament",
+            ridging: "Data de construcció de cavallons",
+            note_added_columns: "L'article 45.2 del RD 1048/2022 exigeix anotar les dates \
+                                 d'anivellament, sembra, inundació, assecats i construcció \
+                                 de cavallons. El model imprès només té columna per a tres \
+                                 de les cinc: aquest quadern hi afegeix les d'anivellament \
+                                 i cavallons, al lloc que els dóna l'article.",
+            note_sources: "La data d'assecat s'anota al tractament a què serveix (secció \
+                           3.1); les d'anivellament i cavallons, com a feines (secció 9.2). \
+                           Aquí es reuneixen per parcel·la.",
+        },
+        s94: S94 {
+            title: "9.4 COBERTES VEGETALS EN CULTIUS LLENYOSOS",
+            plot_ids: "Id. Parcel·les",
+            established_on: "Data d'establiment",
+            width: "Amplada de la coberta (m)",
+            free_canopy_width: "Amplada lliure projecció capçada (m)",
+            maintenance: "Manteniment per mitjans mecànics",
+            mowing: "Sega",
+            brush_cutting: "Esbrossada",
+            grazing: "Pasturatge",
+            note_establishment: "Coberta vegetal espontània o sembrada amb presència viva \
+                                 sobre el terreny (art. 42.1.a). Les amplades són una \
+                                 anotació diferent, amb un termini propi (art. 42.1.e): \
+                                 en blanc vol dir que encara no s'han mesurat.",
+            note_maintenance: "Exigible en pendents iguals o superiors al 10 % i en \
+                               bancals. El pasturatge s'anota com a tal al registre de \
+                               pasturatge i apareix aquí perquè manté aquesta coberta; per \
+                               això no es repeteix a la secció 9.1.",
+        },
+        s95: S95 {
+            title: "9.5 COBERTES INERTES DE RESTES DE PODA",
+            plot_ids: "Id. Parcel·les",
+            established_on: "Data d'establiment",
+            width: "Amplada de la coberta (m)",
+            free_canopy_width: "Amplada lliure projecció capçada (m)",
+            note_establishment: "Coberta inerta procedent de la trituració de restes de \
+                                 poda, que no es pot establir després del 15 d'abril \
+                                 (art. 43.1.a). L'art. 43 no exigeix anotar manteniment, \
+                                 per això aquesta taula no té aquestes columnes.",
+        },
+        s96: S96 {
+            title: "9.6 PASTURES COMUNALS",
+            plot_ids: "Id. de parcel·les",
+            plots: "Parcel·les",
+            performed_on: "Data",
+            performed_end_date: "Data fi",
+            activity: "Activitat de manteniment",
+            note_no_model_page: "El model imprès no dedica cap pàgina a aquesta obligació: \
+                                 l'annex IV del RD 1048/2022 exigeix anotar les dates de \
+                                 les activitats de manteniment de cada parcel·la de \
+                                 pastura comunal, en el termini d'un mes. Aquest quadern \
+                                 li dóna la numeració 9.6, que el model no té.",
+            note_invoices: "Les factures que acrediten els treballs es conserven com a \
+                            documentació, no s'anoten aquí (vegeu l'annex de \
+                            documentació).",
+        },
+    },
+    s10: S10 {
+        section_title: "10. DETERMINADES AJUDES ASSOCIADES",
+        note: "Aquesta secció no té registre propi. Les ajudes associades exigeixen la gestió \
+               sostenible d'insums d'acord amb la normativa vigent en matèria de nutrició \
+               sostenible dels sòls agraris, que aquest quadern anota a les seccions 3, 7 i 8.",
+    },
     annex: Annex {
         section_title: "DOCUMENTACIÓ A CONSERVAR",
         title: "DOCUMENTACIÓ QUE S'HA DE CONSERVAR JUNTAMENT AMB EL QUADERN",
@@ -1948,6 +2571,7 @@ static CA: Labels = Labels {
         item_plan: "Pla d'adobat de cada unitat de producció (RD 1051/2022, art. 6).",
         item_sludge: "Document d'aplicació dels llots expedit pel gestor autoritzat (RD 1051/2022, art. 5.g; annex III de l'Ordre AAA/1072/2013).",
         item_manure: "Document amb la qualitat agronòmica dels fems rebuts de tercers (RD 1051/2022, art. 13.2); no cal quan els subministra el mateix titular.",
+        item_communal_invoices: "Factures que acreditin les activitats de manteniment realitzades a les parcel·les de pastura comunal (RD 1048/2022, annex IV); les dates s'anoten al registre 9.6.",
         retention: "Els documents 1 a 6 es conserven durant almenys tres anys des de la seva \
                     emissió (art. 16.3 del RD 1311/2012). Els justificants de lliurament \
                     d'envasos buits (4) i els documents de venda de la collita (7) responen, \
@@ -1960,11 +2584,20 @@ static CA: Labels = Labels {
         no: "NO",
         cross: "X",
         manual: "Manual",
-        unit_traps: "trampes",
+        unit_traps: Plural {
+            one: "trampa",
+            other: "trampes",
+        },
         unit_traps_ha: "trampes/ha",
-        unit_diffusers: "difusors",
+        unit_diffusers: Plural {
+            one: "difusor",
+            other: "difusors",
+        },
         unit_diffusers_ha: "difusors/ha",
-        unit_units: "unitats",
+        unit_units: Plural {
+            one: "unitat",
+            other: "unitats",
+        },
         unit_units_ha: "unitats/ha",
         justification_threshold: "Superació de llindars",
         justification_monitoring: "Monitoratge",
@@ -1999,6 +2632,8 @@ static CA: Labels = Labels {
         seed_kind_processing_centre: "Tractada en un centre de condicionament",
         seed_kind_purchased_es: "Adquirida tractada a Espanya",
         seed_kind_purchased_abroad: "Adquirida tractada fora d'Espanya",
+        sowing_kind_sowing: "Sembra",
+        sowing_kind_planting: "Plantació",
         method_surface_gravity: "Superfície o gravetat",
         method_sprinkler_fixed: "Aspersió fixa",
         method_sprinkler_mobile: "Aspersió mòbil",
@@ -2036,10 +2671,34 @@ static CA: Labels = Labels {
         nutrient_macro: "Macronutrients",
         nutrient_micro: "Micronutrients",
         nutrient_heavy_metal: "Metalls pesants",
+        operation_no_tillage: "Sense llaurada",
+        operation_tillage: "Llaurada",
+        operation_levelling: "Anivellament",
+        operation_ridging: "Cavallons i taules",
+        operation_weeding: "Eixarcolada",
+        operation_mowing: "Sega",
+        operation_brush_cutting: "Esbrossada",
+        operation_drainage: "Manteniment del drenatge",
+        operation_pruning: "Poda",
+        operation_thinning: "Aclarida",
+        operation_staking: "Entutorat",
+        operation_grafting: "Empelt",
+        operation_pruning_removal: "Eliminació de restes de poda",
+        operation_green_pruning: "Poda en verd",
+        operation_rolling: "Corronat",
+        practice_extensive_grazing: "Pasturatge extensiu (P1)",
+        practice_sustainable_mowing: "Sega sostenible i illes de biodiversitat (P2)",
+        practice_flooded_biodiversity: "Espais de biodiversitat en cultius sota aigua (P5)",
+        practice_plant_cover: "Cobertes vegetals en cultius llenyosos (P6)",
+        practice_inert_cover: "Cobertes inertes de restes de poda (P7)",
+        practice_communal_pasture: "Pastures comunals (annex IV)",
         sigla_base: "AF",
         sigla_top: "AC",
         sigla_fertigation: "F",
-        phi_days: "dies",
+        phi_days: Plural {
+            one: "dia",
+            other: "dies",
+        },
         phi_until: "fins al",
     },
     sheet: SheetLabels {
@@ -2060,6 +2719,16 @@ static CA: Labels = Labels {
         tab_harvest: "5 Collita",
         tab_water_points: "2.2 Captacions",
         tab_irrigation: "8 Reg",
+        tab_grazing: "9.1 Pasturatge",
+        tab_cultural_operations: "9.2 Feines",
+        tab_sowing: "Sembra",
+        tab_covers: "9.4-9.5 Cobertes",
+        cover_type: "Tipus de cobertura",
+        sowing_kind: "Tipus",
+        widths_stated_on: "Data de mesurament d'amplades",
+        drying_date: "Data d'assecat",
+        eco_practice: "Ecorègim",
+        residue_destination: "Destinació de la resta vegetal",
         tab_fertilisation: "6 Fertilització",
         tab_plan: "7.1 Pla d'adobat",
         tab_soil: "4 Sòl",
@@ -2086,6 +2755,7 @@ static CA: Labels = Labels {
         fertilisation_type: "Tipus de fertilització",
         application_method: "Forma d'aplicació",
         sludge: "Aplicació de llots",
+        sustainable_inputs: "Gestió sostenible d'insums",
         practices: "Bones pràctiques",
         service_company: "Empresa de serveis",
         service_regfer: "Núm. REGFER",
@@ -2210,6 +2880,10 @@ mod tests {
                 ("item_analyses", a.item_analyses),
                 ("item_advice", a.item_advice),
                 ("item_sale", a.item_sale),
+                ("item_plan", a.item_plan),
+                ("item_sludge", a.item_sludge),
+                ("item_manure", a.item_manure),
+                ("item_communal_invoices", a.item_communal_invoices),
                 ("retention", a.retention),
             ] {
                 assert!(
@@ -2229,6 +2903,65 @@ mod tests {
         }
     }
 
+    /// The tiering rule's second half: a tier-1 lookup needs a `Labels`
+    /// accessor AND a bidirectional check. The compiler cannot catch a code
+    /// seeded in `module-ecoscheme` with no arm in [`Labels::operation_kind`] —
+    /// the `other => other` fallback would print `brush_cutting` on a page that
+    /// should read "Desbroce", which is exactly the failure owning the
+    /// vocabulary was meant to prevent.
+    ///
+    /// The list is the seed's, transcribed. It stays in step because a code
+    /// added there without a translation here fails this test, and a
+    /// translation added here for a code that does not exist fails it too.
+    #[test]
+    fn every_operation_kind_prints_as_prose_in_every_language() {
+        const SEEDED: [&str; 15] = [
+            "no_tillage",
+            "tillage",
+            "levelling",
+            "ridging",
+            "weeding",
+            "mowing",
+            "brush_cutting",
+            "drainage",
+            "pruning",
+            "thinning",
+            "staking",
+            "grafting",
+            "pruning_removal",
+            "green_pruning",
+            "rolling",
+        ];
+        for language in ReportLanguage::ALL {
+            let labels = language.labels();
+            for code in SEEDED {
+                let printed = labels.operation_kind(code);
+                assert_ne!(
+                    printed,
+                    code,
+                    "{code} falls through to its machine name in {}",
+                    language.code()
+                );
+                assert!(!printed.trim().is_empty());
+            }
+            // Model 9.4 prints Siega and Desbrozado as two columns where
+            // `TIPO_LABOR` has one code; the two must therefore not collapse to
+            // one word, or owning the vocabulary bought nothing.
+            assert_ne!(
+                labels.operation_kind("mowing"),
+                labels.operation_kind("brush_cutting"),
+                "the split of TIPO_LABOR 5 must survive into print in {}",
+                language.code()
+            );
+        }
+        // And unknown codes still print themselves, so a kind added upstream
+        // cannot blank a cell in a legal document.
+        assert_eq!(
+            ReportLanguage::Es.labels().operation_kind("terracing"),
+            "terracing"
+        );
+    }
+
     #[test]
     fn an_unknown_zone_code_prints_itself_rather_than_disappearing() {
         let labels = ReportLanguage::Ca.labels();
@@ -2246,6 +2979,36 @@ mod tests {
             ReportLanguage::Ca.labels().phi_phrase(21, "22/05/2026"),
             "21 dies (fins al 22/05/2026)"
         );
+    }
+
+    /// A one-day plazo de seguridad is a real MAPA value, and the register that
+    /// prints it is the artifact an inspection reads: "1 días" is not a thing
+    /// the book may say.
+    #[test]
+    fn a_one_day_phi_prints_a_singular_noun() {
+        assert_eq!(
+            ReportLanguage::Es.labels().phi_phrase(1, "02/05/2026"),
+            "1 día (hasta 02/05/2026)"
+        );
+        assert_eq!(
+            ReportLanguage::Ca.labels().phi_phrase(1, "02/05/2026"),
+            "1 dia (fins al 02/05/2026)"
+        );
+    }
+
+    /// Zero is plural in both languages ("0 días"), which is what CLDR says and
+    /// what `Intl.PluralRules` returns — the JS layer must not disagree.
+    #[test]
+    fn only_exactly_one_takes_the_singular() {
+        let es = ReportLanguage::Es.labels();
+        assert_eq!(es.value.phi_days.select(0.0), "días");
+        assert_eq!(es.value.phi_days.select(1.0), "día");
+        assert_eq!(es.value.phi_days.select(2.0), "días");
+        // A fractional intensity is plural: "1,5 trampas", never "1,5 trampa".
+        assert_eq!(es.intensity_unit("traps", 1.0), "trampa");
+        assert_eq!(es.intensity_unit("traps", 1.5), "trampas");
+        // A rate is not a counted noun and never inflects.
+        assert_eq!(es.intensity_unit("traps_ha", 1.0), "trampas/ha");
     }
 
     /// Excel refuses tab names over 31 characters; the engine truncates, but a
@@ -2269,6 +3032,11 @@ mod tests {
                 sheet.tab_analysis,
                 sheet.tab_harvest,
                 sheet.tab_water_points,
+                sheet.tab_irrigation,
+                sheet.tab_grazing,
+                sheet.tab_cultural_operations,
+                sheet.tab_sowing,
+                sheet.tab_covers,
             ] {
                 assert!(
                     name.chars().count() <= 31,

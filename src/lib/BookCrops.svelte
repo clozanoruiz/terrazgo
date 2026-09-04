@@ -5,15 +5,22 @@
   // Record book, crops tab: the season's crops per plot (model section 2.1),
   // entered by hand or proposed from the farmer's own PAC declaration. The
   // farm and season come from the shell, which owns the selectors.
-  import { formatDate, t, tCode } from "../i18n.js";
+  import TzTooltip from "./TzTooltip.svelte";
+  import { formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { sortedBy } from "./collate.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
-  import DateInput from "./DateInput.svelte";
+  import TzCheckbox from "./TzCheckbox.svelte";
+  import NumberInput from "./NumberInput.svelte";
   import SpeciesPicker from "./SpeciesPicker.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
 
   let { farmId, seasonId, seasonLabel, plots, crops, onChanged } = $props();
 
@@ -36,7 +43,6 @@
   let irrigationCode = $state("");
   let environmentCode = $state("");
   let gipCode = $state("");
-  let sownOn = $state("");
   let cropCode = $state(null);
 
   // The SIGPAC declared-crops review panel: null until the farmer asks for it.
@@ -45,6 +51,10 @@
   // stay as the backend described them, so nothing edited here can be mistaken
   // for what SIGPAC actually said.
   let proposalEdits = $state([]);
+  // Which proposal the panel under the review table is showing, by row index.
+  // Null when none is open, which is the state a fresh review starts in: the
+  // everyday case is ticking the rows and confirming without editing anything.
+  let proposalOpen = $state(null);
 
   function showCropForm(crop = null) {
     editingCropId = crop?.id ?? null;
@@ -56,7 +66,6 @@
     irrigationCode = crop?.irrigation_code ?? "";
     environmentCode = crop?.growing_environment_code ?? "";
     gipCode = crop?.gip_system_code ?? "";
-    sownOn = crop?.sown_on ?? "";
     cropCode = crop?.crop_code ?? null;
     cropFormOpen = true;
   }
@@ -66,8 +75,11 @@
     editingCropId = null;
   }
 
-  function submitCrop(event) {
-    event.preventDefault();
+  /// The row the inspector is editing, so the delete button beside the form
+  /// knows which crop it is about. Null while creating.
+  const editingCrop = $derived(crops.find((crop) => crop.id === editingCropId) ?? null);
+
+  async function submitCrop() {
     // The plot and season are absent from the edit payload on purpose: a crop
     // never moves, or it would take its treatment history with it.
     const payload = {
@@ -80,30 +92,25 @@
       irrigation_code: irrigationCode || null,
       growing_environment_code: environmentCode || null,
       gip_system_code: gipCode || null,
-      sown_on: sownOn || null,
       // Sent on edits too: the field is form state, so leaving it out would
       // detach the species from the catalogue on every unrelated correction.
       crop_code: cropCode,
     };
-    run(async () => {
-      if (editingCropId) {
-        await invoke("update_crop", { cropId: editingCropId, update: payload });
-      } else {
-        await invoke("create_crop", {
-          crop: { ...payload, plot_id: cropPlotId, season_id: seasonId },
-        });
-      }
-      notify(t("message.crop_saved", { species: payload.species_name }));
-      hideCropForm();
-      await onChanged();
-    });
+    if (editingCropId) {
+      await invoke("update_crop", { cropId: editingCropId, update: payload });
+    } else {
+      await invoke("create_crop", {
+        crop: { ...payload, plot_id: cropPlotId, season_id: seasonId },
+      });
+    }
+    hideCropForm();
+    await onChanged();
   }
 
   function deleteCrop(crop) {
     run(async () => {
       if (!(await confirmDialog(t("crop.delete_confirm", { species: cropLabel(crop) })))) return;
       await invoke("delete_crop", { cropId: crop.id });
-      notify(t("message.crop_deleted"));
       hideCropForm();
       await onChanged();
     });
@@ -128,12 +135,14 @@
         variety: "",
         areaHa: row.declared_area_ha ?? "",
       }));
+      proposalOpen = null;
     });
   }
 
   function closeProposals() {
     proposals = null;
     proposalEdits = [];
+    proposalOpen = null;
   }
 
   const acceptedCount = $derived(
@@ -178,7 +187,6 @@
             production_system_code: existing?.production_system_code ?? null,
             growing_environment_code: existing?.growing_environment_code ?? null,
             gip_system_code: existing?.gip_system_code ?? null,
-            sown_on: existing?.sown_on ?? null,
             variety: edit.variety.trim() || existing?.variety || null,
             irrigation_code: fields.irrigation_code ?? existing?.irrigation_code ?? null,
           },
@@ -192,7 +200,6 @@
             production_system_code: null,
             growing_environment_code: null,
             gip_system_code: null,
-            sown_on: null,
           },
         });
       }
@@ -239,6 +246,18 @@
       .join(", ");
   }
 
+  /// What accepting this row would do, in the farmer's words. Three phrasings
+  /// because a proposal either replaces a crop already recorded, adds a second
+  /// one to the plot, or is the plot's first.
+  function proposalAction(row) {
+    if (row.kind === "update") {
+      return t("crops.proposal_update", { name: row.existing_species_name });
+    }
+    return row.kind === "insert_secondary"
+      ? t("crops.proposal_secondary")
+      : t("crops.proposal_insert");
+  }
+
   function plotName(plotId) {
     return plots.find((p) => p.plot.id === plotId)?.plot.name ?? plotId;
   }
@@ -247,21 +266,9 @@
     return crop.variety ? `${crop.species_name} — ${crop.variety}` : crop.species_name;
   }
 
-  function cropDetail(crop) {
-    return [
-      plotName(crop.plot_id),
-      crop.area_ha ? t("crop.area_detail", { area: crop.area_ha }) : null,
-      crop.production_system_code ? tCode("production_system", crop.production_system_code) : null,
-      crop.irrigation_code ? tCode("irrigation_system", crop.irrigation_code) : null,
-      crop.growing_environment_code
-        ? tCode("growing_environment", crop.growing_environment_code)
-        : null,
-      crop.gip_system_code ? tCode("gip_system", crop.gip_system_code) : null,
-      crop.sown_on ? t("crop.sown_detail", { date: formatDate(crop.sown_on) }) : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
+  // The "·"-joined detail line these rows used to share is gone: every value
+  // is its own column, which is what lets a reader scan the plots — or the
+  // irrigation systems — down the list instead of reading six sentences.
 </script>
 
 <div class="view-head">
@@ -293,81 +300,115 @@
   </div>
 
   {#if proposals.rows.length === 0}
-    <p>{t("crops.proposal_empty")}</p>
-  {/if}
-
-  <ul class="card-list">
-    {#each proposals.rows as row, i (`${row.plot_id}-${i}`)}
-      <li class="card">
-        <div class="stack">
-          <strong>
-            {row.plot_name} —
-            {#if row.species_name}
-              {row.species_name}
-            {:else}
-              {t("crops.proposal_unresolved", { code: row.crop_code })}
-            {/if}
-          </strong>
-          <!-- The campaign rides on EVERY row: the service runs a campaign
-               behind, and a record book must never record last year's
-               declaration as this year's crop without saying so. -->
-          <span class="detail">
-            {t("crops.proposals_campaign", { campaign: row.campaign, season: seasonLabel })}
-            {#if row.declared_area_ha !== null}
-              · {t("crops.proposal_declared_area", { area: row.declared_area_ha })}
-            {/if}
-          </span>
-
-          {#if SELECTABLE.includes(row.kind)}
-            <label class="inline-field">
-              <input type="checkbox" bind:checked={proposalEdits[i].accepted} />
-              <span>
-                {#if row.kind === "update"}
-                  {t("crops.proposal_update", { name: row.existing_species_name })}
-                {:else if row.kind === "insert_secondary"}
-                  {t("crops.proposal_secondary")}
-                {:else}
-                  {t("crops.proposal_insert")}
-                {/if}
-              </span>
-            </label>
-            {#if row.kind === "update"}
-              <span class="detail">{t("crops.proposal_update_hint")}</span>
-            {/if}
-            {#if proposalEdits[i].accepted}
-              <div class="form-grid">
-                <label>
-                  <span>{t("crop.species")}</span>
-                  <SpeciesPicker
-                    bind:name={proposalEdits[i].species}
-                    bind:code={proposalEdits[i].code}
-                    plotId={row.plot_id}
-                    required
+    <p class="table-empty">{t("crops.proposal_empty")}</p>
+  {:else}
+    <!-- `rows-static`: a proposal is not a record yet, and the tick IS the
+         decision. What can be edited before accepting — the species, the
+         variety, the surface — opens BELOW in a panel for the row being
+         looked at, rather than three inline forms unfolding down the list.
+         The campaign rides on every row: the service runs a campaign behind,
+         and a record book must never record last year's declaration as this
+         year's crop without saying so. -->
+    <div class="table-wrap">
+      <table class="data-table rows-static" use:resizableColumns={"crop-proposals"}>
+        <thead>
+          <tr>
+            <th class="col-tick">{t("crops.proposals_accept")}</th>
+            <th>{t("column.plot")}</th>
+            <th>{t("column.crop")}</th>
+            <th>{t("column.campaign")}</th>
+            <th class="col-num">{t("column.area_ha")}</th>
+            <th>{t("crops.proposals_effect")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {#each proposals.rows as row, i (`${row.plot_id}-${i}`)}
+            {@const selectable = SELECTABLE.includes(row.kind)}
+            <tr class:selected={proposalOpen === i}>
+              <td class="col-tick">
+                {#if selectable}
+                  <TzCheckbox
+                    label={proposalAction(row)}
+                    labelHidden
+                    bind:checked={proposalEdits[i].accepted}
                   />
-                </label>
-                <label>
-                  <span>{t("crop.variety")}</span>
-                  <input bind:value={proposalEdits[i].variety} />
-                </label>
-                <label>
-                  <span>{t("crop.area_ha")}</span>
-                  <input type="number" min="0" step="0.0001" bind:value={proposalEdits[i].areaHa} />
-                </label>
-              </div>
-            {/if}
-          {:else if row.kind === "already_recorded"}
-            <span class="detail">
-              {t("crops.proposal_already", { name: row.existing_species_name })}
-            </span>
-          {:else}
-            <span class="detail">
-              {t(`crops.proposal_blocked_${row.blocked_reason}`)}
-            </span>
-          {/if}
+                {/if}
+              </td>
+              <td class="col-name">{row.plot_name}</td>
+              <td class="col-muted">
+                {#if selectable}
+                  <button type="button" class="row-open" onclick={() => (proposalOpen = i)}>
+                    {row.species_name ?? t("crops.proposal_unresolved", { code: row.crop_code })}
+                  </button>
+                {:else}
+                  {row.species_name ?? t("crops.proposal_unresolved", { code: row.crop_code })}
+                {/if}
+              </td>
+              <td class="col-muted">{row.campaign}</td>
+              <td class="col-muted col-num">
+                {row.declared_area_ha === null ? "" : formatNumber(row.declared_area_ha)}
+              </td>
+              <td class="col-muted">
+                {#if selectable}
+                  {proposalAction(row)}
+                {:else if row.kind === "already_recorded"}
+                  {t("crops.proposal_already", { name: row.existing_species_name })}
+                {:else}
+                  {t(`crops.proposal_blocked_${row.blocked_reason}`)}
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    </div>
+
+    {#if proposalOpen !== null && proposals.rows[proposalOpen]}
+      {@const row = proposals.rows[proposalOpen]}
+      <div class="subpanel">
+        <div class="inspector-head">
+          <span>{row.plot_name}</span>
+          <TzTooltip label={t("form.close")}>
+            {#snippet trigger(props)}
+              <button
+                {...props}
+                type="button"
+                class="inspector-close"
+                onclick={(event) => {
+                  props.onclick?.(event);
+                  proposalOpen = null;
+                }}
+                aria-label={t("form.close")}>×</button
+              >
+            {/snippet}
+          </TzTooltip>
         </div>
-      </li>
-    {/each}
-  </ul>
+        <p class="detail">
+          {t("crops.proposals_campaign", { campaign: row.campaign, season: seasonLabel })}
+        </p>
+        {#if row.kind === "update"}
+          <p class="detail">{t("crops.proposal_update_hint")}</p>
+        {/if}
+        <div class="form-grid">
+          <label>
+            <span>{t("crop.species")}</span>
+            <SpeciesPicker
+              bind:name={proposalEdits[proposalOpen].species}
+              bind:code={proposalEdits[proposalOpen].code}
+              plotId={row.plot_id}
+              required
+            />
+          </label>
+          <TextInput label={t("crop.variety")} bind:value={proposalEdits[proposalOpen].variety} />
+          <NumberInput
+            label={t("crop.area_ha")}
+            min={0}
+            bind:value={proposalEdits[proposalOpen].areaHa}
+          />
+        </div>
+      </div>
+    {/if}
+  {/if}
 
   {#if proposals.plots_without_declaration.length > 0}
     <p class="detail">
@@ -390,6 +431,7 @@
       {t("crops.proposal_unreachable", {
         reason: proposals.unreachable_reason ?? "",
         plots: proposalPlots(proposals.plots_unreachable),
+        count: proposals.plots_unreachable.length,
       })}
     </p>
   {/if}
@@ -406,78 +448,124 @@
   {/if}
 {/if}
 
-{#if cropFormOpen}
-  <form onsubmit={submitCrop}>
-    <div class="form-grid">
-      <!-- Locked while editing: a crop never changes plot (its treatment
+<TzWorkspace
+  open={cropFormOpen}
+  title={editingCropId ? cropLabel({ species_name: species, variety }) : t("crops.new")}
+  onclose={hideCropForm}
+  ondelete={editingCrop ? () => deleteCrop(editingCrop) : null}
+>
+  {#snippet list()}
+    {#if crops.length === 0}
+      <p class="table-empty">{t("crops.empty")}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table" use:resizableColumns={"crops"}>
+          <thead>
+            <tr>
+              <th>{t("column.crop")}</th>
+              <th>{t("column.plot")}</th>
+              <th class="col-num">{t("column.area_ha")}</th>
+              <th>{t("column.production_system")}</th>
+              <th>{t("column.irrigation")}</th>
+              <th>{t("column.environment")}</th>
+              <th>{t("column.gip")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each sortedCrops as crop (crop.id)}
+              <tr
+                class:selected={editingCropId === crop.id}
+                onclick={(e) => opensRow(e) && showCropForm(crop)}
+              >
+                <td class="col-name">
+                  <button type="button" class="row-open" onclick={() => showCropForm(crop)}>
+                    {cropLabel(crop)}
+                  </button>
+                </td>
+                <td class="col-muted">{plotName(crop.plot_id)}</td>
+                <td class="col-muted col-num">
+                  {crop.area_ha == null ? "" : formatNumber(crop.area_ha)}
+                </td>
+                <td class="col-muted">
+                  {crop.production_system_code
+                    ? tCode("production_system", crop.production_system_code)
+                    : ""}
+                </td>
+                <td class="col-muted">
+                  {crop.irrigation_code ? tCode("irrigation_system", crop.irrigation_code) : ""}
+                </td>
+                <td class="col-muted">
+                  {crop.growing_environment_code
+                    ? tCode("growing_environment", crop.growing_environment_code)
+                    : ""}
+                </td>
+                <td class="col-muted">
+                  {crop.gip_system_code ? tCode("gip_system", crop.gip_system_code) : ""}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+    {/if}
+  {/snippet}
+
+  {#snippet inspector(formId)}
+    <TzForm id={formId} onsubmit={submitCrop}>
+      <div class="form-grid">
+        <!-- Locked while editing: a crop never changes plot (its treatment
            history points here). Correcting one means delete + create. -->
-      <TzSelect
-        label={t("crop.plot")}
-        items={nameItems(
-          plots,
-          (p) => p.plot.name,
-          (p) => p.plot.id,
-        )}
-        required
-        disabled={editingCropId !== null}
-        bind:value={cropPlotId}
-      />
-      <label>
-        <span>{t("crop.species")}</span>
-        <SpeciesPicker bind:name={species} bind:code={cropCode} plotId={cropPlotId} required />
-      </label>
-      <label><span>{t("crop.variety")}</span><input bind:value={variety} /></label>
-      <TzSelect
-        label={t("crop.production_system")}
-        items={codeItems(productionSystems, "production_system")}
-        nullable
-        bind:value={systemCode}
-      />
-      <label>
-        <span>{t("crop.area_ha")}</span>
-        <input type="number" min="0" step="0.0001" bind:value={cropAreaHa} />
-      </label>
-      <TzSelect
-        label={t("crop.irrigation")}
-        items={codeItems(irrigationSystems, "irrigation_system")}
-        nullable
-        bind:value={irrigationCode}
-      />
-      <TzSelect
-        label={t("crop.growing_environment")}
-        items={codeItems(growingEnvironments, "growing_environment")}
-        nullable
-        bind:value={environmentCode}
-      />
-      <TzSelect
-        label={t("crop.gip_system")}
-        items={codeItems(gipSystems, "gip_system")}
-        nullable
-        bind:value={gipCode}
-      />
-      <DateInput label={t("crop.sown_on")} bind:value={sownOn} />
-    </div>
+        <TzSelect
+          label={t("crop.plot")}
+          items={nameItems(
+            plots,
+            (p) => p.plot.name,
+            (p) => p.plot.id,
+          )}
+          required
+          disabled={editingCropId !== null}
+          bind:value={cropPlotId}
+        />
+        <label>
+          <span>{t("crop.species")}</span>
+          <SpeciesPicker bind:name={species} bind:code={cropCode} plotId={cropPlotId} required />
+        </label>
+        <TextInput label={t("crop.variety")} bind:value={variety} />
+        <TzSelect
+          label={t("crop.production_system")}
+          items={codeItems(productionSystems, "production_system")}
+          nullable
+          bind:value={systemCode}
+        />
+        <NumberInput label={t("crop.area_ha")} min={0} bind:value={cropAreaHa} />
+        <TzSelect
+          label={t("crop.irrigation")}
+          items={codeItems(irrigationSystems, "irrigation_system")}
+          nullable
+          bind:value={irrigationCode}
+        />
+        <TzSelect
+          label={t("crop.growing_environment")}
+          items={codeItems(growingEnvironments, "growing_environment")}
+          nullable
+          bind:value={environmentCode}
+        />
+        <TzSelect
+          label={t("crop.gip_system")}
+          items={codeItems(gipSystems, "gip_system")}
+          nullable
+          bind:value={gipCode}
+        />
+      </div>
+    </TzForm>
+  {/snippet}
+
+  {#snippet actions(formId)}
     <div class="form-actions">
-      <button type="submit">{t("form.save")}</button>
+      <button type="submit" form={formId}>{t("form.save")}</button>
       <button type="button" class="btn-cancel" onclick={hideCropForm}>
         {t("form.cancel")}
       </button>
     </div>
-  </form>
-{/if}
-
-<ul class="card-list">
-  {#each sortedCrops as crop (crop.id)}
-    <li class="card">
-      <strong>{cropLabel(crop)}</strong>
-      <span class="detail">{cropDetail(crop)}</span>
-      <button type="button" onclick={() => showCropForm(crop)}>{t("form.edit")}</button>
-      <button type="button" class="btn-danger" onclick={() => deleteCrop(crop)}>
-        {t("form.delete")}
-      </button>
-    </li>
-  {/each}
-</ul>
-{#if crops.length === 0}
-  <p>{t("crops.empty")}</p>
-{/if}
+  {/snippet}
+</TzWorkspace>

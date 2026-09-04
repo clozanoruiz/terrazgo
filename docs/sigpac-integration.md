@@ -353,7 +353,8 @@ finalised when the module is scheduled.)
    declaration (`cultivo_declarado`) as a reviewed crop prefill — see the
    section below.
 
-5. **GPS point query** (mobile milestone): recinto under the device's position.
+5. ~~**GPS point query**~~ **SHIPPED 2026-07-23**: recinto under the device's
+   position — see "Standing on a plot" below.
 6. **Offline municipality packs** (ATOM/GPKG) — only if field usage shows the
    online cache isn't enough; the GPKG reader from step 2 already does the
    hard part.
@@ -491,6 +492,51 @@ catalogue. The narrowing degrades to the full list whenever it cannot be
 trusted — no plot, no verified boundary, or a land use nothing matches — since
 a filter that hides everything is worse than no filter. Free text stays valid;
 it simply carries no code.
+
+## Standing on a plot — GPS lookup and live tracking (shipped 2026-07-23)
+
+Build-order step 5 asks "which recinto am I standing on". The backend answer
+has existed since step 3 — `module_sigpac::client::recinto_by_point` — so the
+feature is a GPS fix substituted for a map click, plus the frontend wiring.
+
+`tauri-plugin-geolocation` (floor `2.3`, the minor whose `get_current_position`
+and `request_permissions` shapes the code targets) is **mobile-only**: it has no
+desktop implementation, so the dependency is target-gated, the builder
+registration is `#[cfg(mobile)]`, and the ACL lives in a platforms-gated
+`capabilities/mobile.json`. It injects its own Android manifest permissions
+through the manifest merger, so the generated project needs no hand-edit.
+
+Two design rules are worth keeping.
+
+**Gate the UI on the platform, never on probing a command.** The first build
+asked the plugin whether it was there by calling `check_permissions` and
+treating a rejection as absence. That lasted one field test: the plugin rejects
+with "Location services are disabled." when the device's location toggle is off,
+so a rejection does not mean absence, and the whole feature silently vanished on
+a phone with GPS switched off. The controls now gate on the `is_mobile` command
+(`cfg!(mobile)` — compile-time truth). Generally: never gate a feature on
+probing a command that can fail for reasons other than the one being tested.
+
+**Geolocation failure is not a backend error.** A denied permission or a dead
+GPS is reported locally (`map.locate_denied` / `map.locate_error` plus the raw
+reason), never through the command error boundary — a phone indoors is not a
+malfunction.
+
+Live tracking rides the same plumbing: a follow toggle streams `watch_position`
+fixes over a Tauri channel into a dot-and-accuracy marker. The accuracy circle
+is drawn as a ground-true 64-point polygon rather than a MapLibre circle layer,
+whose radius is in screen pixels and would not scale with zoom. The camera
+follows only the *first* fix — re-centring on every fix would fight the user's
+own panning. The watch stops on toggle-off and on view unmount, so GPS never
+outlives the map.
+
+MapLibre's built-in `GeolocateControl` was rejected: it uses
+`navigator.geolocation`, which is a second permission path outside the plugin
+and outside the ACL.
+
+The button that runs the lookup sits in the map's SIGPAC panel, so it appears
+only for Spanish farms — it answers a Spanish question. The follow toggle is in
+the map toolbar instead, because a position on a map is provider-agnostic.
 
 ## Attribution & terms checklist
 

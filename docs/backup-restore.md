@@ -12,10 +12,13 @@ a lost or broken device, so back up regularly and keep copies off the device
 | macOS | `~/Library/Application Support/org.terrazgo.app/terrazgo.db` |
 | Windows | `%APPDATA%\org.terrazgo.app\terrazgo.db` |
 
-While the app runs, `terrazgo.db-wal` and `terrazgo.db-shm` sidecar files may
-exist next to it. **Never copy the live file by hand while the app is running**
-— the copy can be torn or missing recent writes. Use the in-app export, which
-takes a consistent snapshot (`VACUUM INTO`) and verifies it.
+While the app runs, `terrazgo.db-wal` and `terrazgo.db-shm` sidecar files exist
+next to it; closing the app cleanly folds them back into the database and
+removes them, so a stopped Terrazgo leaves one file. (After a crash or a forced
+kill they survive, and the next start recovers from them — that is what they are
+for.) **Never copy the live file by hand while the app is running** — the copy
+can be torn or missing recent writes. Use the in-app export, which takes a
+consistent snapshot (`VACUUM INTO`) and verifies it.
 
 ## Exporting a backup (in-app)
 

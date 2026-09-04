@@ -26,6 +26,33 @@
 //!   owning module's assembly as ordinary inputs rather than sitting in the
 //!   `.typ` file. One template then serves every language it is printed in.
 //!   See `module_cue::report::labels`.
+//!
+//! A template, its data and the zero-warnings assertion, end to end:
+//!
+//! ```
+//! use serde_json::json;
+//! use terrazgo_report::render_pdf;
+//!
+//! let template = r#"
+//! #set text(font: "Liberation Sans")
+//! #let data = sys.inputs
+//! = #data.title
+//! Superficie: #data.area_ha ha
+//! "#;
+//!
+//! let rendered = render_pdf(template, &json!({
+//!     "title": "Cuaderno de explotación",
+//!     "area_ha": 4.0,
+//! }))
+//! .unwrap();
+//!
+//! // A real PDF, and no warnings. The second half is the part that matters:
+//! // an unknown font family is only a warning, and Typst then silently falls
+//! // back — so a template's tests assert this list is empty or the document
+//! // ships in the wrong typeface.
+//! assert!(rendered.bytes.starts_with(b"%PDF-"));
+//! assert!(rendered.warnings.is_empty(), "{:?}", rendered.warnings);
+//! ```
 
 mod error;
 mod sheet;

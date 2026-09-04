@@ -8,31 +8,56 @@
 //! phytosanitary problem codes, …). This module vendors a snapshot of the
 //! catalogue CSVs the app has a named consumer for in the binary
 //! (offline-first: the app must resolve codes from first run, no network) and
-//! imports them with [`ensure_catalogues`] at startup.
+//! imports them with [`ensure_catalogues`] on the first launch of each app
+//! version.
 //!
 //! Design (docs/siex-export.md → "Storage design"):
 //!   * Generic tables, provider columns verbatim in `attrs` JSON — promote a
 //!     catalogue to a typed table only when a real query needs its attributes.
 //!   * **Upsert only, never delete.** Providers retire codes by baja date
 //!     instead of removing them; a code on an old record must keep resolving.
+//!     A row that vanishes from the provider's file unexplained is marked
+//!     `absent_since` and leaves the pickers, but is still resolvable.
 //!   * Not in `record_change`: each device imports its own copy.
-//!   * A vendored snapshot refresh rides an app release; an in-app refresh
-//!     over the network is a possible later addition, same parser and upsert.
+//!   * A vendored snapshot refresh rides an app release; users can also fetch
+//!     the provider's current copy with [`refresh_catalogue`], through the
+//!     same parser and the same upsert. An adoption outlives every restart and
+//!     is replaced by the next app version's own curated snapshot.
 //!
 //! The provider publishes far more catalogues than we vendor; which ones we
 //! carry, and how to enumerate the rest, is docs/maintenance.md §1.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::date::now_utc_iso;
+use crate::date::{now_utc_iso, today_utc};
 use crate::error::{CoreError, Result};
 
 /// `catalogue.source` tag for the FEGA SIEX catalogues.
 pub const SOURCE_SIEX: &str = "siex";
+
+/// The app version, stamped on the rows a vendored import writes so startup can
+/// tell its own snapshot from a copy the user fetched. This crate inherits
+/// `version.workspace = true`, so the workspace version — which is the app's —
+/// arrives here with nothing to plumb through from the shell.
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Where the bytes an import is adopting came from.
+///
+/// The two origins are trusted for different things, which is why this is a
+/// parameter rather than a flag on the caller's side: a vendored file is the
+/// snapshot this release was tested against and stamps
+/// `catalogue.imported_by_version`; a fetched one is the provider's current
+/// list and must not, or the next launch would treat the user's refresh as
+/// this version's own work and never restore the curated set.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Origin {
+    Vendored,
+    Fetched,
+}
 
 /// One vendored provider CSV, embedded at compile time.
 ///
@@ -94,7 +119,8 @@ struct Vendored {
 }
 
 /// The vendored SIEX snapshot (treatment catalogues fetched 2026-07-14; the
-/// rest 2026-08-05, per `GET https://www11.fega.es/bdcsixwsp/catalogos/{id}`).
+/// rest 2026-08-05, re-checked in full 2026-09-04 — only `PRODUCTOS` had moved,
+/// per `GET https://www11.fega.es/bdcsixwsp/catalogos/{id}`).
 ///
 /// Selection rule: **a catalogue is vendored when a named part of the app
 /// reads it** — the record book's coded fields, the declared-crops prefill,
@@ -107,7 +133,7 @@ struct Vendored {
 ///
 /// Refreshing = replacing the files and re-releasing; the importer detects it
 /// by content digest (see [`snapshot_digest`]).
-const VENDORED: [Vendored; 48] = [
+const VENDORED: [Vendored; 49] = [
     Vendored {
         id: "AUTORIZACION_EXCP",
         csv: include_bytes!("../catalogues/AUTORIZACION_EXCP.csv"),
@@ -313,6 +339,31 @@ const VENDORED: [Vendored; 48] = [
             "Fecha de alta",
             "Fecha de modificación",
             "Fecha de baja",
+        ],
+    },
+    Vendored {
+        // The animals a grazing record names (model 9.1's "Especie animal que
+        // pasta"; SIEX `Pastoreo.Animales[].Especie`), read by
+        // module-ecoscheme's species picker.
+        //
+        // Carries NO lifecycle columns at all — no alta, modificación or baja —
+        // so every row is permanently active, the `TIPO_MAQUINA_UNE` precedent.
+        // `Código familia` groups the 198 species into families (bóvidos,
+        // porcino, peces…); it rides in `attrs` rather than becoming the code,
+        // because the record names a species.
+        //
+        // `RAZAS` is deliberately NOT vendored beside it: neither model 9.1 nor
+        // `Pastoreo.Animales[]` asks for a breed (docs/maintenance.md §1).
+        id: "ESPECIE_ANIMAL",
+        csv: include_bytes!("../catalogues/ESPECIE_ANIMAL.csv"),
+        code_header: "Código SIEX",
+        label_header: "Especies animales",
+        identity_attrs: &[],
+        headers: &[
+            "Código SIEX",
+            "Especies animales",
+            "Código familia",
+            "Familia",
         ],
     },
     Vendored {
@@ -875,29 +926,50 @@ pub struct CatalogueCode {
     pub retired_on: Option<String>,
 }
 
-/// Import every vendored catalogue that is missing or older than the vendored
-/// snapshot. Idempotent and upsert-only — over-calling is sanctioned (it runs
-/// at every startup), and rows never disappear, whatever the snapshot says.
+/// Import the vendored snapshot on the first run of each app version.
+/// Idempotent and upsert-only — over-calling is sanctioned (it runs at every
+/// startup), and rows never disappear, whatever the snapshot says.
+///
+/// The question asked here is "did **this app version** write this catalogue
+/// data?", not "have these bytes changed?", and the difference is what makes
+/// [`refresh_catalogue`] worth having: a user's fetched copy would otherwise be
+/// re-imported over at the very next launch, since its bytes are by definition
+/// not the vendored ones.
+///
+/// A version rather than a digest because the vendored files are curated as a
+/// SET — the SIEX mapping bijections and the catalogue suites are green against
+/// one exact snapshot — so a device must never end up running one refreshed
+/// file mixed with the rest of an older release's set. Compared by equality,
+/// not order: a downgrade re-imports too, which is right, because the older
+/// binary's curated set is the correct set for the older binary.
 pub fn ensure_catalogues(conn: &mut Connection) -> Result<()> {
     let tx = conn.transaction()?;
     for vendored in &VENDORED {
-        let digest = snapshot_digest(vendored.csv);
-        let stored_digest: Option<Option<String>> = tx
+        let imported_by: Option<Option<String>> = tx
             .query_row(
-                "SELECT source_digest FROM catalogue WHERE id = ?1",
+                "SELECT imported_by_version FROM catalogue WHERE id = ?1",
                 [vendored.id],
                 |r| r.get(0),
             )
             .optional()?;
-        // Fast path: the stored copy came from these exact bytes. Hashing
-        // ~1.1 MB costs a millisecond or two; parsing it costs tens, and this
-        // runs at every startup on every device.
-        if stored_digest.as_ref().and_then(Option::as_deref) == Some(digest.as_str()) {
+        // Fast path: this version already put its own snapshot here. Reading a
+        // short string beats hashing ~1.6 MB of embedded CSV, and this runs at
+        // every startup on every device.
+        if imported_by.as_ref().and_then(Option::as_deref) == Some(APP_VERSION) {
             continue;
         }
-        // Only now is parsing worth it.
+        // Only now is parsing — and hashing — worth it.
+        let already_imported = imported_by.is_some();
+        let digest = snapshot_digest(vendored.csv);
         let parsed = parse_vendored(vendored)?;
-        reconcile(&tx, vendored, &parsed, &digest, stored_digest.is_some())?;
+        reconcile(
+            &tx,
+            vendored,
+            &parsed,
+            &digest,
+            already_imported,
+            Origin::Vendored,
+        )?;
     }
     tx.commit()?;
     Ok(())
@@ -968,6 +1040,11 @@ pub enum RefreshOutcome {
     Updated {
         added: usize,
         corrected: usize,
+        /// Stored codes this file no longer carries, so they have left the
+        /// pickers (they still resolve on old records). Reported because it is
+        /// the one effect of a refresh a farmer would otherwise discover by
+        /// missing a choice that used to be there.
+        withdrawn: usize,
         /// Columns the file carries that this app version does not read. Safe
         /// (they ride along in `attrs`, unread) but worth saying: they are how
         /// a provider announces a field a future release may want.
@@ -1031,6 +1108,15 @@ impl RefreshReport {
 /// through exactly the code path the vendored files take. Network I/O is the
 /// caller's — core never fetches anything (docs/architecture.md → offline
 /// first).
+///
+/// **What an adoption is worth over time.** It survives every restart, because
+/// [`ensure_catalogues`] skips on the app version and this writes no version
+/// stamp. It does *not* survive an app update: the next version's first run
+/// re-imports its own curated snapshot over the top, which is the point — the
+/// vendored files are tested as a set. What an update restores is every label,
+/// attribute and lifecycle date; codes the refresh *added* stay, since the
+/// import cannot delete without breaking the promise that a code already
+/// written onto a record keeps resolving.
 pub fn refresh_catalogue(conn: &mut Connection, id: &str, bytes: &[u8]) -> Result<RefreshReport> {
     let vendored = VENDORED
         .iter()
@@ -1090,13 +1176,21 @@ pub fn refresh_catalogue(conn: &mut Connection, id: &str, bytes: &[u8]) -> Resul
     }
 
     let tx = conn.transaction()?;
-    let counts = reconcile(&tx, vendored, &parsed, &digest, stored_digest.is_some())?;
+    let counts = reconcile(
+        &tx,
+        vendored,
+        &parsed,
+        &digest,
+        stored_digest.is_some(),
+        Origin::Fetched,
+    )?;
     tx.commit()?;
     Ok(RefreshReport {
         id: vendored.id.to_string(),
         outcome: RefreshOutcome::Updated {
             added: counts.added,
             corrected: counts.corrected,
+            withdrawn: counts.withdrawn,
             extra_columns: parsed.extra_columns,
         },
     })
@@ -1125,14 +1219,17 @@ fn first_control_character(rows: &[ParsedCode]) -> Option<String> {
     None
 }
 
-/// Content fingerprint of one vendored CSV — FNV-1a 64, hand-rolled because
-/// this needs a change detector, not a cryptographic hash, and the alternative
-/// was a dependency.
+/// Content fingerprint of the bytes an import adopted — FNV-1a 64, hand-rolled
+/// because this needs a change detector, not a cryptographic hash, and the
+/// alternative was a dependency.
 ///
-/// It replaces an earlier fast path that compared the newest lifecycle date in
-/// the file, which was wrong in both directions: it had to parse every
-/// catalogue before it could decide to skip it, and it silently skipped a
-/// refreshed snapshot that corrected a label without moving any date.
+/// It answers one question, for [`refresh_catalogue`] alone: are these the
+/// bytes already stored here, so that re-offering them costs nothing? Bytes
+/// rather than the file's newest lifecycle date, because a provider correcting
+/// a label without moving any date is a real refresh, and several catalogues
+/// ship no dates at all. Startup does not consult it — which snapshot a launch
+/// should import is a question about the app version, not about bytes
+/// (see [`ensure_catalogues`]).
 fn snapshot_digest(bytes: &[u8]) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for &byte in bytes {
@@ -1166,12 +1263,57 @@ pub fn vendored_key_headers(catalogue_id: &str) -> Option<(&'static str, &'stati
         .map(|v| (v.code_header, v.label_header))
 }
 
-/// The non-retired codes of one catalogue, in file order (providers publish
-/// their lists in a deliberate order) — what a UI picker offers.
+/// One offer in a catalogue-backed picker: the code the row stores, and the
+/// name the farmer reads. The modules' own catalogue helpers re-export this
+/// rather than defining it again.
+#[derive(Debug, Clone, Serialize)]
+pub struct CataloguePick {
+    pub code: String,
+    pub name: String,
+}
+
+/// Which catalogue names the classes of building a holding can hold. Core's
+/// first per-country catalogue map, and it stays country-neutral the way the
+/// storage layer does: the mechanism is generic and the Spanish-ness is data.
+pub fn premises_class_catalogue(country_code: &str) -> Option<&'static str> {
+    match country_code {
+        "es" => Some("EDIFICACIONES_INSTALACIONES"),
+        _ => None,
+    }
+}
+
+/// The classes a `premises` row can name (FEGA `EDIFICACIONES_INSTALACIONES`,
+/// 109 entries). Empty for a country with no coded list, which is what a picker
+/// with nothing to offer means — the column is nullable and the class optional.
+///
+/// Anexo V marks this class obligatory in the REA "in the event of a treatment
+/// in the buildings and installations that entails their identification for the
+/// CUE" — this app's exact case, models 3.4 and 3.5.
+pub fn premises_classes(conn: &Connection, country_code: &str) -> Result<Vec<CataloguePick>> {
+    let Some(catalogue_id) = premises_class_catalogue(country_code) else {
+        return Ok(Vec::new());
+    };
+    Ok(active_codes(conn, catalogue_id)?
+        .into_iter()
+        .map(|row| CataloguePick {
+            code: row.code,
+            name: row.label,
+        })
+        .collect())
+}
+
+/// The offerable codes of one catalogue, in file order (providers publish their
+/// lists in a deliberate order) — what a UI picker offers.
+///
+/// Two ways a code stops being offered, deliberately separate because they are
+/// different claims: `retired_on` is the authority's own baja date, and
+/// `absent_since` is ours, meaning the provider's current file no longer
+/// carries the row at all. Neither removes it — [`find_code`] resolves both, so
+/// a record that cites one still displays.
 pub fn active_codes(conn: &Connection, catalogue_id: &str) -> Result<Vec<CatalogueCode>> {
     codes_where(
         conn,
-        "catalogue_id = ?1 AND retired_on IS NULL",
+        "catalogue_id = ?1 AND retired_on IS NULL AND absent_since IS NULL",
         params![catalogue_id],
     )
 }
@@ -1441,6 +1583,10 @@ pub struct ReconcileCounts {
     pub added: usize,
     /// Stored codes whose label, attributes or lifecycle dates moved.
     pub corrected: usize,
+    /// Stored codes the provider's current file no longer carries: kept and
+    /// still resolvable, but no longer offered. Only a fetched file can do
+    /// this — see [`Origin`].
+    pub withdrawn: usize,
 }
 
 /// Upsert one catalogue: update drifted rows in place (keeping their ids —
@@ -1456,17 +1602,29 @@ fn reconcile(
     parsed: &ParsedCatalogue,
     digest: &str,
     already_imported: bool,
+    origin: Origin,
 ) -> Result<ReconcileCounts> {
     let now = now_utc_iso();
+    // Only a vendored import claims the version stamp. A fetched one leaves
+    // whatever is there untouched — including NULL, which correctly tells the
+    // next startup that this version's own snapshot has never been imported
+    // here.
+    let stamp = (origin == Origin::Vendored).then_some(APP_VERSION);
     if already_imported {
-        tx.execute(
-            "UPDATE catalogue SET source = ?2, source_updated_at = ?3, source_digest = ?4, imported_at = ?5 WHERE id = ?1",
-            params![vendored.id, SOURCE_SIEX, parsed.newest_date, digest, now],
-        )?;
+        match stamp {
+            Some(version) => tx.execute(
+                "UPDATE catalogue SET source = ?2, source_updated_at = ?3, source_digest = ?4, imported_at = ?5, imported_by_version = ?6 WHERE id = ?1",
+                params![vendored.id, SOURCE_SIEX, parsed.newest_date, digest, now, version],
+            )?,
+            None => tx.execute(
+                "UPDATE catalogue SET source = ?2, source_updated_at = ?3, source_digest = ?4, imported_at = ?5 WHERE id = ?1",
+                params![vendored.id, SOURCE_SIEX, parsed.newest_date, digest, now],
+            )?,
+        };
     } else {
         tx.execute(
-            "INSERT INTO catalogue (id, source, source_updated_at, source_digest, imported_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![vendored.id, SOURCE_SIEX, parsed.newest_date, digest, now],
+            "INSERT INTO catalogue (id, source, source_updated_at, source_digest, imported_at, imported_by_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![vendored.id, SOURCE_SIEX, parsed.newest_date, digest, now, stamp],
         )?;
     }
 
@@ -1479,11 +1637,12 @@ fn reconcile(
         added_on: Option<String>,
         modified_on: Option<String>,
         retired_on: Option<String>,
+        absent_since: Option<String>,
     }
     let mut existing: HashMap<(String, Vec<String>), DbRow> = HashMap::new();
     {
         let mut stmt = tx.prepare(
-            "SELECT id, code, label, attrs, added_on, modified_on, retired_on
+            "SELECT id, code, label, attrs, added_on, modified_on, retired_on, absent_since
              FROM catalogue_code WHERE catalogue_id = ?1",
         )?;
         let raw = stmt
@@ -1496,10 +1655,11 @@ fn reconcile(
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, Option<String>>(5)?,
                     r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (id, code, label, attrs, added_on, modified_on, retired_on) in raw {
+        for (id, code, label, attrs, added_on, modified_on, retired_on, absent_since) in raw {
             let attrs: Option<Value> = attrs.as_deref().map(serde_json::from_str).transpose()?;
             let identity = vendored
                 .identity_attrs
@@ -1522,6 +1682,7 @@ fn reconcile(
                     added_on,
                     modified_on,
                     retired_on,
+                    absent_since,
                 },
             );
         }
@@ -1531,20 +1692,30 @@ fn reconcile(
         "INSERT INTO catalogue_code (catalogue_id, code, label, attrs, added_on, modified_on, retired_on)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
     )?;
+    // A row the file carries is a row the provider still publishes, so this
+    // clears `absent_since` as well as writing the provider's own fields —
+    // whichever origin the file came from, since presence is presence.
     let mut update = tx.prepare(
-        "UPDATE catalogue_code SET label = ?2, attrs = ?3, added_on = ?4, modified_on = ?5, retired_on = ?6
+        "UPDATE catalogue_code SET label = ?2, attrs = ?3, added_on = ?4, modified_on = ?5, retired_on = ?6, absent_since = NULL
          WHERE id = ?1",
     )?;
     let mut counts = ReconcileCounts::default();
+    // Identities the file carried, so what is left of `existing` afterwards is
+    // exactly what it did not. Tracked separately rather than by draining
+    // `existing`, so a file that repeats one identity still collapses onto the
+    // single stored row instead of inserting a duplicate.
+    let mut seen: HashSet<(String, Vec<String>)> = HashSet::with_capacity(parsed.rows.len());
     for row in &parsed.rows {
         let attrs_text = row.attrs.as_ref().map(serde_json::to_string).transpose()?;
-        match existing.get(&(row.code.clone(), row.identity.clone())) {
+        let key = (row.code.clone(), row.identity.clone());
+        match existing.get(&key) {
             Some(db)
                 if db.label == row.label
                     && db.attrs == row.attrs
                     && db.added_on == row.added_on
                     && db.modified_on == row.modified_on
-                    && db.retired_on == row.retired_on => {}
+                    && db.retired_on == row.retired_on
+                    && db.absent_since.is_none() => {}
             Some(db) => {
                 update.execute(params![
                     db.id,
@@ -1567,6 +1738,28 @@ fn reconcile(
                     row.retired_on
                 ])?;
                 counts.added += 1;
+            }
+        }
+        seen.insert(key);
+    }
+
+    // Rows the file did not carry. Only a FETCHED file licenses the inference:
+    // it is the provider's current list, so a row missing from it is genuinely
+    // no longer published. A vendored file proves nothing of the sort — a code
+    // can be missing from it merely by being newer than the release — and
+    // inferring there would hide every code a refresh had added, at the next
+    // app update.
+    if origin == Origin::Fetched {
+        let today = today_utc();
+        let mut withdraw =
+            tx.prepare("UPDATE catalogue_code SET absent_since = ?2 WHERE id = ?1")?;
+        for (key, db) in &existing {
+            // Keep the FIRST date we saw it gone: it records when the row
+            // disappeared, and re-stamping it would also report a change on
+            // every later refresh to a row that did not change.
+            if db.absent_since.is_none() && !seen.contains(key) {
+                withdraw.execute(params![db.id, today])?;
+                counts.withdrawn += 1;
             }
         }
     }

@@ -26,13 +26,23 @@ tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 # Opens the content:// URIs those dialogs return on Android (user_files.rs).
 tauri-plugin-fs = { workspace = true }
+# Hands a registry URL to the platform browser (external_links.rs). Rust-side
+# only: the webview names a link by id, so it needs no opener permission.
+tauri-plugin-opener = { workspace = true }
+# OS name + version for the About panel's technical details (commands/app.rs).
+os_info = { workspace = true }
 # `demo` is enabled unconditionally because cargo features cannot be
 # debug-profile-conditional; the seed command itself refuses in release builds.
 module-cue = { workspace = true, features = ["demo"] }
 module-fertilisation = { workspace = true }
+# The eco-scheme registers (RD 1048/2022, model section 9).
+module-ecoscheme = { workspace = true }
 # The printable/exportable record book. A consumer crate above the modules: the
 # shell asks it for a document, it reads core and the modules to build one.
 terrazgo-recordbook = { workspace = true }
+# The SIEX descriptor export: the second top-layer consumer, dormant but kept
+# compiling and schema-validated (docs/siex-export.md).
+terrazgo-siex = { workspace = true }
 # SIGPAC parcel lookups (P3, 2026-07-08); network rides terrazgo-geo's fetch.
 module-sigpac = { workspace = true }
 terrazgo-core = { workspace = true }
@@ -54,3 +64,9 @@ anyhow = { workspace = true }
 # so desktop builds compile without it (lib.rs gates the init on `mobile`).
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri-plugin-geolocation = { workspace = true }
+
+# The RAII temp-path guard the shutdown test needs (it also sweeps the WAL
+# sidecars, which is exactly what that test asserts about). Dev-only, and it
+# depends on terrazgo-core alone.
+[dev-dependencies]
+terrazgo-testkit = { workspace = true }

@@ -11,13 +11,19 @@ use crate::error::Result;
 use rusqlite::Connection;
 use rusqlite_migration::{M, Migrations};
 use std::path::Path;
+use terrazgo_core::db::Database;
 
 /// Default ceiling for cached tile payload bytes — the knob
 /// `enforce_tile_cache_cap` enforces. 512 MiB holds full-depth orthophoto for
-/// a farm plus generous base-map browsing; revisit at the mobile milestone,
-/// where device storage is the real constraint. Users override it via the
-/// settings file (`tile_cache_max_bytes`); an unset setting follows this
-/// default, which is why the constant stays here and not in the settings.
+/// a farm plus generous base-map browsing. Users override it via the settings
+/// file (`tile_cache_max_bytes`); an unset setting follows this default, which
+/// is why the constant stays here and not in the settings.
+///
+/// Reviewed on 2026-08-26 against device storage, which is what the value was
+/// held open for, and kept at 512 MiB: it is a ceiling rather than a
+/// reservation — a phone only ever holds the tiles it actually browsed — and
+/// the cap is a user setting on every platform, so a device that cannot spare
+/// the space says so itself.
 pub const TILE_CACHE_MAX_BYTES: i64 = 512 * 1024 * 1024;
 
 /// Smallest accepted tile-cache cap. Below this the map cycles through
@@ -50,16 +56,16 @@ fn migrations() -> Migrations<'static> {
 /// the guard is recreation: if the cache fails to open, migrate, or match
 /// the current schema, delete the file (and WAL sidecars) and start fresh.
 /// The cost is a cold cache, nothing else.
-pub fn open_cache(path: &Path) -> Result<Connection> {
+pub fn open_cache(path: &Path) -> Result<Database> {
     match try_open(path) {
-        Ok(conn) => Ok(conn),
+        Ok(conn) => Ok(Database::new(conn)?),
         Err(_) => {
             for suffix in ["", "-wal", "-shm"] {
                 let mut file = path.as_os_str().to_owned();
                 file.push(suffix);
                 let _ = std::fs::remove_file(std::path::Path::new(&file));
             }
-            try_open(path)
+            try_open(path).and_then(|conn| Ok(Database::new(conn)?))
         }
     }
 }
@@ -74,14 +80,15 @@ fn try_open(path: &Path) -> Result<Connection> {
 }
 
 /// In-memory cache database for tests.
-pub fn open_cache_in_memory() -> Result<Connection> {
+pub fn open_cache_in_memory() -> Result<Database> {
     let mut conn = Connection::open_in_memory()?;
     apply_pragmas_and_migrate(&mut conn)?;
-    Ok(conn)
+    Ok(Database::new(conn)?)
 }
 
 fn apply_pragmas_and_migrate(conn: &mut Connection) -> Result<()> {
     conn.pragma_update(None, "journal_mode", "wal")?;
+    terrazgo_core::db::harden(conn)?;
     migrations().to_latest(conn)?;
     Ok(())
 }
@@ -149,13 +156,15 @@ mod tests {
 
     #[test]
     fn cap_evicts_least_recently_used_first_and_only_past_the_cap() {
-        let conn = open_cache_in_memory().unwrap();
-        seed_tile(&conn, "pnoa", 10, 100, "2026-07-01T00:00:00Z"); // oldest
-        seed_tile(&conn, "pnoa", 11, 100, "2026-07-05T00:00:00Z");
-        seed_tile(&conn, "pnoa", 12, 100, "2026-07-10T00:00:00Z"); // newest
+        let cache = open_cache_in_memory().unwrap();
+        let guard = cache.lock().unwrap();
+        let conn = guard.conn().unwrap();
+        seed_tile(conn, "pnoa", 10, 100, "2026-07-01T00:00:00Z"); // oldest
+        seed_tile(conn, "pnoa", 11, 100, "2026-07-05T00:00:00Z");
+        seed_tile(conn, "pnoa", 12, 100, "2026-07-10T00:00:00Z"); // newest
 
         // 250-byte cap: the two newest (200 bytes) fit; the oldest crosses it.
-        assert_eq!(enforce_tile_cache_cap(&conn, 250).unwrap(), 1);
+        assert_eq!(enforce_tile_cache_cap(conn, 250).unwrap(), 1);
         let zooms: Vec<u8> = conn
             .prepare("SELECT z FROM tile ORDER BY z")
             .unwrap()
@@ -166,14 +175,16 @@ mod tests {
         assert_eq!(zooms, vec![11, 12], "oldest-used tile evicted first");
 
         // Under the cap: a no-op.
-        assert_eq!(enforce_tile_cache_cap(&conn, 250).unwrap(), 0);
+        assert_eq!(enforce_tile_cache_cap(conn, 250).unwrap(), 0);
     }
 
     #[test]
     fn clear_tile_cache_empties_tiles_and_keeps_resources() {
-        let conn = open_cache_in_memory().unwrap();
-        seed_tile(&conn, "pnoa", 10, 100, "2026-07-01T00:00:00Z");
-        seed_tile(&conn, "pnoa", 11, 100, "2026-07-05T00:00:00Z");
+        let cache = open_cache_in_memory().unwrap();
+        let guard = cache.lock().unwrap();
+        let conn = guard.conn().unwrap();
+        seed_tile(conn, "pnoa", 10, 100, "2026-07-01T00:00:00Z");
+        seed_tile(conn, "pnoa", 11, 100, "2026-07-05T00:00:00Z");
         conn.execute(
             "INSERT INTO resource (key, data, content_type, fetched_at)
              VALUES ('sigpac/campaigns', x'FF', 'application/json', '2026-07-11T00:00:00Z')",
@@ -181,7 +192,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(clear_tile_cache(&conn).unwrap(), 2);
+        assert_eq!(clear_tile_cache(conn).unwrap(), 2);
         let tiles: i64 = conn
             .query_row("SELECT COUNT(*) FROM tile", [], |r| r.get(0))
             .unwrap();
@@ -192,7 +203,7 @@ mod tests {
         assert_eq!(resources, 1, "resource rows must survive a tile clear");
 
         // Idempotent on an already-empty cache.
-        assert_eq!(clear_tile_cache(&conn).unwrap(), 0);
+        assert_eq!(clear_tile_cache(conn).unwrap(), 0);
     }
 
     #[test]
@@ -205,6 +216,42 @@ mod tests {
         ));
         assert!(validate_tile_cache_cap(0).is_err());
         assert!(validate_tile_cache_cap(-1).is_err());
+    }
+
+    #[test]
+    fn closing_the_cache_deletes_its_wal_sidecars() {
+        use terrazgo_testkit::files::TempFile;
+
+        let file = TempFile::reserve("geo-cache-close.db");
+        let cache = open_cache(file.path()).unwrap();
+        {
+            let guard = cache.lock().unwrap();
+            seed_tile(
+                guard.conn().unwrap(),
+                "pnoa",
+                13,
+                100,
+                "2026-07-01T00:00:00Z",
+            );
+        }
+
+        let wal = {
+            let mut p = file.path().as_os_str().to_owned();
+            p.push("-wal");
+            std::path::PathBuf::from(p)
+        };
+        let shm = {
+            let mut p = file.path().as_os_str().to_owned();
+            p.push("-shm");
+            std::path::PathBuf::from(p)
+        };
+        assert!(wal.exists() && shm.exists());
+
+        // The cache is derived data, but its sidecars are still files on the
+        // farmer's disk — the shutdown hook closes this one too.
+        cache.close().unwrap();
+        assert!(!wal.exists());
+        assert!(!shm.exists());
     }
 
     #[test]
@@ -233,15 +280,20 @@ mod tests {
 
         // open_cache detects the shape mismatch, recreates, and the fresh
         // cache has the current schema (probe column present, usable).
-        let conn = open_cache(&path).unwrap();
-        conn.execute(
-            "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
+        let cache = open_cache(&path).unwrap();
+        let guard = cache.lock().unwrap();
+        guard
+            .conn()
+            .unwrap()
+            .execute(
+                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
              VALUES ('pnoa', 13, 1, 1, x'FF', 'image/jpeg',
                      '2026-07-11T00:00:00Z', '2026-07-11T00:00:00Z')",
-            [],
-        )
-        .unwrap();
-        drop(conn);
+                [],
+            )
+            .unwrap();
+        drop(guard);
+        cache.close().unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

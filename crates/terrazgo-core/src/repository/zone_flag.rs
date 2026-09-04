@@ -87,17 +87,67 @@ pub fn replace_zone_flags(
     Ok(stored)
 }
 
-/// Active flags of one farm's active plots, newest campaign first — one call
-/// feeds the plot cards' zone chips and the alert engine's candidates.
+/// Where a plot **currently stands** for each zone kind: one row per (plot,
+/// zone type), the latest campaign that checked it.
+///
+/// **The reduction is the repository's job, and it was not always.** This table
+/// appends across campaigns by design, so it grows by (plots × zone kinds)
+/// every year while the question every reader asks — "is this plot in a nitrate
+/// zone?" — has an answer of fixed size. All three readers were reducing it
+/// themselves, twice in JavaScript and once in Rust with a correlated
+/// `MAX(campaign)` per row, which is quadratic in campaigns. One rule, stated
+/// once, is also the only way the chip on a plot card and the alert on the same
+/// plot cannot disagree.
+///
+/// A plot last checked in an old campaign keeps its standing: the latest
+/// campaign is resolved **per (plot, zone type)**, never as one date for the
+/// holding, or a plot nobody re-verified would silently lose its chip.
+///
+/// Within one campaign several sources may have flagged the same pair.
+/// `'inside'` wins, which is what the alert engine already did on its own — a
+/// provider saying the plot IS in the zone is the answer that carries a duty.
 pub fn list_zone_flags_for_farm(conn: &Connection, farm_id: &str) -> Result<Vec<ZoneFlag>> {
     let mut stmt = conn.prepare(
-        "SELECT * FROM plot_zone_flag
-         WHERE deleted_at IS NULL
-           AND plot_id IN (SELECT id FROM plot WHERE farm_id = ?1 AND deleted_at IS NULL)
+        "SELECT * FROM (
+             SELECT f.*, ROW_NUMBER() OVER (
+                      PARTITION BY f.plot_id, f.zone_type_code
+                      ORDER BY f.campaign DESC, (f.status = 'inside') DESC, f.id DESC
+                    ) AS standing
+             FROM plot_zone_flag f
+             JOIN plot p ON p.id = f.plot_id AND p.deleted_at IS NULL
+             WHERE f.deleted_at IS NULL AND p.farm_id = ?1
+         )
+         WHERE standing = 1
          ORDER BY campaign DESC, plot_id, zone_type_code",
     )?;
     let flags = stmt
         .query_map([farm_id], map_zone_flag)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(flags)
+}
+
+/// [`list_zone_flags_for_farm`]'s reduction across every holding — the alert
+/// engine, whose candidates are not farm-scoped.
+///
+/// Spelled out rather than sharing a string with the farm query: the two differ
+/// by one `WHERE` clause, and a query built by concatenation is one no reader
+/// can check against `EXPLAIN QUERY PLAN` without reassembling it first.
+pub fn list_latest_zone_flags(conn: &Connection) -> Result<Vec<ZoneFlag>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM (
+             SELECT f.*, ROW_NUMBER() OVER (
+                      PARTITION BY f.plot_id, f.zone_type_code
+                      ORDER BY f.campaign DESC, (f.status = 'inside') DESC, f.id DESC
+                    ) AS standing
+             FROM plot_zone_flag f
+             JOIN plot p ON p.id = f.plot_id AND p.deleted_at IS NULL
+             WHERE f.deleted_at IS NULL
+         )
+         WHERE standing = 1
+         ORDER BY campaign DESC, plot_id, zone_type_code",
+    )?;
+    let flags = stmt
+        .query_map([], map_zone_flag)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(flags)
 }

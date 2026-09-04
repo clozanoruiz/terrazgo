@@ -13,9 +13,8 @@
 
 use crate::error::{GeoError, Result};
 use crate::fetch::{self, Fetched};
-use rusqlite::Connection;
 use serde_json::{Value, json};
-use std::sync::Mutex;
+use terrazgo_core::db::Database;
 
 const OFM_NE2_PREFIX: &str = "https://tiles.openfreemap.org/natural_earth/ne2sr/";
 const OFM_TILEJSON_URL: &str = "https://tiles.openfreemap.org/planet";
@@ -24,7 +23,7 @@ const OFM_ATTRIBUTION: &str = "© OpenFreeMap contributors, data © OpenStreetMa
 
 /// The OpenFreeMap "liberty" style, rewritten onto `geo://`. Fetched through
 /// the cache, so once seen it also works offline.
-pub fn openfreemap_style(cache: &Mutex<Connection>, base: &str) -> Result<String> {
+pub fn openfreemap_style(cache: &Database, base: &str) -> Result<String> {
     let raw = fetch::resource(cache, "ofm-style", "")?;
     let mut style: Value = serde_json::from_slice(&raw.data)?;
     rewrite_openfreemap_style(&mut style, base, |url| {

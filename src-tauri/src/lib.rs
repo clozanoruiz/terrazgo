@@ -8,6 +8,7 @@
 pub mod catalogues;
 pub mod commands;
 pub mod db;
+pub mod external_links;
 pub mod geo_protocol;
 pub mod registry;
 pub mod state;
@@ -36,7 +37,12 @@ pub fn run() {
         // Rust-side only (user_files.rs): resolves the content:// URIs the
         // dialogs return on Android. No fs commands are exposed to the
         // webview — the capabilities file deliberately grants none.
-        .plugin(tauri_plugin_fs::init());
+        .plugin(tauri_plugin_fs::init())
+        // Rust-side only (external_links.rs): hands an allowlisted registry or
+        // project URL to the platform browser. The webview passes an id, never
+        // a URL, so the capabilities file grants it no opener permission — the
+        // fs plugin above sets the same precedent.
+        .plugin(tauri_plugin_opener::init());
     // GPS for the map's "which recinto am I standing on" lookup (P5). The
     // plugin has no desktop implementation, so it exists only in mobile
     // builds — the frontend probes for it and hides the locate button when
@@ -76,26 +82,30 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Paths stay `commands::<name>` on purpose: the parent re-exports every
+            // domain file, so moving a command between them is not an API change
+            // (see commands.rs). That also means the path cannot say where a
+            // command lives — which is what the grouping below is for. Ordered to
+            // mirror each file, so the two read side by side.
+
+            // --- app — the shell's own surface: readiness, settings, catalogues, backups, maintenance
             commands::app_ready,
             commands::is_mobile,
             commands::get_status,
+            commands::get_about_info,
             commands::get_settings,
             commands::update_settings,
             commands::clear_tile_cache,
+            commands::check_and_compact_database,
             commands::catalogue_status,
             commands::refresh_catalogues,
+            commands::export_backup,
+            commands::import_backup,
+            // --- core — the farm registry: farms, plots, seasons, crops, people, machines, premises
             commands::list_user_profiles,
             commands::create_user_profile,
             commands::update_user_profile,
             commands::delete_user_profile,
-            commands::export_backup,
-            commands::import_backup,
-            commands::list_alerts,
-            commands::refresh_alerts,
-            commands::acknowledge_alert,
-            commands::dismiss_alert,
-            commands::get_treatment_record,
-            commands::seed_demo_data,
             commands::list_countries,
             commands::list_farms,
             commands::get_farm,
@@ -120,73 +130,9 @@ pub fn run() {
             commands::list_units,
             commands::list_quantity_units,
             commands::list_intensity_units,
-            commands::list_non_field_subject_kinds,
-            commands::list_register_kinds,
-            commands::list_analysis_materials,
-            commands::list_analysis_types,
-            commands::list_seed_treatment_kinds,
-            commands::list_plant_products,
-            commands::list_substance_codes,
-            commands::list_non_field_treatments,
-            commands::create_non_field_treatment,
-            commands::update_non_field_treatment,
-            commands::set_non_field_efficacy,
-            commands::delete_non_field_treatment,
-            commands::list_register_declarations,
-            commands::set_register_declaration,
-            commands::clear_register_declaration,
-            commands::list_seed_treatments,
-            commands::create_seed_treatment,
-            commands::update_seed_treatment,
-            commands::set_seed_treatment_efficacy,
-            commands::delete_seed_treatment,
-            commands::list_analysis_records,
-            commands::create_analysis_record,
-            commands::update_analysis_record,
-            commands::delete_analysis_record,
-            commands::list_harvest_records,
-            commands::create_harvest_record,
-            commands::update_harvest_record,
-            commands::delete_harvest_record,
-            commands::list_irrigation_methods,
-            commands::list_water_origins,
-            commands::list_irrigation_volume_units,
-            commands::list_irrigation_records,
-            commands::create_irrigation_record,
-            commands::update_irrigation_record,
-            commands::delete_irrigation_record,
-            commands::list_fertilisation_types,
-            commands::list_application_methods,
-            commands::list_manure_treatments,
-            commands::list_nutrient_kinds,
-            commands::list_fertiliser_dose_units,
-            commands::list_fertiliser_material_kinds,
-            commands::list_fertiliser_material_details,
-            commands::list_nutrient_codes,
-            commands::fertiliser_material_composition,
-            commands::list_fertilisation_practices,
-            commands::list_fertiliser_materials,
-            commands::create_fertiliser_material,
-            commands::update_fertiliser_material,
-            commands::delete_fertiliser_material,
-            commands::list_fertilisation_records,
-            commands::create_fertilisation_record,
-            commands::update_fertilisation_record,
-            commands::delete_fertilisation_record,
-            commands::list_fertilisation_plans,
-            commands::create_fertilisation_plan,
-            commands::update_fertilisation_plan,
-            commands::delete_fertilisation_plan,
-            commands::list_reason_categories,
-            commands::list_efficacies,
-            commands::list_justifications,
-            commands::list_problem_codes,
-            commands::list_measures,
-            commands::list_growth_stages,
-            commands::list_products,
-            commands::list_licence_levels,
             commands::list_irrigation_systems,
             commands::list_growing_environments,
+            commands::list_licence_levels,
             commands::list_gip_systems,
             commands::list_advisors,
             commands::create_advisor,
@@ -202,6 +148,47 @@ pub fn run() {
             commands::create_machinery,
             commands::update_machinery,
             commands::delete_machinery,
+            commands::list_premises,
+            commands::list_premises_details,
+            commands::list_premises_kinds,
+            commands::list_sowing_kinds,
+            commands::list_premises_classes,
+            commands::create_premises,
+            commands::update_premises,
+            commands::delete_premises,
+            commands::list_geo_features,
+            commands::save_plot_boundary,
+            commands::delete_geo_feature,
+            commands::list_zone_flags,
+            commands::list_water_points,
+            commands::create_water_point,
+            commands::update_water_point,
+            commands::delete_water_point,
+            commands::list_water_declarations,
+            commands::set_water_declaration,
+            commands::list_sowing_records,
+            commands::create_sowing_record,
+            commands::update_sowing_record,
+            commands::delete_sowing_record,
+            commands::list_harvest_records,
+            commands::create_harvest_record,
+            commands::update_harvest_record,
+            commands::delete_harvest_record,
+            commands::list_irrigation_volume_units,
+            commands::list_fertiliser_dose_units,
+            // --- cue — the treatment domain (module-cue): products, every register RD 1311/2012 governs, alerts
+            commands::list_alerts,
+            commands::refresh_alerts,
+            commands::acknowledge_alert,
+            commands::dismiss_alert,
+            commands::get_treatment_record,
+            commands::list_reason_categories,
+            commands::list_efficacies,
+            commands::list_justifications,
+            commands::list_problem_codes,
+            commands::list_measures,
+            commands::list_growth_stages,
+            commands::list_products,
             commands::list_formulation_types,
             commands::list_authorisation_kinds,
             commands::list_exceptional_substances,
@@ -221,39 +208,143 @@ pub fn run() {
             commands::set_treatment_efficacy,
             commands::delete_treatment_record,
             commands::export_cuaderno_precheck,
-            commands::book_advisory,
             commands::export_cuaderno,
-            commands::report_languages,
-            commands::export_cuaderno_pdf,
-            commands::export_cuaderno_xlsx,
-            commands::list_geo_features,
-            commands::save_plot_boundary,
-            commands::delete_geo_feature,
-            commands::get_map_style,
-            commands::list_boundary_file,
-            commands::read_boundary_feature,
+            commands::list_phi_status,
+            commands::seed_demo_data,
+            commands::list_non_field_subject_kinds,
+            commands::list_register_kinds,
+            commands::list_non_field_treatments,
+            commands::create_non_field_treatment,
+            commands::update_non_field_treatment,
+            commands::set_non_field_efficacy,
+            commands::delete_non_field_treatment,
+            commands::list_register_declarations,
+            commands::set_register_declaration,
+            commands::clear_register_declaration,
+            commands::list_seed_treatments,
+            commands::create_seed_treatment,
+            commands::update_seed_treatment,
+            commands::set_seed_treatment_efficacy,
+            commands::delete_seed_treatment,
+            commands::list_analysis_materials,
+            commands::list_analysis_types,
+            commands::list_seed_treatment_kinds,
+            commands::list_plant_products,
+            commands::list_substance_codes,
+            commands::list_analysis_records,
+            commands::create_analysis_record,
+            commands::update_analysis_record,
+            commands::delete_analysis_record,
+            // --- fertilisation — fertilisation and irrigation (module-fertilisation): RD 1051/2022's registers
+            commands::list_irrigation_methods,
+            commands::list_water_origins,
+            commands::list_irrigation_records,
+            commands::create_irrigation_record,
+            commands::update_irrigation_record,
+            commands::delete_irrigation_record,
+            commands::list_fertilisation_types,
+            commands::list_application_methods,
+            commands::list_manure_treatments,
+            commands::list_nutrient_kinds,
+            commands::list_fertiliser_material_kinds,
+            commands::list_fertiliser_material_details,
+            commands::fertiliser_material_composition,
+            commands::list_nutrient_codes,
+            commands::list_fertilisation_practices,
+            commands::list_fertiliser_materials,
+            commands::create_fertiliser_material,
+            commands::update_fertiliser_material,
+            commands::delete_fertiliser_material,
+            commands::list_fertilisation_records,
+            commands::create_fertilisation_record,
+            commands::update_fertilisation_record,
+            commands::delete_fertilisation_record,
+            commands::list_fertilisation_plans,
+            commands::create_fertilisation_plan,
+            commands::update_fertilisation_plan,
+            commands::delete_fertilisation_plan,
+            // --- ecoscheme — eco-schemes (module-ecoscheme): RD 1048/2022's grazing, operations and soil covers
+            commands::list_eco_practices,
+            commands::list_cultural_operation_kinds,
+            commands::list_animal_species,
+            commands::list_residue_destinations,
+            commands::list_grazing_records,
+            commands::create_grazing_record,
+            commands::update_grazing_record,
+            commands::delete_grazing_record,
+            commands::list_cultural_operations,
+            commands::create_cultural_operation,
+            commands::update_cultural_operation,
+            commands::delete_cultural_operation,
+            commands::list_cover_types,
+            commands::list_soil_covers,
+            commands::create_soil_cover,
+            commands::update_soil_cover,
+            commands::delete_soil_cover,
+            // --- sigpac — SIGPAC lookups, zone checks and declared-crop prefill (module-sigpac)
             commands::sigpac_lookup_reference,
             commands::sigpac_lookup_point,
             commands::sigpac_verify_plot,
             commands::sigpac_propose_crops,
             commands::sigpac_accept_crop_proposals,
             commands::list_crop_species,
-            commands::list_zone_flags,
-            commands::list_water_points,
-            commands::create_water_point,
-            commands::update_water_point,
-            commands::delete_water_point,
-            commands::list_water_declarations,
-            commands::set_water_declaration,
-            commands::list_phi_status,
+            // --- geo — the map tier: styles and stored geometry (terrazgo-geo)
+            commands::get_map_style,
+            commands::list_boundary_file,
+            commands::read_boundary_feature,
+            // --- recordbook — the printed record book and the SIEX export (terrazgo-recordbook)
+            commands::book_advisory,
+            commands::report_languages,
+            commands::export_cuaderno_pdf,
+            commands::export_cuaderno_xlsx,
+            // --- links — the allowlisted pages the app points at (external_links.rs)
+            commands::open_external_link,
         ])
-        .run(tauri::generate_context!());
+        .build(tauri::generate_context!());
 
     // The stock template ends in `.expect(...)`; spelled out instead because
     // unwrap/expect are banned outside tests (workspace clippy lint).
-    if let Err(e) = result {
-        eprintln!("fatal: failed to start Terrazgo: {e}");
-        std::process::exit(1);
+    let app = match result {
+        Ok(app) => app,
+        Err(e) => {
+            eprintln!("fatal: failed to start Terrazgo: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            close_databases(handle);
+        }
+    });
+}
+
+/// Close both databases on the way out.
+///
+/// SQLite deletes a database's `-wal`/`-shm` sidecars when the last connection
+/// to it closes cleanly, and nothing else does — a checkpoint empties the
+/// write-ahead log but leaves the files. Dropping the connections would be
+/// enough in an ordinary program, but Tauri never drops managed state: the
+/// platform event loop ends the process with `std::process::exit`, so this hook
+/// is the last chance to close, and closing has to be explicit.
+///
+/// `RunEvent::Exit` arrives before that exit on desktop. Android never reaches
+/// it — the system kills the process — which is what WAL is for, and why this
+/// is not gated to desktop: the branch simply never runs there.
+///
+/// `try_state` rather than `state`: `initialise` runs on a worker thread, so a
+/// window closed during startup can arrive here before either database has been
+/// managed. Failures are printed rather than surfaced — there is no UI left.
+fn close_databases(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<state::AppState>()
+        && let Err(err) = state.db.close()
+    {
+        eprintln!("warning: could not close the database cleanly: {err}");
+    }
+    if let Some(geo) = app.try_state::<state::GeoState>()
+        && let Err(err) = geo.cache.close()
+    {
+        eprintln!("warning: could not close the geo cache cleanly: {err}");
     }
 }
 
@@ -277,24 +368,30 @@ fn initialise(app: &tauri::AppHandle) -> anyhow::Result<()> {
     // upsert-only; after first run this is a handful of date probes.
     terrazgo_core::catalogue::ensure_catalogues(&mut conn)?;
 
-    // Idempotent reconciliation — over-calling is sanctioned by the
-    // repository docs; a dismissal is never resurrected.
-    module_cue::repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
-
-    app.manage(state::AppState {
-        conn: Mutex::new(conn),
-        db_path,
-        schema_version,
-    });
-
     // Device-local settings, a plain JSON file beside the databases.
     // A missing or unreadable file just means defaults (tolerant
     // read), so loading can never abort startup.
+    //
+    // Loaded BEFORE the first alert refresh below, which is load-bearing: the
+    // refresh needs this device's lead times, and reading them afterwards would
+    // give every launch one reconciliation at the wrong lead time.
     let settings_path = data_dir.join("settings.json");
     let settings = terrazgo_core::settings::load_settings(&settings_path);
     let tile_cache_cap = settings
         .tile_cache_max_bytes
         .unwrap_or(terrazgo_geo::db::TILE_CACHE_MAX_BYTES);
+    let alert_config =
+        AlertConfig::from_overrides(settings.licence_lead_days, settings.itv_lead_days);
+
+    // Idempotent reconciliation — over-calling is sanctioned by the
+    // repository docs; a dismissal is never resurrected.
+    module_cue::repository::refresh_alerts(&mut conn, &today_utc(), &alert_config)?;
+
+    app.manage(state::AppState {
+        db: terrazgo_core::db::Database::new(conn)?,
+        db_path,
+        schema_version,
+    });
     app.manage(state::SettingsState {
         settings: Mutex::new(settings),
         path: settings_path,
@@ -302,9 +399,26 @@ fn initialise(app: &tauri::AppHandle) -> anyhow::Result<()> {
 
     // The geo cache is a separate database with its own lifecycle:
     // derived, re-fetchable, never in backups or record_change.
-    let geo_conn = terrazgo_geo::db::open_cache(&data_dir.join("geo-cache.db"))?;
-    app.manage(state::GeoState {
-        conn: Mutex::new(geo_conn),
+    let geo_cache = terrazgo_geo::db::open_cache(&data_dir.join("geo-cache.db"))?;
+    app.manage(state::GeoState { cache: geo_cache });
+
+    // Corruption check, off the readiness path for the same reason as the tile
+    // cap below: measured at ~1.7 ms/MB, so ~10 ms on a smallholder's book but
+    // approaching a second on a cooperative-scale one after a decade
+    // (src-tauri/tests/quick_check_cost.rs re-runs the measurement).
+    //
+    // It opens its OWN read-only connection rather than borrowing the app's.
+    // Holding the shared lock for that long would freeze every command at
+    // startup, and WAL lets a second reader in without disturbing writers. The
+    // cost is a narrow race: closing the window mid-check leaves the sidecars
+    // behind that once, because this connection is then the last one open.
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(err) = db::run_due_integrity_check(&handle) {
+            // A failure to CHECK is not a failure of the database; say so and
+            // leave the previous verdict standing.
+            eprintln!("integrity check could not run: {err}");
+        }
     });
 
     // Tile-cache size cap, off the readiness path: usually a no-op, but the
@@ -315,10 +429,13 @@ fn initialise(app: &tauri::AppHandle) -> anyhow::Result<()> {
         let Some(geo) = handle.try_state::<state::GeoState>() else {
             return;
         };
-        let Ok(conn) = geo.conn.lock() else {
+        let Ok(cache) = geo.cache.lock() else {
             return;
         };
-        match terrazgo_geo::db::enforce_tile_cache_cap(&conn, tile_cache_cap) {
+        let Ok(conn) = cache.conn() else {
+            return;
+        };
+        match terrazgo_geo::db::enforce_tile_cache_cap(conn, tile_cache_cap) {
             Ok(0) => {}
             Ok(evicted) => eprintln!("geo-cache cap: evicted {evicted} tiles"),
             Err(err) => eprintln!("geo-cache cap enforcement failed: {err}"),

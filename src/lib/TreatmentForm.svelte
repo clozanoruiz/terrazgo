@@ -5,16 +5,20 @@
   // Treatment entry form — the CUE module's central input (RD 1311/2012
   // mandatory fields). Multi-plot rows are dynamic; the legal snapshots, the
   // country and the PHI end date are derived in Rust at insert time, not here.
-  import { formatDate, t, tCode } from "../i18n.js";
+  import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
   import { emptyProblemRow, emptyRow } from "./treatmentDraft.js";
+  import TzCheckbox from "./TzCheckbox.svelte";
+  import NumberInput from "./NumberInput.svelte";
   import DateInput from "./DateInput.svelte";
   import TimeInput from "./TimeInput.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
 
   let {
     farmId,
@@ -32,7 +36,10 @@
     // to a different record to correct refills the fields on screen.
     draft,
     onSaved,
-    onCancel,
+    /// Names this form so the register's pinned Save can claim it. The panel
+    /// owns the action bar now, and this is the longest form in the app — the
+    /// one whose Save was furthest out of reach.
+    formId = "",
   } = $props();
 
   // Session-wide reference data, read from the module instead of drilled
@@ -160,8 +167,10 @@
     if (surfaces.length === 0 || surfaces.some((s) => !(s > 0))) return null;
     const total = dose * surfaces.reduce((sum, s) => sum + s, 0);
     // Trim float noise (1.5 × 3.2 = 4.800000000000001) without pretending to
-    // more precision than the inputs carry.
-    return { value: Number(total.toFixed(4)), unit };
+    // more precision than the inputs carry. Rounded arithmetic rather than
+    // toFixed: this produces the NUMBER the field stores, and toFixed produces
+    // a dot-decimal string — the confusion the two are worth keeping apart.
+    return { value: Math.round(total * 1e4) / 1e4, unit };
   });
 
   function applySuggestedTotal() {
@@ -195,14 +204,17 @@
     draft.rows.splice(index, 1);
   }
 
-  function submit(event) {
-    event.preventDefault();
+  async function submit() {
     const fields = {
       application_date: draft.applicationDate,
       application_end_date: draft.applicationEndDate || null,
       // Local wall-clock HH:MM, sent as typed. Never "" — an empty string is
       // not an hour, and the backend would refuse it as malformed.
       application_time: draft.applicationTime || null,
+      // Model 9.3's "fecha de seca" (RD 1048/2022 art. 45.2): the day a flooded
+      // field was dried so this treatment could be applied. Empty means the
+      // ordinary case — a crop that is not grown under water.
+      drying_date: draft.dryingDate || null,
       // The chemical block travels whole or not at all: a purely non-chemical
       // actuation states a measure instead, and the backend refuses halves.
       product_id: draft.productId || null,
@@ -235,47 +247,68 @@
       surface_treated_ha: Number(row.surface),
       growth_stage_code: row.growthStage || null,
     }));
-    run(async () => {
-      if (draft.editingId) {
-        // A correction carries neither campaign nor holding (a treatment never
-        // moves either) and no efficacy — that keeps its own control in the
-        // list, because it is observed after the fact.
-        const saved = await invoke("update_treatment_record", {
-          treatmentId: draft.editingId,
-          update: { ...fields, plots: treatedPlots },
-        });
-        notify(t("message.treatment_updated", { date: formatDate(saved.record.application_date) }));
-      } else {
-        const saved = await invoke("create_treatment_record", {
-          record: {
-            ...fields,
-            season_id: seasonId,
-            farm_id: farmId,
-            country_code: null, // derived from the farm in Rust
-            efficacy_code: draft.efficacyCode || null,
-          },
-          plots: treatedPlots,
-        });
-        notify(t("message.treatment_saved", { date: formatDate(saved.phi_end_date) }));
-      }
-      await onSaved();
-    });
+    if (draft.editingId) {
+      // A correction carries neither campaign nor holding (a treatment never
+      // moves either) and no efficacy — that keeps its own control in the
+      // list, because it is observed after the fact.
+      await invoke("update_treatment_record", {
+        treatmentId: draft.editingId,
+        update: { ...fields, plots: treatedPlots },
+      });
+    } else {
+      const saved = await invoke("create_treatment_record", {
+        record: {
+          ...fields,
+          season_id: seasonId,
+          farm_id: farmId,
+          country_code: null, // derived from the farm in Rust
+          efficacy_code: draft.efficacyCode || null,
+        },
+        plots: treatedPlots,
+      });
+      notify(t("message.treatment_saved", { date: formatDate(saved.phi_end_date) }));
+    }
+    await onSaved();
   }
 </script>
 
-<form onsubmit={submit}>
+<TzForm
+  id={formId}
+  onsubmit={submit}
+  anchors={{
+    "invalid.end_date_before_start": "application_end_date",
+    "invalid.dose_without_product": "dose_value",
+    "invalid.product_without_dose": "dose_value",
+    "invalid.invalid_dose": "dose_value",
+    "invalid.invalid_total_quantity": "total_quantity_value",
+    "invalid.quantity_unit_mismatch": "total_quantity_value",
+    "invalid.application_time": "application_time",
+  }}
+>
   <div class="form-grid">
-    <DateInput label={t("treatment.date")} required bind:value={draft.applicationDate} />
+    <DateInput
+      label={t("treatment.date")}
+      name="application_date"
+      required
+      bind:value={draft.applicationDate}
+    />
     <DateInput
       label={t("treatment.end_date")}
+      name="application_end_date"
       hint={t("treatment.end_date_hint")}
       min={draft.applicationDate}
       bind:value={draft.applicationEndDate}
     />
     <TimeInput
       label={t("treatment.time")}
+      name="application_time"
       hint={t("treatment.time_hint")}
       bind:value={draft.applicationTime}
+    />
+    <DateInput
+      label={t("treatment.drying_date")}
+      hint={t("treatment.drying_date_hint")}
+      bind:value={draft.dryingDate}
     />
     <TzSelect
       label={t("treatment.product")}
@@ -285,17 +318,14 @@
       nullLabel=""
       bind:value={draft.productId}
     />
-    <label>
-      <span>{t("treatment.dose")}</span>
-      <input
-        type="number"
-        step="any"
-        min="0.001"
-        required={draft.productId !== ""}
-        disabled={draft.productId === ""}
-        bind:value={draft.doseValue}
-      />
-    </label>
+    <NumberInput
+      label={t("treatment.dose")}
+      name="dose_value"
+      min={0.001}
+      required={draft.productId !== ""}
+      disabled={draft.productId === ""}
+      bind:value={draft.doseValue}
+    />
     <TzSelect
       label={t("treatment.unit")}
       items={codeItems(units, "unit")}
@@ -303,14 +333,17 @@
       disabled={draft.productId === ""}
       bind:value={draft.doseUnit}
     />
-    <label>
-      <span>{t("treatment.total_quantity")}</span>
-      <input type="number" step="any" min="0.0001" bind:value={draft.totalQuantity} />
+    <NumberInput
+      label={t("treatment.total_quantity")}
+      name="total_quantity_value"
+      min={0.0001}
+      bind:value={draft.totalQuantity}
+    >
       {#if suggestedTotal && Number(draft.totalQuantity) !== suggestedTotal.value}
         <small>
           <button type="button" class="link-button" onclick={applySuggestedTotal}>
             {t("treatment.total_quantity_suggest", {
-              value: suggestedTotal.value,
+              value: formatNumber(suggestedTotal.value),
               unit: tCode("unit", suggestedTotal.unit),
             })}
           </button>
@@ -318,17 +351,14 @@
       {:else}
         <small>{t("treatment.total_quantity_hint")}</small>
       {/if}
-    </label>
+    </NumberInput>
     <TzSelect
       label={t("treatment.total_quantity_unit")}
       items={codeItems(quantityUnits, "unit")}
       disabled={draft.totalQuantity === ""}
       bind:value={draft.totalQuantityUnit}
     />
-    <label>
-      <span>{t("treatment.target")}</span>
-      <input bind:value={draft.targetOrganism} />
-    </label>
+    <TextInput label={t("treatment.target")} bind:value={draft.targetOrganism} />
     <TzSelect
       label={t("treatment.operator")}
       items={nameItems(operators, (o) => o.full_name)}
@@ -342,19 +372,14 @@
       nullLabel={t("treatment.machinery_none")}
       bind:value={draft.machineryId}
     />
-    <label>
-      <span>{t("treatment.phi_days")}</span>
-      <input
-        type="number"
-        min="0"
-        step="1"
-        bind:value={draft.phiDays}
-        placeholder={defaultPhi ?? ""}
-      />
-      {#if defaultPhi != null}
-        <small>{t("treatment.phi_default", { days: defaultPhi })}</small>
-      {/if}
-    </label>
+    <NumberInput
+      label={t("treatment.phi_days")}
+      hint={defaultPhi != null ? t("treatment.phi_default", { count: defaultPhi }) : ""}
+      integer
+      min={0}
+      placeholder={defaultPhi != null ? String(defaultPhi) : ""}
+      bind:value={draft.phiDays}
+    />
     <!-- Efficacy is observed after the application, so a correction does not
          carry it: the register list keeps its own control for that. -->
     {#if !draft.editingId}
@@ -367,10 +392,7 @@
         bind:value={draft.efficacyCode}
       />
     {/if}
-    <label>
-      <span>{t("treatment.notes")}</span>
-      <input bind:value={draft.notes} />
-    </label>
+    <TextInput label={t("treatment.notes")} bind:value={draft.notes} />
   </div>
 
   <!-- Model 3.1 bis. Everything here is optional: an ordinary treatment names
@@ -396,27 +418,24 @@
         nullLabel=""
         bind:value={draft.measureCode}
       />
-      <label>
-        <span>{t("treatment.measure_intensity")}</span>
-        <input
-          type="number"
-          step="any"
-          min="0.001"
-          disabled={draft.measureCode === ""}
-          bind:value={draft.measureIntensity}
-        />
-        <small>{t("treatment.measure_intensity_hint")}</small>
-      </label>
+      <NumberInput
+        label={t("treatment.measure_intensity")}
+        hint={t("treatment.measure_intensity_hint")}
+        min={0.001}
+        disabled={draft.measureCode === ""}
+        bind:value={draft.measureIntensity}
+      />
       <TzSelect
         label={t("treatment.measure_intensity_unit")}
         items={codeItems(intensityUnits, "unit")}
         disabled={draft.measureIntensity === ""}
         bind:value={draft.measureIntensityUnit}
       />
-      <label>
-        <span>{t("treatment.measure_registration")}</span>
-        <input disabled={draft.measureCode === ""} bind:value={draft.measureRegistration} />
-      </label>
+      <TextInput
+        label={t("treatment.measure_registration")}
+        disabled={draft.measureCode === ""}
+        bind:value={draft.measureRegistration}
+      />
     </div>
   </fieldset>
 
@@ -455,14 +474,11 @@
     <legend>{t("treatment.justifications_section")}</legend>
     <div class="checkbox-grid">
       {#each justifications as justification (justification.code)}
-        <label class="checkbox">
-          <input
-            type="checkbox"
-            value={justification.code}
-            bind:group={draft.checkedJustifications}
-          />
-          <span>{tCode("justification", justification.code)}</span>
-        </label>
+        <TzCheckbox
+          label={tCode("justification", justification.code)}
+          value={justification.code}
+          bind:group={draft.checkedJustifications}
+        />
       {/each}
     </div>
   </fieldset>
@@ -489,10 +505,7 @@
           nullLabel={t("treatment.crop_none")}
           bind:value={row.cropId}
         />
-        <label>
-          <span>{t("treatment.surface")}</span>
-          <input type="number" step="any" min="0.01" required bind:value={row.surface} />
-        </label>
+        <NumberInput label={t("treatment.surface")} min={0.01} required bind:value={row.surface} />
         <!-- EST_FENOLOGICO: BBCH order, 0-9. Never alphabetical. -->
         <TzSelect
           label={t("treatment.growth_stage")}
@@ -510,9 +523,4 @@
     {/each}
     <button type="button" onclick={addRow}>{t("treatment.add_plot")}</button>
   </fieldset>
-
-  <div class="form-actions">
-    <button type="submit">{t("form.save")}</button>
-    <button type="button" class="btn-cancel" onclick={onCancel}>{t("form.cancel")}</button>
-  </div>
-</form>
+</TzForm>

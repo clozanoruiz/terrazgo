@@ -39,7 +39,8 @@ export default {
   "map.drawing_hint": "Feu clic al mapa per afegir punts; feu clic al primer per acabar.",
   "map.draw_cancel": "Cancel·la el dibuix",
   "map.import": "Importa d'un fitxer…",
-  "map.import_pick": "Trieu un contorn ({count} trobats)",
+  "map.import_pick.one": "Trieu un contorn (1 trobat)",
+  "map.import_pick.other": "Trieu un contorn ({count} trobats)",
   "map.import_filter": "Filtra per nom o atributs…",
   "map.import_use": "Usa",
   "map.sigpac_pick": "Cerca un recinte SIGPAC",
@@ -53,7 +54,7 @@ export default {
   "map.track_stop": "Deixa de seguir",
   "map.sigpac_attach": "Desa el contorn a {plot}",
   "map.sigpac_create": "Crea una parcel·la amb aquest recinte",
-  "map.import_more": "…i {count} més — afineu el filtre.",
+  "map.import_more": "…i {n} més — afineu el filtre.",
   "map.boundaries": "Contorns desats",
   "map.no_boundary": "Encara no hi ha cap contorn desat.",
   "map.delete_boundary": "Treu",
@@ -66,4 +67,8 @@ export default {
   "map.base_ortho": "Orto",
   "map.basemap_unavailable":
     "Mapa base no disponible sense connexió (encara no és a la memòria cau) — els contorns es mostren igualment.",
+  "map.engine_unavailable":
+    "No s'ha pogut carregar el mapa. Reinicieu l'aplicació per tornar-ho a provar.",
+  "map.drawing_unavailable":
+    "No s'ha pogut carregar l'eina de dibuix. Reinicieu l'aplicació per tornar-ho a provar.",
 };

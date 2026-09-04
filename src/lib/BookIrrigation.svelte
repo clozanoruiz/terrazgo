@@ -23,13 +23,20 @@
   // The accumulated volume the model prints is NOT entered: the book computes
   // it as a running sum, because a stored copy could disagree with the rows
   // above it.
-  import { formatDate, t, tCode } from "../i18n.js";
+  import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
-  import { notify, run } from "./notifications.svelte.js";
+  import { run } from "./notifications.svelte.js";
+  import TzCheckbox from "./TzCheckbox.svelte";
   import DateInput from "./DateInput.svelte";
+  import NumberInput from "./NumberInput.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
 
   let { farmId, seasonId, plots, crops } = $props();
 
@@ -110,6 +117,23 @@
     formOpen = true;
   }
 
+  function hideForm() {
+    formOpen = false;
+    editingId = null;
+  }
+
+  /// The row the inspector is editing, so the delete button beside the form
+  /// knows which record it is about. Null while creating.
+  const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
+
+  /// A single day, or the interval a watering that ran over several states.
+  function irrigatedRange(record) {
+    const start = formatDate(record.irrigated_on);
+    return record.irrigation_end_date
+      ? `${start} – ${formatDate(record.irrigation_end_date)}`
+      : start;
+  }
+
   function toggleOrigin(code, checked) {
     chosenOrigins = checked
       ? [...chosenOrigins, code]
@@ -122,8 +146,7 @@
     return value === "" || value === null ? null : Number(value);
   }
 
-  function submit(event) {
-    event.preventDefault();
+  async function submit() {
     const payload = {
       irrigated_on: irrigatedOn,
       irrigation_end_date: endDate || null,
@@ -145,28 +168,25 @@
       water_origins: chosenOrigins,
     };
 
-    run(async () => {
-      if (editingId) {
-        await invoke("update_irrigation_record", {
-          irrigationRecordId: editingId,
-          update: { ...payload, id: editingId },
-        });
-      } else {
-        await invoke("create_irrigation_record", {
-          record: { ...payload, season_id: seasonId, farm_id: farmId },
-        });
-      }
-      notify(t("message.irrigation_saved"));
-      formOpen = false;
-      load();
-    });
+    if (editingId) {
+      await invoke("update_irrigation_record", {
+        irrigationRecordId: editingId,
+        update: { ...payload, id: editingId },
+      });
+    } else {
+      await invoke("create_irrigation_record", {
+        record: { ...payload, season_id: seasonId, farm_id: farmId },
+      });
+    }
+    hideForm();
+    load();
   }
 
   function remove(record) {
     run(async () => {
       if (!(await confirmDialog(t("irrigation.delete_confirm")))) return;
       await invoke("delete_irrigation_record", { irrigationRecordId: record.id });
-      notify(t("message.irrigation_deleted"));
+      hideForm();
       load();
     });
   }
@@ -185,143 +205,154 @@
   </div>
   <p class="detail">{t("irrigation.intro")}</p>
 
-  <ul class="card-list">
-    {#each records as detail (detail.record.id)}
-      <li class="card">
-        <div class="stack">
-          <strong>
-            {formatDate(detail.record.irrigated_on)}{detail.record.irrigation_end_date
-              ? ` – ${formatDate(detail.record.irrigation_end_date)}`
-              : ""}
-            — {tCode("irrigation_method", detail.record.irrigation_method_code)}
-          </strong>
-          <span class="detail">
-            {t("irrigation.volume_detail", {
-              volume: detail.record.volume_value,
-              unit: tCode("unit", detail.record.volume_unit_code),
-            })}
-            {#if detail.water_origins.length > 0}
-              · {detail.water_origins.map((code) => tCode("water_origin", code)).join(", ")}
-            {/if}
-          </span>
-          <span class="detail">
-            {detail.plots.map((p) => plotName(p.plot_id)).join(", ")}
-          </span>
+  <TzWorkspace
+    open={formOpen}
+    title={editingId ? formatDate(irrigatedOn) : t("irrigation.new")}
+    onclose={hideForm}
+    ondelete={editing ? () => remove(editing.record) : null}
+  >
+    {#snippet list()}
+      {#if records.length === 0}
+        <p class="table-empty">{t("table.empty")}</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table" use:resizableColumns={"irrigations"}>
+            <thead>
+              <tr>
+                <th>{t("column.date")}</th>
+                <th>{t("column.method")}</th>
+                <th class="col-num">{t("column.volume_applied")}</th>
+                <th>{t("column.origin")}</th>
+                <th>{t("column.plots")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each records as detail (detail.record.id)}
+                <tr
+                  class:selected={editingId === detail.record.id}
+                  onclick={(e) => opensRow(e) && showForm(detail)}
+                >
+                  <td class="col-name">
+                    <button type="button" class="row-open" onclick={() => showForm(detail)}>
+                      {irrigatedRange(detail.record)}
+                    </button>
+                  </td>
+                  <td class="col-muted">
+                    {tCode("irrigation_method", detail.record.irrigation_method_code)}
+                  </td>
+                  <td class="col-muted col-num">
+                    {t("irrigation.volume_detail", {
+                      volume: formatNumber(detail.record.volume_value),
+                      unit: tCode("unit", detail.record.volume_unit_code),
+                    })}
+                  </td>
+                  <td class="col-muted">
+                    {detail.water_origins.map((code) => tCode("water_origin", code)).join(", ")}
+                  </td>
+                  <td class="col-muted"
+                    >{detail.plots.map((p) => plotName(p.plot_id)).join(", ")}</td
+                  >
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
-        <button type="button" onclick={() => showForm(detail)}>{t("form.edit")}</button>
-        <button type="button" class="btn-danger" onclick={() => remove(detail.record)}>
-          {t("form.delete")}
-        </button>
-      </li>
-    {/each}
-  </ul>
+      {/if}
+    {/snippet}
 
-  {#if formOpen}
-    <form onsubmit={submit}>
-      <div class="form-grid">
-        <DateInput label={t("irrigation.irrigated_on")} required bind:value={irrigatedOn} />
-        <DateInput
-          label={t("irrigation.end_date")}
-          hint={t("irrigation.end_date_hint")}
-          bind:value={endDate}
-        />
-        <TzSelect
-          label={t("irrigation.method")}
-          items={codeItems(irrigationMethods, "irrigation_method")}
-          required
-          bind:value={methodCode}
-        />
-        <label>
-          <span>{t("irrigation.volume")}</span>
-          <input type="number" step="any" min="0.001" required bind:value={volumeValue} />
-        </label>
-        <TzSelect
-          label={t("irrigation.volume_unit")}
-          items={codeItems(volumeUnits, "unit")}
-          bind:value={volumeUnit}
-        />
-        <label>
-          <span>{t("irrigation.meter_number")}</span>
-          <input bind:value={meterNumber} />
-        </label>
-        <label>
-          <span>{t("treatment.notes")}</span>
-          <input bind:value={notes} />
-        </label>
-      </div>
-
-      <fieldset class="subsection">
-        <legend>{t("irrigation.water_section")}</legend>
-        <p class="detail">{t("irrigation.water_hint")}</p>
+    {#snippet inspector(formId)}
+      <TzForm id={formId} onsubmit={submit}>
         <div class="form-grid">
-          <label>
-            <span>{t("irrigation.nitric_n")}</span>
-            <input type="number" step="any" min="0" bind:value={nitricN} />
-          </label>
-          <label>
-            <span>{t("irrigation.soluble_p2o5")}</span>
-            <input type="number" step="any" min="0" bind:value={solubleP2o5} />
-          </label>
+          <DateInput label={t("irrigation.irrigated_on")} required bind:value={irrigatedOn} />
+          <DateInput
+            label={t("irrigation.end_date")}
+            hint={t("irrigation.end_date_hint")}
+            bind:value={endDate}
+          />
+          <TzSelect
+            label={t("irrigation.method")}
+            items={codeItems(irrigationMethods, "irrigation_method")}
+            required
+            bind:value={methodCode}
+          />
+          <NumberInput
+            label={t("irrigation.volume")}
+            min={0.001}
+            required
+            bind:value={volumeValue}
+          />
+          <TzSelect
+            label={t("irrigation.volume_unit")}
+            items={codeItems(volumeUnits, "unit")}
+            bind:value={volumeUnit}
+          />
+          <TextInput label={t("irrigation.meter_number")} bind:value={meterNumber} />
+          <TextInput label={t("treatment.notes")} bind:value={notes} />
         </div>
-        <div class="checkbox-list">
-          {#each waterOrigins as origin (origin.code)}
-            <label class="inline">
-              <input
-                type="checkbox"
-                checked={chosenOrigins.includes(origin.code)}
-                onchange={(event) => toggleOrigin(origin.code, event.currentTarget.checked)}
-              />
-              <span>{tCode("water_origin", origin.code)}</span>
-            </label>
-          {/each}
-        </div>
-      </fieldset>
 
-      <fieldset class="subsection">
-        <legend>{t("irrigation.plots_section")}</legend>
-        {#each plotRows as row, index (row)}
-          <div class="form-grid plot-row">
-            <TzSelect
-              label={t("crop.plot")}
-              items={nameItems(
-                plots,
-                (p) => p.plot.name,
-                (p) => p.plot.id,
-              )}
-              required
-              bind:value={row.plotId}
-              onchange={() => onPlotChosen(row)}
-            />
-            <TzSelect
-              label={t("treatment.crop")}
-              items={nameItems(
-                cropsOfPlot(row.plotId),
-                (crop) => `${crop.species_name}${crop.variety ? ` — ${crop.variety}` : ""}`,
-              )}
-              nullable
-              nullLabel=""
-              bind:value={row.cropId}
-            />
-            <label>
-              <span>{t("irrigation.area")}</span>
-              <input type="number" step="any" min="0.0001" bind:value={row.areaHa} />
-            </label>
-            {#if plotRows.length > 1}
-              <button type="button" class="btn-danger" onclick={() => plotRows.splice(index, 1)}>
-                {t("treatment.remove")}
-              </button>
-            {/if}
+        <fieldset class="subsection">
+          <legend>{t("irrigation.water_section")}</legend>
+          <p class="detail">{t("irrigation.water_hint")}</p>
+          <div class="form-grid">
+            <NumberInput label={t("irrigation.nitric_n")} min={0} bind:value={nitricN} />
+            <NumberInput label={t("irrigation.soluble_p2o5")} min={0} bind:value={solubleP2o5} />
           </div>
-        {/each}
-        <button type="button" onclick={() => plotRows.push(emptyPlotRow())}>
-          {t("treatment.add_plot")}
-        </button>
-      </fieldset>
+          <div class="checkbox-list">
+            {#each waterOrigins as origin (origin.code)}
+              <TzCheckbox
+                label={tCode("water_origin", origin.code)}
+                checked={chosenOrigins.includes(origin.code)}
+                onchange={(next) => toggleOrigin(origin.code, next)}
+              />
+            {/each}
+          </div>
+        </fieldset>
 
+        <fieldset class="subsection">
+          <legend>{t("irrigation.plots_section")}</legend>
+          {#each plotRows as row, index (row)}
+            <div class="form-grid plot-row">
+              <TzSelect
+                label={t("crop.plot")}
+                items={nameItems(
+                  plots,
+                  (p) => p.plot.name,
+                  (p) => p.plot.id,
+                )}
+                required
+                bind:value={row.plotId}
+                onchange={() => onPlotChosen(row)}
+              />
+              <TzSelect
+                label={t("treatment.crop")}
+                items={nameItems(
+                  cropsOfPlot(row.plotId),
+                  (crop) => `${crop.species_name}${crop.variety ? ` — ${crop.variety}` : ""}`,
+                )}
+                nullable
+                nullLabel=""
+                bind:value={row.cropId}
+              />
+              <NumberInput label={t("irrigation.area")} min={0.0001} bind:value={row.areaHa} />
+              {#if plotRows.length > 1}
+                <button type="button" class="btn-danger" onclick={() => plotRows.splice(index, 1)}>
+                  {t("treatment.remove")}
+                </button>
+              {/if}
+            </div>
+          {/each}
+          <button type="button" onclick={() => plotRows.push(emptyPlotRow())}>
+            {t("treatment.add_plot")}
+          </button>
+        </fieldset>
+      </TzForm>
+    {/snippet}
+
+    {#snippet actions(formId)}
       <div class="form-actions">
-        <button type="submit">{t("form.save")}</button>
-        <button type="button" onclick={() => (formOpen = false)}>{t("form.cancel")}</button>
+        <button type="submit" form={formId}>{t("form.save")}</button>
+        <button type="button" class="btn-cancel" onclick={hideForm}>{t("form.cancel")}</button>
       </div>
-    </form>
-  {/if}
+    {/snippet}
+  </TzWorkspace>
 {/if}

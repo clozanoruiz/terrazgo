@@ -107,9 +107,9 @@ export default {
   "material.fill": "Rellenar desde el catálogo",
   "material.fill_hint":
     "Toma la composición que el catálogo publica para el producto elegido, sin tocar las líneas que usted ya haya anotado. Compruébela con la etiqueta: los metales pesados no se rellenan nunca, porque el catálogo mezcla porcentajes y mg/kg en las mismas columnas.",
-  "material.filled": "Se han añadido {count} líneas de composición.",
+  "material.filled.one": "Se ha añadido una línea de composición.",
+  "material.filled.other": "Se han añadido {count} líneas de composición.",
   "material.filled_none": "El catálogo no añade nada que no estuviera ya anotado.",
-  "material.richness_detail": "N {n} · P₂O₅ {p} · K₂O {k}",
   "material.supplier_registry": "Registro",
   "material.supplier_number": "Nº de identificación",
   "material.empty": "Aún no hay materiales fertilizantes registrados.",
@@ -133,6 +133,11 @@ export default {
   "fertilisation.dose_unit": "Unidad",
   "fertilisation.dose_detail": "{dose} {unit}",
   "fertilisation.sludge": "Aplicación de lodos de depuradora",
+  "fertilisation.sustainable_inputs": "Gesti\u00f3n sostenible de insumos",
+  "fertilisation.irrigation_link": "Riego con el que se fertirrig\u00f3",
+  "fertilisation.irrigation_link_hint":
+    "Enl\u00e1celo con el registro de riego de la pesta\u00f1a Riego: es el mismo acto, anotado en los dos registros que exige el real decreto.",
+  "fertilisation.irrigation_link_none": "Sin enlazar",
   "fertilisation.machinery": "Maquinaria",
   "fertilisation.machinery_hint": "Opcional (Anexo III C.g).",
   "fertilisation.service_section": "Empresa de servicios",
@@ -148,6 +153,9 @@ export default {
   "fertilisation.practices_section": "Buenas prácticas",
   "fertilisation.practices_hint":
     "El modelo impreso no las recoge; se anotan porque el cuaderno digital las pide.",
+  "fertilisation.practices_none": "Ninguna seleccionada",
+  "fertilisation.practices_selected.one": "1 seleccionada",
+  "fertilisation.practices_selected.other": "{count} seleccionadas",
   "fertilisation.delete_confirm": "¿Eliminar esta fertilización del registro?",
   "plan.title": "7.1 Plan de abonado",
   "plan.intro":

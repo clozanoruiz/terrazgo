@@ -31,6 +31,84 @@ fn composed_migration_definitions_are_valid() {
 }
 
 #[test]
+fn the_record_book_composes_the_same_schema_the_shell_does() {
+    // `terrazgo_recordbook::db::migrations()` hand-repeats the registry: core's
+    // steps followed by each contributing module's. Its doc comment has claimed
+    // since 2026-08-07 that a contract test pinned the two together — and until
+    // 2026-08-18, when a third module joined, no such test existed. That is the
+    // shape of finding the app has been bitten by twice (a stated guard that was
+    // only a comment), so here it is for real.
+    //
+    // What it catches: a module registered in the shell but forgotten in the
+    // book's composition. Nothing else would. The book would keep compiling and
+    // its own tests would keep passing, because a section only fails once it
+    // reads a table — so the gap would surface as "no such table" in a later
+    // seam, or, worse, as a section quietly missing from a legal document.
+    //
+    // The shell is the only crate that can see both sides: the book does not
+    // depend on src-tauri, and it must not — the arrow points the other way.
+    let mut from_shell = Connection::open_in_memory().unwrap();
+    composed_migrations().to_latest(&mut from_shell).unwrap();
+
+    let mut from_book = Connection::open_in_memory().unwrap();
+    terrazgo_recordbook::db::migrations()
+        .to_latest(&mut from_book)
+        .unwrap();
+
+    assert_eq!(
+        schema_objects(&from_shell),
+        schema_objects(&from_book),
+        "the record book's migration composition has drifted from the module \
+         registry — add the missing module to terrazgo-recordbook's db::migrations \
+         (and to its Cargo.toml), or remove the one that left"
+    );
+}
+
+#[test]
+fn the_siex_export_composes_the_same_schema_the_shell_does() {
+    // The second consumer crate, pinned on exactly the same terms and for the
+    // same failure: `terrazgo_siex::db::migrations()` hand-repeats the registry,
+    // and a module registered in the shell but forgotten there would compile,
+    // pass that crate's own tests, and then fail as "no such table" the first
+    // time a block read it — or, worse, emit a descriptor silently missing a
+    // register the authority expects.
+    //
+    // Written WITH the crate rather than after it, because the record book's
+    // equivalent went eleven days as a doc comment describing a test that did
+    // not exist.
+    let mut from_shell = Connection::open_in_memory().unwrap();
+    composed_migrations().to_latest(&mut from_shell).unwrap();
+
+    let mut from_export = Connection::open_in_memory().unwrap();
+    terrazgo_siex::db::migrations()
+        .to_latest(&mut from_export)
+        .unwrap();
+
+    assert_eq!(
+        schema_objects(&from_shell),
+        schema_objects(&from_export),
+        "the SIEX export's migration composition has drifted from the module \
+         registry — add the missing module to terrazgo-siex's db::migrations \
+         (and to its Cargo.toml), or remove the one that left"
+    );
+}
+
+/// Every table, index, view and trigger a database carries, with its DDL —
+/// the comparable fingerprint of a composed schema.
+fn schema_objects(conn: &Connection) -> Vec<(String, String, String)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT type, name, IFNULL(sql, '') FROM sqlite_schema
+             WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+        )
+        .unwrap();
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap()
+}
+
+#[test]
 fn registry_is_populated_with_unique_names() {
     let modules = registered_modules();
     assert!(
@@ -143,7 +221,7 @@ fn demo_seed_is_guarded_and_drives_alerts() {
     // Pinned "today" — demo dates: PHI window 2026-05-25..2026-06-24 (open),
     // ITV due 2026-07-01 with 30-day lead (active from 2026-06-01), licence
     // expiry 2026-08-15 with 60-day lead (active from 2026-06-16 only).
-    let config = module_cue::alerts::AlertConfig::default();
+    let config = module_cue::alerts::AlertConfig::defaults();
 
     module_cue::repository::refresh_alerts(&mut conn, "2026-06-12", &config).unwrap();
     let codes = active_alert_codes(&conn);

@@ -39,7 +39,8 @@ export default {
   "map.drawing_hint": "Haz clic en el mapa para añadir puntos; clic en el primero para terminar.",
   "map.draw_cancel": "Cancelar dibujo",
   "map.import": "Importar de archivo…",
-  "map.import_pick": "Elige un contorno ({count} encontrados)",
+  "map.import_pick.one": "Elige un contorno (1 encontrado)",
+  "map.import_pick.other": "Elige un contorno ({count} encontrados)",
   "map.import_filter": "Filtrar por nombre o atributos…",
   "map.import_use": "Usar",
   "map.sigpac_pick": "Buscar recinto SIGPAC",
@@ -52,7 +53,7 @@ export default {
   "map.track_stop": "Dejar de seguir",
   "map.sigpac_attach": "Guardar contorno en {plot}",
   "map.sigpac_create": "Crear parcela con este recinto",
-  "map.import_more": "…y {count} más — afina el filtro.",
+  "map.import_more": "…y {n} más — afina el filtro.",
   "map.boundaries": "Contornos guardados",
   "map.no_boundary": "Aún no hay contorno guardado.",
   "map.delete_boundary": "Quitar",
@@ -65,4 +66,8 @@ export default {
   "map.base_ortho": "Orto",
   "map.basemap_unavailable":
     "Mapa base no disponible sin conexión (aún no está en caché) — los contornos se muestran igualmente.",
+  "map.engine_unavailable":
+    "No se ha podido cargar el mapa. Reinicia la aplicación para volver a intentarlo.",
+  "map.drawing_unavailable":
+    "No se ha podido cargar la herramienta de dibujo. Reinicia la aplicación para volver a intentarlo.",
 };

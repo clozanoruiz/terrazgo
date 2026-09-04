@@ -111,7 +111,15 @@
       });
       map.on("moveend", () => onZoom?.(map.getZoom()));
       wireInteractions();
-    })();
+    })().catch((err) => {
+      if (cancelled) return;
+      // MapLibre arrives as a dynamic chunk, so this can reject before there is
+      // any map to report through. fetchStyle already handles its own failure
+      // and falls back to OFFLINE_STYLE, so what reaches here is the chunk
+      // itself — and with no map the canvas just stays empty. Saying so beats
+      // a blank rectangle the user cannot tell from a slow one.
+      notify(`${t("map.engine_unavailable")} [${errorText(err)}]`, true);
+    });
     return () => {
       cancelled = true;
       stopDrawing();
@@ -424,7 +432,15 @@
   // --- drawing (terra-draw) ------------------------------------------------------
 
   $effect(() => {
-    if (drawing) startDrawing();
+    if (drawing)
+      startDrawing().catch((err) => {
+        // terra-draw is a dynamic chunk too. Flipping the mode back off is the
+        // load-bearing half: the parent's draw button binds to `drawing`, so
+        // leaving it true lights the button over a map that will never accept
+        // a vertex.
+        drawing = false;
+        notify(`${t("map.drawing_unavailable")} [${errorText(err)}]`, true);
+      });
     else stopDrawing();
   });
 

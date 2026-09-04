@@ -7,10 +7,11 @@
 //! Split out of `commands.rs` (2026-08-13); the boundary machinery and the
 //! re-exports stay in the parent file.
 
-use super::{CmdResult, CommandError, lock_conn};
+use super::{CmdResult, CommandError};
 use crate::state::AppState;
 use serde::Serialize;
 use tauri::State;
+use terrazgo_core::date::today_utc;
 
 /// What the printed record book is missing. Advisory only — it is deliberately
 /// NOT wired into any export or print path, because a farmer must be able to
@@ -21,9 +22,13 @@ pub fn book_advisory(
     season_id: String,
     farm_id: String,
 ) -> CmdResult<terrazgo_recordbook::BookAdvisory> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(terrazgo_recordbook::book_advisory(
-        &conn, &season_id, &farm_id,
+        conn,
+        &season_id,
+        &farm_id,
+        &today_utc(),
     )?)
 }
 
@@ -60,8 +65,9 @@ pub fn report_languages(
     farm_id: String,
     ui_locale: String,
 ) -> CmdResult<ReportLanguagesInfo> {
-    let conn = lock_conn(&state)?;
-    let available = terrazgo_recordbook::languages_for_farm(&conn, &farm_id)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    let available = terrazgo_recordbook::languages_for_farm(conn, &farm_id)?;
     let default = terrazgo_recordbook::default_language(&available, &ui_locale);
     Ok(ReportLanguagesInfo {
         languages: available
@@ -99,11 +105,12 @@ pub async fn export_cuaderno_pdf(
     language: String,
 ) -> CmdResult<CuadernoPdfSummary> {
     let language = report_language(&language)?;
-    let guard = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let guard = db.conn()?;
     let today = terrazgo_core::date::now_utc_iso();
     let generated_on = today.split('T').next().unwrap_or(&today);
     let pdf =
-        terrazgo_recordbook::render_cuaderno(&guard, &season_id, &farm_id, generated_on, language)?;
+        terrazgo_recordbook::render_cuaderno(guard, &season_id, &farm_id, generated_on, language)?;
     crate::user_files::write_user_file(&app, &dest_path, &pdf.bytes)?;
     Ok(CuadernoPdfSummary {
         path: dest_path,
@@ -133,11 +140,12 @@ pub async fn export_cuaderno_xlsx(
     language: String,
 ) -> CmdResult<CuadernoXlsxSummary> {
     let language = report_language(&language)?;
-    let guard = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let guard = db.conn()?;
     let today = terrazgo_core::date::now_utc_iso();
     let generated_on = today.split('T').next().unwrap_or(&today);
     let book = terrazgo_recordbook::render_cuaderno_xlsx(
-        &guard,
+        guard,
         &season_id,
         &farm_id,
         generated_on,

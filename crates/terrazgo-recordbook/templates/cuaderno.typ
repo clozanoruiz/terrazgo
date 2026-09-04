@@ -674,6 +674,220 @@
   #super[(3)] #L.s8.note_water_quality
 ]
 
+// ================================================================ ECORREGÍMENES
+//
+// The book's THIRD decree, RD 1048/2022, reaching the cuaderno through
+// RD 1054/2022 anexo II item 4. Its sub-registers arrive one per seam; the
+// heading and the intro line below are the section's own furniture.
+//
+// The intro earns its place: section 9 is empty for most holdings, because the
+// duties exist only for those claiming an ecorrégimen. Without a line saying
+// so, an empty page reads as a book with a gap rather than a holding outside
+// the regime — and unlike the conditional registers of section 3, there is no
+// "APLICA: SÍ/NO" box anywhere in section 9 to say it instead.
+#pagebreak()
+#section-title[#L.s9.section_title]
+#block(above: 10pt, below: 8pt)[#L.s9.intro]
+
+// 9.1 pastoreo extensivo (P1, art. 30.2 ter). One printed line per animal
+// group, repeating the dates: the model's last three columns describe ONE group
+// of animals while the dates describe the grazing, so sheep and goats on the
+// same pasture are two lines.
+//
+// `blank_rows: 6` like every other empty register, and NEVER 0: section 9 has
+// no "APLICA TRATAMIENTO: SÍ/NO" box anywhere, so there is no stored statement
+// that could close this table. A farmer claiming no ecorrégimen is not
+// declaring the register empty — they are outside the regime, which the
+// section's intro says in prose.
+#subsection[#L.s9.s91.title]
+#data-table(
+  (auto, 1.4fr, auto, auto, 1fr, 1fr, auto),
+  (
+    [#L.s9.s91.group_ref #super[(1)]], [#L.s9.s91.plot_reference #super[(2)]],
+    [#L.s9.s91.started_on], [#L.s9.s91.ended_on #super[(3)]],
+    [#L.s9.s91.species], [#L.s9.s91.rega], [#L.s9.s91.animal_count],
+  ),
+  sys.inputs.grazing.map(r => (
+    [#r.group_ref], [#r.plot_reference],
+    [#r.started_on], [#r.ended_on],
+    [#r.species], [#r.rega], align(right)[#r.animal_count],
+  )),
+  size: 7.5pt,
+)
+#text(size: 6.5pt)[
+  #super[(1)] #L.s9.s91.note_group_ref
+  #super[(2)] #L.s9.s91.note_grouping
+  #super[(3)] #L.s9.s91.note_deadline
+]
+
+// 9.2 siega sostenible e islas de biodiversidad (P2, arts. 31 and 31.4.d).
+//
+// The model's row is a PLOT — it prints the SIGPAC parts and the surface in
+// columns of their own, the way table 2.1 does — and its activity cells
+// accumulate dates. So this page is a pivot of the register, and the assembly
+// hands it one row per plot with each column already joined. The spreadsheet
+// unfolds it back to one row per operation.
+//
+// Eleven columns, so 7pt: the alternative would be dropping a SIGPAC part, and
+// the model prints all five.
+#pagebreak()
+#subsection[#L.s9.s92.title]
+#data-table(
+  (auto, auto, auto, auto, auto, auto, auto, 1.3fr, 1fr, 1fr, 1.4fr),
+  (
+    [#L.s9.s92.plot_ids], [#L.s9.s92.province], [#L.s9.s92.municipality],
+    [#L.s9.s92.polygon], [#L.s9.s92.parcel], [#L.s9.s92.enclosure],
+    [#L.s9.s92.sigpac_area],
+    [#L.s9.s92.mowing #super[(1)]],
+    [#L.s9.s92.tillage #super[(2)]], [#L.s9.s92.sowing #super[(2)]],
+    [#L.s9.s92.maintenance #super[(3)]],
+  ),
+  sys.inputs.mowing.map(r => (
+    [#r.order], [#r.province], [#r.municipality],
+    [#r.polygon], [#r.parcel], [#r.enclosure], align(right)[#r.sigpac_area],
+    [#r.mowing], [#r.tillage], [#r.sowing], [#r.maintenance],
+  )),
+  size: 7pt,
+)
+#text(size: 6.5pt)[
+  #super[(1)] #L.s9.s92.note_cuts
+  #super[(2)] #L.s9.s92.note_date
+  #super[(3)] #L.s9.s92.note_activity
+]
+
+// 9.3 espacios de biodiversidad en cultivos bajo agua (P5, art. 45.2).
+//
+// The one page in this book that prints MORE columns than the model. Art. 45.2
+// names five dates — nivelación, siembra, inundación, secas and construcción de
+// caballones — and the printed form has a column for three. A book following
+// the form would not satisfy the article, so the two missing ones get columns,
+// placed where the article names them; that leaves the model's own three in
+// their original relative order. The layout is orientativo, the content binds
+// (the PHI-column precedent).
+//
+// The row is a plot, and its five cells are gathered from three tables in three
+// crates: core's sowing register, module-cue's treatments and
+// module-ecoscheme's cultural operations. The footnote says where each is
+// annotated, so a farmer knows which form to reach for.
+#subsection[#L.s9.s93.title]
+#data-table(
+  (auto, 1fr, 1fr, 1fr, 1fr, 1fr),
+  (
+    [#L.s9.s93.plot_ids],
+    [#L.s9.s93.levelling #super[(4)]], [#L.s9.s93.sowing],
+    [#L.s9.s93.flooding], [#L.s9.s93.drying],
+    [#L.s9.s93.ridging #super[(4)]],
+  ),
+  sys.inputs.flooded.map(r => (
+    [#r.order],
+    [#r.levelling], [#r.sowing], [#r.flooding], [#r.drying], [#r.ridging],
+  )),
+  size: 7.5pt,
+)
+#text(size: 6.5pt)[
+  #super[(4)] #L.s9.s93.note_added_columns
+  #L.s9.s93.note_sources
+]
+
+// 9.4 cubiertas vegetales en leñosos (P6, art. 42) and 9.5 cubiertas inertes
+// (P7, art. 43) — one register, two pages, split by the practice.
+//
+// **The row here is the cover, not the plot**, unlike 9.2 and 9.3: one
+// establishment date and one pair of widths, however many plots the cover was
+// established over. So there is nothing to pivot and the register's own row is
+// already the printed one.
+//
+// Art. 42 is THREE annotations on three deadlines, which this single row of
+// columns collapses. The widths therefore print blank on a cover whose second
+// annotation is not due yet — a true statement, not a gap, and the advisory is
+// what says so out loud.
+//
+// A page of their own, so the footnote run restarts at (1) the way it does
+// after every other pagebreak in this section.
+#pagebreak()
+#subsection[#L.s9.s94.title]
+#data-table(
+  (auto, auto, auto, auto, 1fr, 1fr, 1fr),
+  (
+    [#L.s9.s94.plot_ids],
+    [#L.s9.s94.established_on #super[(1)]],
+    [#L.s9.s94.width], [#L.s9.s94.free_canopy_width],
+    [#L.s9.s94.mowing], [#L.s9.s94.brush_cutting],
+    [#L.s9.s94.grazing #super[(2)]],
+  ),
+  sys.inputs.plant_covers.map(r => (
+    [#r.plot_ids], [#r.established_on],
+    align(right)[#r.width], align(right)[#r.free_canopy_width],
+    [#r.mowing], [#r.brush_cutting], [#r.grazing],
+  )),
+  size: 7.5pt,
+)
+#text(size: 6.5pt)[
+  #super[(1)] #L.s9.s94.note_establishment
+  #super[(2)] #L.s9.s94.note_maintenance
+]
+
+// 9.5 — the same register under art. 43, three columns shorter, because that
+// article asks for no maintenance at all.
+#subsection[#L.s9.s95.title]
+#data-table(
+  (auto, 1fr, 1fr, 1fr),
+  (
+    [#L.s9.s95.plot_ids],
+    [#L.s9.s95.established_on #super[(3)]],
+    [#L.s9.s95.width], [#L.s9.s95.free_canopy_width],
+  ),
+  sys.inputs.inert_covers.map(r => (
+    [#r.plot_ids], [#r.established_on],
+    align(right)[#r.width], align(right)[#r.free_canopy_width],
+  )),
+  size: 7.5pt,
+)
+#text(size: 6.5pt)[
+  #super[(3)] #L.s9.s95.note_establishment
+]
+
+// "9.6" pastos comunales (anexo IV) — a subsection the printed model does not
+// have.
+//
+// The clearest case in the whole book for deriving a register from the decree
+// rather than from the form: anexo IV obliges the annotation and the model
+// prints no page for it, so a schema read off the form would have missed the
+// duty entirely. The footnote says as much, because a reader comparing this
+// book against the official model must find the difference explained.
+//
+// One row per operation rather than 9.2's per-plot pivot: there is no official
+// layout to follow here, and the register shape every other section uses is
+// the honest default.
+#subsection[#L.s9.s96.title]
+#data-table(
+  (auto, 1.2fr, auto, auto, 2fr),
+  (
+    [#L.s9.s96.plot_ids], [#L.s9.s96.plots],
+    [#L.s9.s96.performed_on], [#L.s9.s96.performed_end_date],
+    [#L.s9.s96.activity #super[(4)]],
+  ),
+  sys.inputs.communal.map(r => (
+    [#r.plot_ids], [#r.plots],
+    [#r.performed_on], [#r.performed_end_date], [#r.activity],
+  )),
+  size: 7.5pt,
+)
+#text(size: 6.5pt)[
+  #super[(4)] #L.s9.s96.note_no_model_page
+  #L.s9.s96.note_invoices
+]
+
+// ==================================================== DETERMINADAS AYUDAS (10)
+//
+// A page with no register: the aids require RD 1051/2022 compliance, which
+// sections 3, 7 and 8 already record. One sentence, because printing nothing
+// would leave a reader counting section numbers to conclude the book skipped
+// one.
+#pagebreak()
+#section-title[#L.s10.section_title]
+#block(above: 10pt, below: 8pt)[#L.s10.note]
+
 // ========================================= DOCUMENTACIÓN A CONSERVAR (anexo)
 //
 // A duty, not a register: art. 16.3 obliges keeping what backs the entries for
@@ -700,6 +914,10 @@
   [#L.annex.item_plan],
   [#L.annex.item_sludge],
   [#L.annex.item_manure],
+  // The third decree's own. Anexo IV asks a comunal pasture's beneficiary for
+  // two things — the dates, which are register "9.6", and the invoices proving
+  // the work, which are a document and belong here.
+  [#L.annex.item_communal_invoices],
 )
 #block(above: 14pt, stroke: 0.5pt, inset: 6pt, width: 100%)[
   #text(weight: "bold")[#L.annex.retention]

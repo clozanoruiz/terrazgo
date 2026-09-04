@@ -156,16 +156,43 @@ fn geojson_geometries(path: &Path) -> Result<Vec<String>> {
 // GeoPackage
 // ---------------------------------------------------------------------------
 
+/// The 16-byte SQLite header, read as 16 bytes. Reading the whole file to
+/// compare a magic string is not merely wasteful on a hostile input: a real
+/// SIGPAC provincial GeoPackage is hundreds of megabytes, so it was a memory
+/// spike on the ordinary path and an out-of-memory kill on a phone.
 fn is_sqlite_file(path: &Path) -> Result<bool> {
-    let bytes = std::fs::read(path)?;
-    Ok(bytes.starts_with(b"SQLite format 3\0"))
+    const MAGIC: &[u8] = b"SQLite format 3\0";
+    let mut head = [0u8; MAGIC.len()];
+    let mut file = std::fs::File::open(path)?;
+    match std::io::Read::read_exact(&mut file, &mut head) {
+        Ok(()) => Ok(head == MAGIC),
+        // Shorter than the header, so it cannot be a database.
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
+        Err(e) => Err(e.into()),
+    }
 }
 
+/// Open a GeoPackage the user chose. This is a database file we did not write,
+/// so it gets the full treatment: read-only, [`harden`](terrazgo_core::db::harden)
+/// against hostile schema features, and an integrity check before we believe
+/// anything in it. `quick_check` rather than `integrity_check` because the point
+/// is to reject a damaged file cheaply, and the caller only reads geometry.
 fn open_gpkg(path: &Path) -> Result<Connection> {
-    Ok(Connection::open_with_flags(
+    let conn = Connection::open_with_flags(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )?)
+    )?;
+    terrazgo_core::db::harden(&conn)?;
+    let intact = conn
+        .query_row("PRAGMA quick_check", [], |r| r.get::<_, String>(0))
+        .map(|verdict| verdict == "ok")
+        // "file is not a database" surfaces here, not at open() — SQLite
+        // opens lazily.
+        .unwrap_or(false);
+    if !intact {
+        return Err(GeoError::Invalid("boundary_file_unsupported"));
+    }
+    Ok(conn)
 }
 
 /// The feature tables of a GeoPackage with a geographic SRS, as

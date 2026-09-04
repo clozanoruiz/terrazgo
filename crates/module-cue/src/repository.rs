@@ -21,7 +21,6 @@
 
 mod alert;
 mod analysis;
-mod export_alias;
 mod lookup;
 mod non_field_treatment;
 mod product;
@@ -36,9 +35,8 @@ use terrazgo_core::audit;
 pub use alert::{acknowledge_alert, dismiss_alert, list_active_alerts, refresh_alerts};
 pub use analysis::{
     get_analysis_record, insert_analysis_record, list_analysis_records,
-    soft_delete_analysis_record, update_analysis_record,
+    list_analysis_records_for_export, soft_delete_analysis_record, update_analysis_record,
 };
-pub use export_alias::{ensure_export_alias, find_export_alias};
 pub use lookup::{
     list_analysis_materials, list_analysis_types, list_authorisation_kinds, list_efficacies,
     list_formulation_types, list_justifications, list_non_field_subject_kinds,
@@ -46,11 +44,13 @@ pub use lookup::{
 };
 pub use non_field_treatment::{
     clear_register_declaration, get_non_field_treatment, insert_non_field_treatment,
-    list_non_field_treatments, list_register_declarations, set_non_field_efficacy,
-    set_register_declaration, soft_delete_non_field_treatment, update_non_field_treatment,
+    list_non_field_treatments, list_non_field_treatments_for_export, list_register_declarations,
+    set_non_field_efficacy, set_register_declaration, soft_delete_non_field_treatment,
+    subject_kinds_naming_premises, update_non_field_treatment,
 };
 pub use seed_treatment::{
-    get_seed_treatment, insert_seed_treatment, list_seed_treatments, set_seed_treatment_efficacy,
+    get_seed_treatment, insert_seed_treatment, list_seed_treatments,
+    list_seed_treatments_for_export, list_seed_treatments_for_sowing, set_seed_treatment_efficacy,
     soft_delete_seed_treatment, update_seed_treatment,
 };
 // The unit lists moved to core with the `unit` table (2026-08-07). Re-exported
@@ -60,23 +60,26 @@ pub use terrazgo_core::repository::{list_intensity_units, list_quantity_units, l
 // The farm-registry repositories moved to the core (2026-06-12); re-exported so
 // existing callers (demo seeding, tests) keep one repository entry point.
 pub use product::{
-    add_product_active_substance, add_product_authorisation, insert_active_substance,
-    insert_product, insert_product_with_authorisation, list_active_substances,
-    list_product_details, list_products_authorised, remove_product_active_substance,
-    remove_product_authorisation, soft_delete_product, update_product,
+    add_product_active_substance, add_product_authorisation, find_product_authorisation,
+    insert_active_substance, insert_product, insert_product_with_authorisation,
+    list_active_substances, list_product_details, list_products_authorised,
+    remove_product_active_substance, remove_product_authorisation, soft_delete_product,
+    update_product,
 };
 pub use terrazgo_core::repository::{
     insert_crop, insert_farm, insert_machinery, insert_operator, insert_plot, insert_season,
     list_crops, list_machinery, list_operators, list_seasons,
 };
 pub use treatment::{
-    crop_ids_with_treatments, get_treatment_record, insert_treatment_record,
-    list_treatment_records, phi_status_for_farm, season_has_treatments, set_treatment_efficacy,
-    soft_delete_treatment_record, update_treatment_record,
+    MAX_PHI_HORIZON_DAYS, MIN_PHI_HORIZON_DAYS, crop_ids_with_treatments, default_phi_horizon_days,
+    get_treatment_record, insert_treatment_record, list_treatment_records, phi_horizon_days,
+    phi_status_for_farm, season_has_treatments, set_treatment_efficacy,
+    soft_delete_treatment_record, update_treatment_record, validate_phi_horizon_days,
 };
-// Export-only query (soft-deleted records included, for the Borrar entries);
-// crate-visible so the seam stays the export module, not general callers.
-pub(crate) use treatment::list_treatment_records_for_export;
+// Export-only query (soft-deleted records included, for the Borrar entries).
+// Public since the exporter moved out to terrazgo-siex; the name is the guard
+// that its crate visibility used to be.
+pub use treatment::list_treatment_records_for_export;
 
 use crate::error::CueError;
 

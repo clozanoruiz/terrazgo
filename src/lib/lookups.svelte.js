@@ -38,6 +38,8 @@ const COMMANDS = {
   justifications: "list_justifications",
   efficacies: "list_efficacies",
   subjectKinds: "list_non_field_subject_kinds",
+  premisesKinds: "list_premises_kinds",
+  sowingKinds: "list_sowing_kinds",
   seedTreatmentKinds: "list_seed_treatment_kinds",
   analysisMaterials: "list_analysis_materials",
   analysisTypes: "list_analysis_types",
@@ -54,8 +56,11 @@ const COMMANDS = {
   applicationMethods: "list_application_methods",
   manureTreatments: "list_manure_treatments",
   nutrientKinds: "list_nutrient_kinds",
+  ecoPractices: "list_eco_practices",
+  culturalOperationKinds: "list_cultural_operation_kinds",
   // NOT here: list_fertiliser_material_kinds, list_problem_codes,
-  // list_growth_stages, list_crop_species, list_plant_products and
+  // list_growth_stages, list_crop_species, list_plant_products,
+  // list_premises_classes and
   // list_substance_codes all take a country (or a category), so they are
   // per-holding reference data rather than session-wide. Caching them would
   // need a key, and the view already knows the argument.
@@ -75,7 +80,14 @@ export function loadLookups() {
     const entries = Object.entries(COMMANDS);
     inFlight = Promise.all(entries.map(([, command]) => invoke(command)))
       .then((results) => {
-        entries.forEach(([name], index) => (lookups[name] = results[index]));
+        // A block body, not a concise one: assigning into a `$state` proxy from
+        // an expression-bodied arrow returns the right-hand side rather than the
+        // stored value, which Svelte flags as `assignment_value_stale` once per
+        // key. forEach discards the result either way, so this is only about
+        // not emitting thirty warnings on every startup.
+        entries.forEach(([name], index) => {
+          lookups[name] = results[index];
+        });
       })
       .catch((error) => {
         // A failed load must not be remembered as done: the next view retries.

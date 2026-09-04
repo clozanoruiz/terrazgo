@@ -12,19 +12,61 @@ use crate::date::parse_date;
 use crate::error::{CueError, Result};
 use jiff::ToSpan;
 
-/// Lead times for the expiry alerts. These are user convenience, not regulatory values;
-/// the future core settings UI will let the user override them.
-#[derive(Debug, Clone)]
+/// Lead times for the expiry alerts: how far ahead of an operator licence's or a
+/// machine's ITV expiry date the alert opens. **Not regulatory values** — no decree
+/// says when to start warning — and since 2026-08-26 the farmer can override both in
+/// Settings, because the right answer is something they know and the app does not: a
+/// carné de aplicador is renewed on a training course with limited dates, and how far
+/// ahead one has to book varies by province and season.
+///
+/// Deliberately **not** `Default`. The values below are module-cue's own, for its
+/// tests; the shell must resolve from device settings through [`AlertConfig::from_overrides`],
+/// and `AlertConfig::default()` is exactly the reflex that would silently ignore a
+/// farmer's choice while compiling perfectly. Removing the trait makes that a compile
+/// error instead of a wrong lead time nothing on screen would reveal.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AlertConfig {
     pub licence_lead_days: i64,
     pub itv_lead_days: i64,
 }
 
-impl Default for AlertConfig {
-    fn default() -> Self {
+/// Smallest and largest lead time a user may choose. Zero is excluded because a lead
+/// time of nothing is a licence that first alerts on the day it expires — indistinguishable
+/// from not being warned; the ceiling is a little over a year, past which the alert is
+/// permanent and stops meaning anything.
+pub const MIN_LEAD_DAYS: i64 = 1;
+pub const MAX_LEAD_DAYS: i64 = 400;
+
+/// Range-check a user-supplied lead time. The rule's owner owns its validation, the
+/// way `terrazgo_geo::db::validate_tile_cache_cap` does for the tile cache.
+pub fn validate_lead_days(days: i64) -> Result<()> {
+    if !(MIN_LEAD_DAYS..=MAX_LEAD_DAYS).contains(&days) {
+        return Err(CueError::Invalid("lead_days_out_of_range"));
+    }
+    Ok(())
+}
+
+impl AlertConfig {
+    /// module-cue's own lead times (60 days licence / 30 days ITV, per the alerts
+    /// design of 2026-06-11). **The shell must not call this** — it resolves from
+    /// device settings via [`from_overrides`](Self::from_overrides).
+    pub fn defaults() -> Self {
         Self {
             licence_lead_days: 60,
             itv_lead_days: 30,
+        }
+    }
+
+    /// Build from device settings, each `None` following the default above.
+    ///
+    /// `None` means "the user never chose", not "the default at the time of writing" —
+    /// so changing a default here reaches every user who left the setting alone, which
+    /// is the same contract `AppSettings`' optional fields carry.
+    pub fn from_overrides(licence_lead_days: Option<i64>, itv_lead_days: Option<i64>) -> Self {
+        let defaults = Self::defaults();
+        Self {
+            licence_lead_days: licence_lead_days.unwrap_or(defaults.licence_lead_days),
+            itv_lead_days: itv_lead_days.unwrap_or(defaults.itv_lead_days),
         }
     }
 }
@@ -32,6 +74,19 @@ impl Default for AlertConfig {
 /// PHI window rule. `phi_end_date` (= application date + PHI days, per RD 1311/2012 and
 /// the product label) is the FIRST day harvest is allowed again, so the alert is active
 /// on `[application_date, phi_end_date)` — inclusive start, exclusive end.
+///
+/// ```
+/// use module_cue::alerts::phi_window_is_active;
+///
+/// // A 21-day PHI applied on 12 March: the window runs to 1 April inclusive.
+/// let (applied, ends) = ("2026-03-12", "2026-04-02");
+/// assert!(phi_window_is_active(applied, ends, "2026-03-12").unwrap()); // day of
+/// assert!(phi_window_is_active(applied, ends, "2026-04-01").unwrap()); // last day
+///
+/// // The end date is the first day harvest is ALLOWED, so the alert is over.
+/// assert!(!phi_window_is_active(applied, ends, "2026-04-02").unwrap());
+/// assert!(!phi_window_is_active(applied, ends, "2026-03-11").unwrap());
+/// ```
 pub fn phi_window_is_active(
     application_date: &str,
     phi_end_date: &str,
@@ -53,6 +108,16 @@ pub fn zone_alert_is_active(status: &str) -> bool {
 /// The alert type raised for a zone kind. `None` for zone types the alert
 /// engine does not know (a future country's codes simply raise nothing until
 /// a mapping is added — never an error).
+///
+/// ```
+/// use module_cue::alerts::zone_alert_type;
+///
+/// assert_eq!(zone_alert_type("nitrate_vulnerable"), Some("nitrate_zone"));
+///
+/// // An unmapped zone kind raises nothing rather than failing: a future
+/// // country's codes must not break alert refresh for everyone else.
+/// assert_eq!(zone_alert_type("zone_humide"), None);
+/// ```
 pub fn zone_alert_type(zone_type_code: &str) -> Option<&'static str> {
     match zone_type_code {
         "nitrate_vulnerable" => Some("nitrate_zone"),
@@ -66,6 +131,21 @@ pub fn zone_alert_type(zone_type_code: &str) -> Option<&'static str> {
 /// onward, and it STAYS active once the date has passed — an expired licence or overdue
 /// inspection is the most urgent state, not a resolved one. It only clears when the
 /// source row's date changes (renewal) or the subject is deleted.
+///
+/// ```
+/// use module_cue::alerts::expiry_alert_is_active;
+///
+/// // A licence expiring 1 March, warned about 60 days ahead (the AlertConfig
+/// // default — a lead time, not a regulatory figure).
+/// // The window opens on 31 December, exactly 60 days before.
+/// let expiry = "2027-03-01";
+/// assert!(!expiry_alert_is_active(expiry, "2026-12-30", 60).unwrap());
+/// assert!(expiry_alert_is_active(expiry, "2026-12-31", 60).unwrap());
+///
+/// // Past the date it does not resolve itself: an expired licence is the
+/// // most urgent state there is.
+/// assert!(expiry_alert_is_active(expiry, "2028-06-01", 60).unwrap());
+/// ```
 pub fn expiry_alert_is_active(expiry_date: &str, today: &str, lead_days: i64) -> Result<bool> {
     let expiry = parse_date(expiry_date)?;
     let today = parse_date(today)?;
@@ -205,8 +285,51 @@ mod tests {
     #[test]
     fn default_config_lead_times() {
         // 60 days licence / 30 days ITV, per the alerts design (2026-06-11).
-        let config = AlertConfig::default();
+        let config = AlertConfig::defaults();
         assert_eq!(config.licence_lead_days, 60);
         assert_eq!(config.itv_lead_days, 30);
+    }
+
+    #[test]
+    fn an_unset_override_follows_the_default_rather_than_a_captured_value() {
+        // The whole point of storing `None` instead of 60: a user who never
+        // touched the setting must move when the default moves.
+        assert_eq!(
+            AlertConfig::from_overrides(None, None),
+            AlertConfig::defaults()
+        );
+    }
+
+    #[test]
+    fn each_override_applies_independently() {
+        let config = AlertConfig::from_overrides(Some(90), None);
+        assert_eq!(config.licence_lead_days, 90);
+        assert_eq!(
+            config.itv_lead_days,
+            AlertConfig::defaults().itv_lead_days,
+            "overriding one lead time must not disturb the other"
+        );
+    }
+
+    #[test]
+    fn lead_times_are_accepted_across_the_whole_offered_range() {
+        assert!(validate_lead_days(MIN_LEAD_DAYS).is_ok());
+        assert!(validate_lead_days(MAX_LEAD_DAYS).is_ok());
+        assert!(validate_lead_days(60).is_ok());
+    }
+
+    #[test]
+    fn lead_times_outside_the_range_are_refused() {
+        // Zero would first alert on the expiry day itself, which is not a
+        // warning; the ceiling keeps a permanent alert from being reachable.
+        for days in [MIN_LEAD_DAYS - 1, MAX_LEAD_DAYS + 1, -30] {
+            assert!(
+                matches!(
+                    validate_lead_days(days),
+                    Err(CueError::Invalid("lead_days_out_of_range"))
+                ),
+                "{days} should have been refused"
+            );
+        }
     }
 }

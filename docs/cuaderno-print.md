@@ -33,10 +33,14 @@ SÍ/NO" checkboxes); **recommended** = in the model but not in Anexo III Parte I
 (kept because the model is what inspectors know, and art. 16.3 obliges keeping
 the underlying documents).
 
-> **Two decrees feed one book.** RD 1311/2012 governs the phytosanitary
+> **Three decrees feed one book.** RD 1311/2012 governs the phytosanitary
 > registers (1.x, 2.x, 3.x, 4); RD 1051/2022 governs fertilisation, irrigation
-> and soil (6, 7.1, 8, A.3). They carry different deadlines and different
-> exemption thresholds, and the printed model reflects only the first.
+> and soil (6, 7.1, 8, A.3); RD 1048/2022 governs the eco-scheme annotations
+> (section 9), reaching the cuaderno through RD 1054/2022 anexo II item 4. They
+> carry different deadlines and different exemption thresholds, and the printed
+> model reflects only the first. The third is also the one whose registers must
+> be derived from the decree rather than the form — see "The eco-scheme
+> registers" below.
 
 | Model section | Legal basis | Class | Coverage |
 | --- | --- | --- | --- |
@@ -58,12 +62,12 @@ the underlying documents).
 | 6 Fertilización | Anexo III **Parte I.C** + **RD 1051/2022 art. 5**, amended by RD 934/2025 | **binding since 1 Jan 2026** | **complete since 2026-08-08** — `fertiliser_material` + `fertilisation_record` and its junctions in `module-fertilisation`. **The model's "OPCIONAL (EXCEPTO ZONAS VULNERABLES)" heading is STALE** (Andalucía v6 is from 2023 and predates RD 1051/2022): this is a NATIONAL duty with a size threshold, not a nitrate-vulnerable-zone matter. Exempt only: ≤5 ha arable+permanent (temporary pastures excluded) **and** ≤1 ha irrigated, or unfertilised pasture-only. **The size exemption is partial, not total** (art. 4.1, checked 2026-08-07): a holding exempt under the ≤5 ha limb that has fertilised pastures, or greenhouses totalling >0,1 ha under cover, must still record **those surfaces**. Recording deadline **one month from each operation**. SIEX: `Fertilizacion` |
 | 7.1 Plan de abonado | **RD 1051/2022 art. 4.2 + art. 6** (not merely PAC ecoschemes) | **binding from 1 Sep 2026** | **complete since 2026-08-08** — `fertilisation_plan` carries art. 5.a's four (what the BOOK records); art. 6's plan document is kept, not printed. The table's aportadas and acumuladas are assembled from section 6. Earlier, **1 Jan 2026**, for irrigated production units sown or planted 1 March–30 June. Exempt: unfertilised pasture-only; ≤10 ha secano or fodder for self-consumption. SIEX: `PlanAbonado` |
 | 8 Riego | Anexo III C.l + **RD 1051/2022 art. 5.e** | **binding since 1 Jan 2026** | **complete since 2026-08-07** — `irrigation_record` + its junctions in `module-fertilisation`, NOT the Irrigation module: art. 5.e puts *doses and dates of irrigation* inside the SAME cuaderno duty as fertilisation, on the same one-month deadline. SIEX `Riego` requires `SistemaRiego` per EVENT and carries `OrigenAgua` — which finally gives `SIST_RIEGO` and `ORIGEN_AGUA_RIEGO` their consumer and closes the recorded `crop.irrigation_code` gap where it belongs, on the form. The Irrigation module keeps *planning* (schedules, ETo); this is the *record* |
-| 9.1 (P1) Pastoreo extensivo | RD 1048/2022 art. 30.2 ter | conditional (holdings claiming the eco-scheme) | **not built — recorded gap.** Grazing start/end dates, animal species, REGA, animals moved (SIEX: `Pastoreo`) |
-| 9.2 (P2) Siega sostenible / islas de biodiversidad | RD 1048/2022 art. 31 + 31.4.d | conditional | **not built — recorded gap.** Mowing dates, laboreo, siembra, other maintenance (SIEX: `LaboresCulturales`) |
-| 9.3 (P5) Espacios de biodiversidad: cultivos bajo agua | RD 1048/2022 art. 45.2 | conditional | **not built — recorded gap.** Dry-sowing, flooding, drying, levelling and caballón dates (SIEX: `LaboresCulturales`, whose `TIPO_LABOR` carries "Nivelación" and "Caballones y tablas en cultivos bajo agua") |
-| 9.4 (P6) Cubiertas vegetales en leñosos | RD 1048/2022 art. 42.1.a, 42.1.c, 42.1.e | conditional | **not built — recorded gap.** Establishment date, maintenance type, cover width and free canopy width — **three annotations with three different deadlines**, which the model's single row collapses (SIEX: `DatosCubierta`) |
-| 9.5 (P7) Cubiertas inertes de restos de poda | RD 1048/2022 art. 43.1.a–b | conditional | **not built — recorded gap.** Establishment date (not after 15 April) and the same two widths (SIEX: `DatosCubierta`) |
-| — pastos comunales | RD 1048/2022 **anexo IV** | conditional | **not built — recorded gap, and the model prints NO page for it**: dates of maintenance activities per pasture plot, within one month, invoices kept. The clearest proof that duties come from the decree, not the form |
+| 9.1 (P1) Pastoreo extensivo | RD 1048/2022 art. 30.2 ter | conditional (holdings claiming the eco-scheme) | **complete since 2026-08-18** — `grazing_record` + `grazing_plot` + `grazing_animal` in `module-ecoscheme`. **The deadline runs from the END of grazing**, so an open record (`ended_on` NULL) is not late and prints a blank end cell rather than an invented date. One printed line per animal group: the model's last three columns describe one group while the dates describe the grazing, so sheep and goats on one pasture are two lines. Column 2 asks for the SIGPAC **reference**, not the table-2.1 cross-reference the other registers use — the plot's name prints instead when it carries no complete reference. `ESPECIE_ANIMAL` vendored with it (SIEX: `Pastoreo`) |
+| 9.2 (P2) Siega sostenible / islas de biodiversidad | RD 1048/2022 art. 31 + 31.4.d | conditional | **complete since 2026-08-19** — `cultural_operation` + `cultural_operation_plot` in `module-ecoscheme`, ONE table behind four duties on three pages. **The printed page is a PIVOT of the register**: the model's row is a *plot* (it carries the SIGPAC parts and the surface in columns of their own, like table 2.1) and its cells accumulate dates, so two cuts are one row and one operation on two plots is two. `no_tillage` deliberately does **not** print under "Laboreo" — a date there states the ground was worked. The **Siembra column stays blank until seam 3**: `TIPO_LABOR` publishes no siembra code, and a sowing is its own register. `DEST_RES_VEG` gains its consumer (SIEX: `LaboresCulturales`) |
+| 9.3 (P5) Espacios de biodiversidad: cultivos bajo agua | RD 1048/2022 art. 45.2 | conditional | **complete since 2026-08-19, and it prints FIVE date columns where the model prints three.** Art. 45.2 names *"las fechas de nivelación, siembra, inundación y secas, y construcción de caballones"*; the form has no column for nivelación or caballones, so a book following the form would not satisfy the article — the layout is orientativo and the content binds (the PHI-column precedent). The two added columns sit where the ARTICLE names them, which leaves the model's own three in their original relative order. The row is a plot, and its five cells come from **three tables in three crates**: `sowing_record` (core), `treatment_record.drying_date` (module-cue) and `cultural_operation` (module-ecoscheme) — only `terrazgo-recordbook` can read all three. **A plot enters the page on evidence of being a cultivo bajo agua** (a flooded sowing, a `flooded_biodiversity` operation, or a treatment that dried the field); once in, every sowing on it prints, which is what keeps a dry sowing visible in the month before the flooding is annotated |
+| 9.4 (P6) Cubiertas vegetales en leñosos | RD 1048/2022 art. 42.1.a, 42.1.c, 42.1.e | conditional | **complete since 2026-08-19** — `soil_cover` + `soil_cover_plot` in `module-ecoscheme`. **The row here is the COVER, not the plot**, unlike 9.2 and 9.3: one establishment date and one pair of widths however many plots it covers, so there is nothing to pivot. Art. 42 is **three annotations on three deadlines**, which the model's single row collapses and the schema therefore splits — `established_on` is the record, the two widths are a nullable all-or-none triple carrying their own `widths_stated_on`, and the maintenance is rows in the registers those activities already belong to. So the three "mantenimiento por medios mecánicos" columns are cross-read: Siega and Desbrozado from `cultural_operation`, Pastoreo from `grazing_record`, both keyed on `soil_cover_id` and resolved once per book. `TIPO_COBERTURA_SUELO` gains its consumer, though **no printed column**: art. 42.1.a annotates the date, not which of the two kinds it was (SIEX: `DatosCubierta`) |
+| 9.5 (P7) Cubiertas inertes de restos de poda | RD 1048/2022 art. 43.1.a–b | conditional | **complete since 2026-08-19** — the same `soil_cover` register under `practice_code = 'inert_cover'`, printed three columns shorter because **art. 43 asks for no maintenance at all**. The register refuses a maintenance line against one rather than storing something no page would print. The 15 April limit is advisory work, not a write-time refusal: the book records what happened and does not decide whether an aid was earned (SIEX: `DatosCubierta`) |
+| "9.6" pastos comunales | RD 1048/2022 **anexo IV** | conditional | **complete since 2026-08-19, on a page the model does not have.** The same `cultural_operation` rows under `practice_code = 'communal_pasture'`, printed as a subsection the book numbers **9.6** itself — with a footnote saying the official model carries no page for it, because a reader comparing the two must find the difference explained. One row per operation, not 9.2's per-plot pivot: there is no official layout to follow, so the register shape the rest of the book uses is the honest default. Folding it into 9.2 was rejected — that page's footnotes are about P2's two cuts and its 300 m threshold, which would sit wrongly over an anexo IV row. The invoices the annex asks for join the conservation annex (`item_communal_invoices`); the book holds no attachments by design. The clearest proof that duties come from the decree, not the form |
 | 10 Determinadas ayudas asociadas | RD 1048/2022 arts. 49.h, 51.e, 53.e, 54.d, 61.4 | recommended | **nothing to build.** The page carries no fields — it redirects to sections 3, 7 and 8, because the aid requires "la aplicación de la gestión sostenible de insumos conforme a las disposiciones normativas vigentes en materia de nutrición sostenible de los suelos agrarios", i.e. RD 1051/2022 compliance, which those sections already record |
 | Documentación a conservar (annex page) | art. 16.3 | binding (as a duty, not a table) | **complete since 2026-08-07** — a plain numbered list of the model's seven items plus the three-year retention sentence, never tick boxes (it is a reminder of what to file away, not something the farmer fills in). The book holds no attachments by design (the seam-4 scope decision) |
 
@@ -76,7 +80,7 @@ not *telling* — and until this slice nothing told, since `export_precheck`
 serves the parked SIEX export rather than the artifact that carries legal
 weight.
 
-`terrazgo_recordbook::advisory::book_advisory` reports six things, all
+`terrazgo_recordbook::advisory::book_advisory` reports ten things, all
 advisory, none of them able to stop a print or an export:
 
 | Finding | Source |
@@ -87,6 +91,50 @@ advisory, none of them able to stop a print or an export:
 | Applicators with no ROPO / licence number | table 1.2, and B.d's identification |
 | Conditional registers ticked neither SÍ nor NO | the model's own "APLICA TRATAMIENTO" boxes — silence is the one state of the three that says nothing |
 | Sections 6 and 8 empty | RD 1051/2022 art. 5.d and 5.e |
+| Covers with no widths stated | RD 1048/2022 arts. 42.1.e / 43.1.b |
+| Inert covers established after 15 April | art. 43.1.a |
+| Live covers with no maintenance recorded | art. 42.1.c |
+| Grazings still open on a closed campaign | art. 30.2 ter |
+
+It takes `today` as a parameter rather than reading the clock, the
+`refresh_alerts` precedent, because one of the four section-9 checks is a date
+rule and a rule that cannot be tested is not pinned.
+
+### Section 9's checks are record-triggered, and that is the design (2026-08-20)
+
+The four eco-scheme findings each key off a record the farmer **chose to
+create**, so none of them reaches a holding outside the regime. There is
+deliberately **no `SectionGap` and no "section 9 is empty" finding**: the app
+cannot know which eco-schemes were claimed in the solicitud única, so an empty
+section 9 is the normal state of most holdings. It is the plan-de-abonado
+precedent and stronger, since here the duty itself is per claimed practice.
+
+Four routes to a claim were checked and all are closed — recorded so the
+question is not re-derived. The Nube de SIGPAC OGC API publishes five
+collections and none is an eco-scheme layer; `cultivo_declarado` carries
+solicitud-única aid *lines* (`CL`, `VI`, `PT`), not practices; FEGA's
+287-catalogue registry publishes no practice list at all; and the CUE exchange
+schema models activities, not entitlements. **The design does not preclude
+it**: `practice_code` sits on every record, so a holding-level "claimed P6,
+recorded nothing" finding would be one advisory field away.
+
+Two of the four are worded carefully, because the obvious wording would be a
+false statement:
+
+- **Missing widths are not late.** Art. 42.1.e falls due after 42.1.a, so a
+  cover between the two deadlines is a *complete* record with an annotation
+  still to make. `widths_stated_on` is what makes the two distinguishable at
+  all — it is why that column exists, though no source asks for it.
+- **An open grazing is not late either.** The month runs from the END of
+  grazing (art. 30.2 ter, and the model's own 9.1 footnote), so the honest
+  finding is that the book cannot show the annotation *finished* — and only
+  once the campaign has closed. A season with no `ends_on` says nothing about
+  that and produces no finding.
+
+The 15 April boundary is derived from the record's **own** `established_on`
+year, never from `season.label`, which is free text and spans two calendar
+years anyway. And there is **no communal-pasture invoice check**: anexo IV asks
+for invoices kept as evidence, and the book holds no attachments by design.
 
 ### Why it never says "exempt"
 
@@ -120,14 +168,15 @@ is exempted per *unidad de producción* (art. 4.2), a unit the schema does not
 model — a plan covers a set of crops — so an advisory over it would either nag
 every smallholder or excuse a large one.
 
-## The eco-scheme registers this book does not carry (2026-08-11)
+## The eco-scheme registers (found 2026-08-11, built by 2026-08-20)
 
 A third decree writes into the cuaderno. RD 1054/2022 anexo II ends with *"otros
 aspectos que se recojan en la respectiva normativa sectorial"*, and **RD
 1048/2022** is that sectoral norm for anyone claiming an ecorrégimen: ten
 clauses ordering an annotation **in the cuaderno de explotación agrícola**, most
-of them within one month of the activity. The table below exists so the gap is
-visible rather than implied.
+of them within one month of the activity. A completeness audit found them
+missing; the arc that followed built all six duties, and the table below stayed
+as its spec.
 
 It is ordered by **decree and article**, with the model's pages in the last
 column rather than as the organising principle — because the duties exist
@@ -146,17 +195,23 @@ whether or not a form prints them, and one of these has no printed page at all.
 | 45.2 | *"las fechas de nivelación, siembra, inundación y secas, y construcción de caballones"* | 1 month per activity | 9.3 |
 | **anexo IV** | the dates of maintenance activities on each **pasto comunal** plot, with the invoices kept as evidence | 1 month | **none** |
 
-Three things the printed form hides, and a schema derived from it would lose:
+Three things the printed form hides, and a schema derived from it would have
+lost — each of which the built registers had to answer:
 
 1. **Anexo IV's duty has no page.** The model prints five eco-scheme
    sub-registers; the decree carries six duties. Reading the form would have
-   missed the sixth entirely.
+   missed the sixth entirely — the book prints it as a **"9.6"** of its own.
 2. **Art. 42 is three annotations with three different deadlines**, collapsed
    into one row of columns. A single "cover" record with one date would not
-   satisfy it.
+   satisfy it, which is why `soil_cover` splits into a record, a nullable
+   all-or-none width triple and rows in two other registers.
 3. **The cuaderno is the primary evidence route, not a convenience.** Farmers
    who do not use it fall back to a paper register they must custody plus
    georeferenced photographs on a 1 % sample of beneficiaries.
+
+A fourth surfaced while building: **art. 45.2 names five dates and model 9.3
+prints three**, so the book prints five — the layout is orientativo and the
+content binds, the PHI column precedent.
 
 **Two of RD 1048/2022's duties are already satisfied**: arts. 35.2 and 45.7 ask
 for a plan de abonado plus *"las operaciones de aporte de nutrientes y materia
@@ -170,10 +225,17 @@ control) names the CUE as a system and creates no annotation duty. RD 1049/2022
 orgánica al suelo deben estar correctamente registradas en el cuaderno de
 explotación"*, plus the plan de abonado — already carried.
 
-The vocabularies exist and nothing would need inventing: `TIPO_COBERTURA_SUELO`
-and `TIPO_LABOR` are vendored already (and read by nothing today), and
-`ESPECIE_ANIMAL` and `RAZAS` are published in the FEGA registry. The SIEX twins
-are `Pastoreo`, `DatosCubierta` and `LaboresCulturales`, none of them captured
+**The vocabularies needed nothing invented, and now all have consumers.**
+`TIPO_COBERTURA_SUELO`, `TIPO_LABOR` and `DEST_RES_VEG` were vendored and read
+by nothing; the three registers gave them readers, and `ESPECIE_ANIMAL` was
+vendored with the grazing one. `RAZAS` is published and deliberately **not**
+vendored — neither model 9.1 nor `Pastoreo.Animales[]` asks for a breed
+(`maintenance.md` §1 records the negative). Two owned lookups carry what FEGA
+publishes no list for: `eco_practice` (the six duties) and
+`cultural_operation_kind`, whose 15 codes map onto `TIPO_LABOR`'s 14 with a
+deliberately non-injective pair, pinned in both directions so a new upstream
+code makes somebody look. The SIEX twins are `Pastoreo`, `DatosCubierta` and
+`LaboresCulturales`, all three now captured and none emitted
 (`siex-export.md`).
 
 ## What the EU annex adds (Reglamento (UE) 2023/564)
@@ -411,7 +473,33 @@ applicator and efficacy.
 resembles it: B.b identifies what was treated as "la parcela, **o en su caso,
 local o medio de transporte tratado**", and B.f asks for "el volumen tratado
 expresado en metros cúbicos" *como tratamiento de locales* — the model's own
-subject and quantity columns, straight out of the annex. So B.d ("identificación
+subject and quantity columns, straight out of the annex.
+
+**B.b's word is "identification", which is why 3.4 and 3.5 gained a registry
+(2026-08-20).** The subject cell had been free text retyped on each record, and
+that identifies nothing — two treatments of one warehouse can spell it
+differently and nothing ties them together, so the book cannot answer "what was
+done in this store this year". Core's `premises` is the identity; the printed
+cell is composed from it (name + address for a local, name + model + plate for
+a vehicle) and frozen onto the record, so correcting a store's address never
+rewrites what a past record states. The link is **nullable**: a farmer who has
+not built the registry yet still records a lawful treatment, and it is the SIEX
+export's precheck that demands it — the `efficacy_code` precedent. A
+postharvest record names no premises at all, because it treats produce.
+
+**The registry reached the interface on 2026-08-21**, which is what makes it an
+identification rather than a table: `RegistryPremises.svelte` is the catalogue's
+sixth section (farm-scoped, like machinery), and each register offers only the
+kind its own page prints — 3.4 the buildings, 3.5 the vehicles. Choosing one
+replaces the free-text field rather than sitting beside it, because the printed
+cell is composed in Rust and a second editable field would be asking twice; the
+free text stays for a farmer who has registered nothing yet, with a line
+pointing at the catalogue. The registry entry also carries two fields the
+*printed* model never asks for and Anexo V does — a cadastral reference and
+FEGA's class of building — which are recorded on the registry row and
+deliberately kept out of the composed cell (`data-model.md` → `premises`).
+
+So B.d ("identificación
 del aplicador **y, en su caso, del asesor**") binds here as it does in 3.1, and
 the register carries the advisor even though the printed model shows no column
 for it (2026-08-10). The PDF folds the pair into the applicator cell the model
@@ -473,6 +561,55 @@ Footnote (1) is the irrigation-system list, and it is **`SIST_RIEGO` verbatim**:
 > records the system used for *this irrigation* — which is why the recorded
 > `crop.irrigation_code → SIST_RIEGO` gap was never closable on the crop.
 > Volumen acumulado is a running sum, assembled like 7.1's.
+
+### Section 9 — the eco-scheme registers (transcribed 2026-08-17)
+
+Not in any doc before the arc that builds them. Numbering is the model's; the
+sixth duty has no page and the book gives it one.
+
+**9.1 (P1, art. 30.2 ter)** — Id. del grupo de parcelas⁽¹⁾ · Referencia SIGPAC
+de la parcela o grupo⁽²⁾ · Fecha inicio de pastoreo · Fecha fin de pastoreo⁽³⁾ ·
+Especie animal que pasta · REGA · N.º animales desplazados al pasto.
+⁽¹⁾ completed only for plots more than 10 km from the main livestock
+installation; ⁽²⁾ plots less than 10 km apart may be treated as a group;
+⁽³⁾ the annotation is due within one month of the **END** of grazing.
+
+**9.2 (P2, art. 31)** — Id. de parcelas · Provincia · Municipio · Polígono ·
+Parcela · Recinto · Superficie SIGPAC (ha) · Siega: fecha de cortes⁽¹⁾ · Otras
+actividades: Laboreo⁽²⁾ / Siembra⁽³⁾ / Otras activ. de mantenimiento⁽⁴⁾.
+⁽¹⁾ two cuts a year, threshold 300 m altitude; ⁽²⁾⁽³⁾ indicate a date;
+⁽⁴⁾ indicate a date **and** the activity.
+
+**9.3 (P5, art. 45.2)** — Id. Parcelas · Fecha de siembra en seco · Fecha de
+inundación · Fecha de seca para tratamiento herbicida o fitosanitario.
+**Two of art. 45.2's five dates have no column** — nivelación and construcción
+de caballones — so the book adds them: the layout is orientativo, the content
+binds (the PHI-column precedent). As built, the printed order is the ARTICLE's
+— nivelación · siembra en seco · inundación · seca · caballones — which leaves
+the model's own three in their original relative order.
+
+**9.4 (P6, art. 42)** — Id. Parcelas · Fecha de establecimiento⁽¹⁾ · Anchura de
+la cubierta (m) · Anchura libre proyección copa (m) · Mantenimiento por medios
+mecánicos: Siega / Desbrozado / Pastoreo⁽²⁾. ⁽¹⁾ live spontaneous or sown
+cover; ⁽²⁾ slopes ≥ 10 % and bancales.
+
+**9.5 (P7, art. 43)** — Id. Parcelas · Fecha de establecimiento⁽³⁾ · Anchura de
+la cubierta (m) · Anchura libre proyección copa (m). ⁽³⁾ inert cover from
+trituración of pruning residue.
+
+**"9.6" (anexo IV)** — no printed page exists. The book's own: Id. de parcelas ·
+Parcelas · Fecha · Fecha fin · Actividad de mantenimiento, with a footnote
+stating that the official model carries no page for the duty.
+
+**Section 10** carries no fields — it redirects to sections 3, 7 and 8. Nothing
+to build, but the page prints one sentence saying so, or a reader concludes the
+book skipped a section.
+
+> **No "APLICA TRATAMIENTO: SÍ / NO" box appears anywhere in section 9.** The
+> `register_declaration` mechanism does not extend here and must not be
+> extended: a farmer claiming no ecorrégimen is not declaring the register
+> empty, they are outside the regime — which the section's intro says in prose.
+> Every section 9 table therefore uses `blank_rows: 6`, never `0`.
 
 ### Anexo III Parte I sección C — the binding list for 6 and 8
 
@@ -996,15 +1133,46 @@ design above in four places, and recorded two gaps rather than building them.
   is stored on the lookup rather than matched on the code, so the derivation
   reads from data.
 
-Recorded, deliberately not built: the twin's **`Fertirrigacion` sub-block**
-(its own `SistemaRiego`, `DosisN`/`DosisP`, `OrigenAgua`, `NumContador` — the
-model has no fertigation columns, `application_method_code` already records
-*that* it was fertigation, and the water side is §8's), its **`GestionSostInsu`
-boolean**, and **`BuenasPracticasRiego`**, which is optional on `Fertilizacion`
-AND on `Riego` and has no column in either printed section. The line that
-decides: **required in the twin → capture it (`BuenasPracticas` is);
-optional in the twin AND absent from the model → record it as a gap.** All
-three are in `docs/siex-export.md`'s dormant-export inventory.
+Three things were recorded here as deliberately not built, and **seam 3 built
+two of them on 2026-08-21** — because the rule this paragraph stated was too
+coarse, and correcting it is worth more than either field.
+
+- **`Fertirrigacion`** is BUILT. The original reasoning — "the model has no
+  fertigation columns, `application_method_code` already records *that* it was
+  fertigation, and the water side is §8's" — missed that the sub-block is the
+  **only reader anywhere in the format** of C.l's two water-quality figures,
+  which `irrigation_record` captures and no printed column and no member of
+  `Riego` carries. Not building it left two columns of a *binding* Anexo III
+  letter with no consumer at all. It is filled through
+  `fertilisation_record.irrigation_record_id`, which the farmer sets on the §6
+  form when the method is a fertigation.
+- **`GestionSostInsu`** is BUILT, as `sustainable_input_management`.
+- **`BuenasPracticasRiego`** is still a recorded gap, and now for a reason that
+  survives: it is **Voluntario** in Anexo V on both blocks, not merely optional
+  in the schema.
+
+**The rule that decided them was wrong, and the corrected one is:** the test is
+not "required in the twin" — that is the JSON Schema's `required`, which is only
+*structural validity of an entry you chose to send*. It is **Anexo V's own
+`OBLIGATORIEDAD` column**: a field FEGA marks `Obligatorio` inside a block we do
+send is a real requirement even when no decree names it, and a field it marks
+`Voluntario` and no page prints is a recorded gap. `BuenasPracticas` is captured
+under both readings; `GestionSostInsu` only under the corrected one. The three
+questions this untangles — required, obligatorio and binding — are set out in
+`docs/siex-export.md`.
+
+**Code `0` is exclusive (2026-09-01).** Every ámbito of
+`BUENAS_PRACTICAS_AMBITOS` opens with `"0";"No realiza buenas prácticas"`, an
+ordinary row that the file's shape says nothing special about — so a record
+could hold it beside the other forty, claiming at once that nothing was done and
+what was done. `validated_practices` refuses that pair, and the form never offers
+it. **This is not the case `soil_cover`'s "the picker narrows, never the
+repository" rule protects**: that rule exists because the catalogue *grows*
+between releases and refusing an unlisted code would make a lawful practice
+unrecordable. Here both codes are known, published and fixed in meaning, and a
+register that can hold the contradiction exports it as two
+`BuenaPracticaFertilizante` entries. The section stays optional throughout — an
+empty set and a bare `0` are both legal answers, and only the pair is refused.
 
 ### A.3's soil block and the annex additions (2026-08-09)
 
@@ -1131,6 +1299,166 @@ either mapped or listed in `UNMAPPED_COLUMNS` **with its reason**, and a
 declared exclusion that stops being published fails too — stale reasoning
 being its own kind of rot.
 
+### Sections 9.4 and 9.5 as built (2026-08-19)
+
+**One register, two pages, split by the practice** — the shape 9.2 and the
+book's own "9.6" already use. `soil_cover` carries both: art. 42's live cover of
+spontaneous or sown vegetation (P6, model 9.4) and art. 43's inert cover of
+triturated pruning residue (P7, model 9.5). The two articles ask for the same
+three things, `DatosCubierta` gives them one block, and `practice_code` decides
+the page.
+
+**The row here is the cover, not the plot.** That is the difference from 9.2 and
+9.3, which pivot onto the parcel: a cover has one establishment date and one
+pair of widths however many plots it was established over, so there is nothing
+to accumulate per plot and the register's own row is already the printed one.
+The plots ride in the "Id. Parcelas" cell as table-2.1 cross-references.
+
+#### Art. 42 is three annotations, and the schema is shaped like that
+
+The printed model collapses them into one row of columns. Read from the decree
+instead, they are three facts with three deadlines, and they arrive at three
+different times:
+
+| Clause | What is annotated | Deadline | Where it is stored |
+| --- | --- | --- | --- |
+| 42.1.a / 43.1.a | the establishment date | 1 month | `soil_cover.established_on` — the record itself |
+| 42.1.e / 43.1.b | the cover width **and** the free canopy width | within the month before the 4-month live-cover period ends | `width_m`, `free_canopy_width_m`, `widths_stated_on` — nullable, all three or none |
+| 42.1.c | the maintenance performed | within the month before the solicitud-única modification period ends | `cultural_operation` and `grazing_record` rows carrying a `soil_cover_id` |
+
+Three consequences worth stating, because each is a place the form would have
+misled a schema derived from it:
+
+- **A cover with no widths is a COMPLETE record.** Its second annotation is not
+  due yet. So the cells print blank rather than as a zero, which would be a
+  statement the farmer never made, and the advisory is what says the annotation
+  is outstanding.
+- **`widths_stated_on` is a column neither the decree nor the twin asks for.**
+  It exists because the deadline is what the annotation is *about*: with it,
+  "measured in June" and "never measured" are distinguishable at query time.
+  Without it they are the same NULL, and no advisory could tell them apart.
+- **The widths move together or not at all** (`invalid.incomplete_widths`), the
+  `plot_water_point.distance_m` pairing: one width without the other, or a width
+  with no date, is a *wrong* answer rather than a missing one.
+
+#### The maintenance is not this register's rows
+
+A siega is a cultural operation and a pastoreo is a grazing, whichever land they
+happen on — so they stay in the registers that own them, linked back by a
+nullable `soil_cover_id`. **The twin agrees**: `DatosCubierta` in schema 3.11.4
+carries no maintenance member at all, while the booleans it derives sit on
+`LaboresCulturales`.
+
+That link also **partitions two printed pages**. Model 9.1 prints the grazings
+with no cover, model 9.4's Pastoreo column the ones with one. Without the
+partition a P6 cover grazing would print on the P1 extensive-grazing page as
+well, which on a document an inspector reads is a false statement rather than a
+duplicate. `GRAZING_PRACTICES` gained `plant_cover` for the same reason.
+
+The cover form still enters all three columns in one place — a maintenance line
+asks only for its kind and date, inheriting the cover's plots, practice, farm
+and season, and the repository writes it through the *same* functions the 9.2
+and 9.1 forms use, inside the transaction that writes the cover. One validation
+path, one audit path, and a book that never holds a cover whose maintenance
+half-saved.
+
+**Withdrawing a cover withdraws its maintenance**, each as its own audited soft
+delete: those rows are art. 42.1.c's annotation *of that cover* and print in its
+columns, so a cover withdrawn as a mistake must leave no siega behind pointing
+at nothing.
+
+#### Two things the pages do not print, and one the form does not offer
+
+- **`cover_type_code` has no printed column.** Art. 42.1.a annotates the *date*
+  a cover was established, not which of "espontánea o sembrada" it was, so the
+  distinction lives in the printed footnote. The field is captured because
+  `DatosCubierta.TipoCobertura` asks for it, and the workbook carries it.
+- **Model 9.5 has no maintenance columns**, because art. 43 asks for none. A
+  maintenance line against an inert cover is refused
+  (`invalid.maintenance_on_an_inert_cover`) rather than stored somewhere no
+  page would print it.
+- **`TIPO_COBERTURA_SUELO` is narrowed by the picker, never by the repository.**
+  Art. 42.1.a's codes are 2 and 3, art. 43.1.a's is 4 — and specifically not 5,
+  "otros materiales", which is nutshells and stones rather than pruning
+  residue. But the catalogue is a provider registry that grows between releases
+  (it gained code 6 in 2024) and the in-app refresh runs on the user's machine,
+  so refusing an unknown code would lock a farmer out of recording a lawful
+  cover. A picker may offer less than the record accepts, never the reverse.
+  A contract test accounts for every active code — claimed by a practice or
+  pinned in `NON_COVER_TYPES` with its reason — so an upstream addition makes
+  somebody decide rather than passing unnoticed.
+
+
+### The sowing register, and where 9.3's five dates live (2026-08-19)
+
+Model 9.3 is the only page in the book assembled from **three tables in three
+crates**, and the reason is that art. 45.2's five dates are five different kinds
+of fact:
+
+| Date | Where it is recorded | Why there |
+| --- | --- | --- |
+| Nivelación | `cultural_operation`, kind `levelling`, practice `flooded_biodiversity` | it is work done on the land, and `TIPO_LABOR` 2 is literally "Nivelación en cultivos bajo agua" |
+| Siembra en seco | `sowing_record.sown_on` (**core**) | a sowing is a farm event, not an eco-scheme one |
+| Inundación | `sowing_record.flooded_on` | it is an attribute of that sowing — the same seed, later watered |
+| Seca | `treatment_record.drying_date` (**module-cue**) | the model says "fecha de seca **para tratamiento**", and the twin puts `FechaSeca` on `TratamFito`: the field is dried *in order to* spray |
+| Construcción de caballones | `cultural_operation`, kind `ridging` | `TIPO_LABOR` 3, "Caballones y tablas en cultivos bajo agua" |
+
+**`sowing_record` and `sowing_plot` are in `terrazgo-core`**, the `harvest_record`
+precedent: sowing is harvest's mirror image, the two bracket a crop, and crop
+planning, costs and analytics will all want it. Core therefore holds the crop's
+three brackets — `crop`, `sowing_record`, `harvest_record`. `sowing_plot` mirrors
+`harvest_plot` field for field, **including the absence of a surface column**:
+model 9.3 asks which parcels, not how much of each.
+
+**It carries no eco-scheme practice code**, and cannot: core may not reference a
+module's lookup. What marks a sowing as a *cultivo bajo agua* is `flooded_on`, a
+core-native fact — which also decides which plots reach the page. A sowing with
+no flooding date is not on its own evidence of a flooded crop, or every wheat
+sowing on the holding would print on a page about rice.
+
+**`flooded_on` is normally filled by a CORRECTION.** A rice grower dry-sows in
+April and floods in May, and each is annotated within a month of its own
+activity — so the row exists with a NULL flooding date for a month. That is why
+the page also admits a plot on *other* evidence (a nivelación, a seca), and why
+once a plot is in, every sowing on it prints its date.
+
+#### What `SiembraPlantacion` asked for and this register deliberately does not hold
+
+The twin is wider than the duty, and most of the difference is **recorded rather
+than captured** (`siex-export.md`), on the standing line: a field required by the
+twin is captured even with no model column; a field optional in the twin AND
+absent from the model is recorded.
+
+- `Cantidad` (kg of seed) **is** required, so `seed_quantity_kg` exists although
+  no page of section 9 prints it.
+- `SiembraDirecta` is already recordable as a `cultural_operation` of kind
+  `no_tillage` — capturing it twice would be two statements of one fact.
+- `MaterialTratado`, `MaterialAdquirido`, `FechaAdquisicion` and `NumLote`
+  restate what model 3.2's `seed_treatment` holds. **The two registers stay
+  separate tables** (settled 2026-08-19) — the printed model keeps them as two,
+  filled independently, and merging them is blocked by their junctions:
+  `seed_treatment_plot.surface_sown_ha` is `NOT NULL` because model 3.2 prints
+  "Superficie sembrada (ha)", while model 9.3 asks for no surface at all, so a
+  merge would either weaken a shipped register or invent a required field.
+  **They stopped being *unlinked* on 2026-08-21**: `seed_treatment` gained a
+  nullable `sowing_record_id` the farmer sets on the 3.2 form, plus `acquired_on`
+  for the one member nothing stored. Three of those four members needed no
+  capture at all — `MaterialAdquirido` is `treatment_kind_code` (FEGA's
+  TIPO_TRATAMIENTO 4 and 5 *are* "adquisición de semilla tratada"),
+  `MaterialTratado` is whether a 3.2 record exists, and `NumLote` is `seed_lot`.
+  Reasoning in `siex-export.md` → "How seam 2's contradiction was settled".
+- The required `SiembraPlantacion` member is **`sowing_record.kind_code`**, and
+  the reading recorded here on 2026-08-19 — Anexo V's *"Cultivo
+  sembrado/plantado, según catálogo SIEX. Será un campo calculado"*, so the crop,
+  derived — **was wrong**. The WS descriptor types it `number(1)`, "1 Siembra 0
+  Plantación"; Anexo V's "Cultivo" is `DGCs[].CodigoCultivo`, per-DGC. That made
+  it a capture question, and **the form had already answered it**: this register
+  is titled "Siembra y plantación" and asks how each crop began, so a planting is
+  its documented use and a constant would misstate every one of them. No decree
+  asks for a planting annotation, which is why the register was not *derived*
+  from the member — it already invited both answers. (`MATERIAL_VEGETAL_REPRODUCCION`
+  is still not its catalogue; that file stays orphaned — `maintenance.md` §1.)
+
 ## Two outputs, one assembly (2026-08-02)
 
 The book is read out of the database **once**, into a typed `Cuaderno`
@@ -1216,3 +1544,13 @@ valley, not in province 25.
 - Deviations from the model stay allowed (content binding, layout not): the
   extra "Plazo de seguridad" column in 3.1 already ships; total-quantity-used
   and interval dates join it per Anexo III B.
+- The export filename carries the campaign, the language and the date —
+  `cuaderno_2025-2026_ca_20260803.pdf` — because the language is chosen per
+  export and never persisted, so the file itself has to say which one it is.
+- **Check a layout change by rendering the page, not by extracting its text.**
+  `pdftotext` reports the same words whatever the layout does, so it cannot see
+  a cell that wrapped to fourteen lines or a table that ran off the sheet;
+  render to an image (`pdftoppm`) and look. Two design decisions in this
+  document — the BBCH register printing the number rather than FEGA's sentence,
+  and section 2.1's font size — came from looking at the rendered page and
+  would not have come from any text dump.

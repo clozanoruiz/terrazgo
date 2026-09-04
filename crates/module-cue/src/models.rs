@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 // as part of this module's data model.
 pub use terrazgo_core::models::{
     Crop, Farm, Lookup, Machinery, MachineryEsExtension, NewCrop, NewFarm, NewMachinery,
-    NewOperator, NewPlot, NewSeason, Operator, Plot, Season,
+    NewOperator, NewPlot, NewPremises, NewSeason, Operator, Plot, Premises, Season,
 };
 
 // ---------------------------------------------------------------------------
@@ -81,6 +81,12 @@ pub struct TreatmentRecord {
     /// Start hour as local wall-clock `HH:MM`, asked for by Reglamento (UE)
     /// 2023/564's annex where the hour is relevant. `None` = not stated.
     pub application_time: Option<String>,
+    /// The day the flooded field was dried so that this treatment could be
+    /// applied — model 9.3's fourth column and the twin's `FechaSeca`. One of
+    /// the five dates RD 1048/2022 art. 45.2 names, and it sits here rather
+    /// than on the sowing because the drying is done *in order to* spray.
+    /// `None` = not a flooded crop, or not stated.
+    pub drying_date: Option<String>,
     /// The chemical half of the actuation, present or absent as a BLOCK
     /// (`product_id`, `dose_value`, `dose_unit_code`, `phi_days_used`,
     /// `phi_end_date`, `product_name_snapshot` are all `Some` or all `None`,
@@ -191,28 +197,11 @@ pub struct PlotPhiStatus {
     pub phi_until: Option<String>,
 }
 
-/// Integer alias a regulatory export assigns to an activity record the first
-/// time it is exported (SIEX's `IdAjena*` keys are integers, our ids UUIDs).
-/// Never updated, never deleted: the alias is the edit/delete key on the
-/// authority's side, and the row's existence marks the record as previously
-/// exported. `split_key` discriminates when one record maps to several export
-/// entries (a multi-crop treatment splits into one `TratamFito` per crop);
-/// its value is serializer-defined, opaque here ('' for a 1:1 record).
-#[derive(Debug, Clone, Serialize)]
-pub struct ExportAlias {
-    pub id: String,
-    pub target: String,
-    pub entity_table: String,
-    pub entity_id: String,
-    pub split_key: String,
-    pub alias: i64,
-    pub created_at: String,
-}
-
 /// Derived alert row, owned by `repository::refresh_alerts` (reconciliation). Serialize
-/// is for the future Tauri commands, not for `record_change` — derived state is never
-/// audit-logged or synced. There is no `NewAlert`: users acknowledge or dismiss alerts,
-/// they never create them.
+/// is for the Tauri commands that hand alerts to the Status view (`list_alerts`,
+/// `refresh_alerts`), not for `record_change` — derived state is never audit-logged or
+/// synced. There is no `NewAlert`: users acknowledge or dismiss alerts, they never
+/// create them.
 #[derive(Debug, Clone, Serialize)]
 pub struct Alert {
     pub id: String,
@@ -320,6 +309,10 @@ pub struct NewTreatmentRecord {
     /// (`invalid.application_time`).
     #[serde(default)]
     pub application_time: Option<String>,
+    /// Model 9.3's "fecha de seca" (RD 1048/2022 art. 45.2). Captured, never
+    /// derived, and unvalidated beyond its ISO shape.
+    #[serde(default)]
+    pub drying_date: Option<String>,
     /// The chemical half. All three travel together, and all three may be
     /// absent — a purely non-chemical actuation states a `measure_code`
     /// instead. An actuation that states neither is rejected
@@ -394,6 +387,8 @@ pub struct UpdateTreatmentRecord {
     pub application_end_date: Option<String>,
     #[serde(default)]
     pub application_time: Option<String>,
+    #[serde(default)]
+    pub drying_date: Option<String>,
     #[serde(default)]
     pub product_id: Option<String>,
     #[serde(default)]
@@ -471,6 +466,10 @@ pub struct NonFieldTreatment {
     /// 3.3 only: the PRODUCTOS catalogue code of the plant product treated,
     /// verbatim and unconstrained by a foreign key.
     pub subject_product_code: Option<String>,
+    /// 3.4 / 3.5: the registry row identifying the local or vehicle treated.
+    /// `None` on produce records, and on records written before the registry
+    /// existed — `subject_description` stays the printed truth either way.
+    pub premises_id: Option<String>,
     /// How much of the subject was treated: tonnes for produce, cubic metres
     /// for premises and vehicles. `None` prints blank.
     pub treated_quantity_value: Option<f64>,
@@ -537,9 +536,13 @@ pub struct NewNonFieldTreatment {
     pub country_code: Option<String>,
     pub subject_kind_code: String,
     pub treated_on: String,
+    /// Ignored when `premises_id` names a registry row: the description is
+    /// composed from it instead, so the two can never disagree.
     pub subject_description: String,
     #[serde(default)]
     pub subject_product_code: Option<String>,
+    #[serde(default)]
+    pub premises_id: Option<String>,
     #[serde(default)]
     pub treated_quantity_value: Option<f64>,
     #[serde(default)]
@@ -579,6 +582,11 @@ pub struct UpdateNonFieldTreatment {
     pub subject_description: String,
     #[serde(default)]
     pub subject_product_code: Option<String>,
+    /// Correctable: naming the right store after naming the wrong one re-takes
+    /// the description, and clearing it leaves the last composed text standing
+    /// as the record's own statement.
+    #[serde(default)]
+    pub premises_id: Option<String>,
     #[serde(default)]
     pub treated_quantity_value: Option<f64>,
     #[serde(default)]
@@ -638,6 +646,13 @@ pub struct SeedTreatment {
     /// printed model has no such column: a book kept to the model alone cannot
     /// be made to answer it.
     pub treatment_kind_code: Option<String>,
+    /// When the seed was bought, `YYYY-MM-DD` (SIEX `FechaAdquisicion`).
+    /// Meaningful only for the two purchased kinds.
+    pub acquired_on: Option<String>,
+    /// Which sowing used this seed (SIEX `MaterialTratado`). `None` = the two
+    /// registers were filled independently, which is how the printed model
+    /// works and stays lawful.
+    pub sowing_record_id: Option<String>,
     pub product_name: String,
     pub product_registration_number: Option<String>,
     pub product_active_substance: Option<String>,
@@ -682,6 +697,10 @@ pub struct NewSeedTreatment {
     pub seed_lot: Option<String>,
     #[serde(default)]
     pub treatment_kind_code: Option<String>,
+    #[serde(default)]
+    pub acquired_on: Option<String>,
+    #[serde(default)]
+    pub sowing_record_id: Option<String>,
     pub product_name: String,
     #[serde(default)]
     pub product_registration_number: Option<String>,
@@ -721,6 +740,10 @@ pub struct UpdateSeedTreatment {
     pub seed_lot: Option<String>,
     #[serde(default)]
     pub treatment_kind_code: Option<String>,
+    #[serde(default)]
+    pub acquired_on: Option<String>,
+    #[serde(default)]
+    pub sowing_record_id: Option<String>,
     pub product_name: String,
     #[serde(default)]
     pub product_registration_number: Option<String>,

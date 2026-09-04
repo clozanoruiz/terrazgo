@@ -13,8 +13,8 @@ use crate::storage::{self, PlotMatch};
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashSet;
-use std::sync::Mutex;
 use terrazgo_core::catalogue;
+use terrazgo_core::db::Database;
 use terrazgo_core::models::{Crop, GeoFeature, ZoneFlag};
 use terrazgo_geo::{GeoError, Result};
 
@@ -44,7 +44,7 @@ pub struct PlotVerification {
 /// (the plot may not exist yet); `Ok(None)` = SIGPAC does not know the ref.
 pub fn lookup_reference(
     app: &Connection,
-    cache: &Mutex<Connection>,
+    cache: &Database,
     parts: &[String],
     refresh: bool,
 ) -> Result<Option<RecintoLookup>> {
@@ -63,7 +63,7 @@ pub fn lookup_reference(
 /// Door B: the recinto under a map click (later: the GPS position).
 pub fn lookup_point(
     app: &Connection,
-    cache: &Mutex<Connection>,
+    cache: &Database,
     lon: f64,
     lat: f64,
 ) -> Result<Option<RecintoLookup>> {
@@ -79,7 +79,7 @@ pub fn lookup_point(
 /// stored, the plot is untouched.
 pub fn verify_plot(
     app: &mut Connection,
-    cache: &Mutex<Connection>,
+    cache: &Database,
     plot_id: &str,
     refresh: bool,
     actor: Option<&str>,
@@ -187,7 +187,7 @@ pub struct CropProposals {
 /// proposed for overwriting.
 pub fn propose_crops(
     app: &Connection,
-    cache: &Mutex<Connection>,
+    cache: &Database,
     farm_id: &str,
     season_id: &str,
     treated_crop_ids: &HashSet<String>,
@@ -490,7 +490,7 @@ pub fn crop_species(app: &Connection, plot_id: Option<&str>) -> Result<SpeciesCa
 /// The three zone-layer checks for one recinto, stored replace-within-campaign.
 fn check_zones(
     app: &mut Connection,
-    cache: &Mutex<Connection>,
+    cache: &Database,
     plot_id: &str,
     reference: &SigpacRef,
     refresh: bool,
@@ -506,9 +506,9 @@ fn check_zones(
 }
 
 /// Shared lookup shape: fetch, then attach the dedup matches.
-fn lookup<F>(app: &Connection, cache: &Mutex<Connection>, fetch: F) -> Result<Option<RecintoLookup>>
+fn lookup<F>(app: &Connection, cache: &Database, fetch: F) -> Result<Option<RecintoLookup>>
 where
-    F: FnOnce(&Mutex<Connection>) -> Result<Option<RecintoInfo>>,
+    F: FnOnce(&Database) -> Result<Option<RecintoInfo>>,
 {
     let Some(recinto) = fetch(cache)? else {
         return Ok(None);

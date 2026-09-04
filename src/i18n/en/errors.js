@@ -10,6 +10,7 @@ export default {
   // preceded by the internal_intro line so regular users get some orientation.
   "error.internal_intro": "An internal error occurred:",
   "error.not_found": "Record not found.",
+  "error.invalid.unknown_link": "That link is not available in this version.",
   "error.invalid.empty_name": "The name must not be empty.",
   "error.invalid.operator_not_found": "The selected operator no longer exists.",
   "error.invalid.empty_authorisation_number": "The registration number must not be empty.",
@@ -43,6 +44,9 @@ export default {
     "This plot has abstraction points recorded, so it cannot be declared free of them. Delete them first.",
   "error.invalid.report_language_unknown": "That language is not available for the record book.",
   "error.invalid.cache_cap_too_small": "The space for offline maps is too small (minimum 64 MB).",
+  "error.invalid.lead_days_out_of_range": "The warning must be given between 1 and 400 days ahead.",
+  "error.invalid.phi_horizon_out_of_range":
+    "Treated plots must be kept on the map for between 7 and 730 days.",
   "error.invalid_date": 'Invalid date "{date}" (expected YYYY-MM-DD).',
   "error.authorisation_missing": 'Product {product_id} is not authorised in "{country}".',
   "error.country_mismatch": 'Country "{provided}" does not match the farm\'s country ("{farm}").',
@@ -99,6 +103,12 @@ export default {
   "error.invalid.invalid_harvest_quantity":
     "Enter the quantity and its unit (kg or t), or leave both blank.",
   "error.invalid.plot_not_on_farm": "The chosen plot does not belong to this holding.",
+  "error.invalid.sowing_not_on_farm":
+    "The chosen sowing belongs to another holding or another campaign.",
+  "error.invalid.irrigation_not_on_farm":
+    "The chosen irrigation belongs to another holding or another campaign.",
+  "error.invalid.link_needs_fertigation":
+    "Only a fertigation can be linked to an irrigation. Choose sprinkler or localised fertigation as the application method.",
 
   // Section 8 — the irrigation register (RD 1051/2022 art. 5.e).
   "error.invalid.invalid_date_interval": "The end date cannot be earlier than the start date.",
@@ -125,6 +135,8 @@ export default {
   "error.invalid.unknown_application_method": "Choose an application method from the list.",
   "error.invalid.machinery_not_on_farm": "The chosen machinery does not belong to this holding.",
   "error.invalid.empty_practice_code": "Choose a good practice from the list.",
+  "error.invalid.practices_contradict_none":
+    "\u201cNo good practices carried out\u201d cannot be claimed alongside other practices.",
 
   // Section 7.1 — the plan de abonado (RD 1051/2022 art. 4.2, 5.a and 6).
   "error.invalid.invalid_nutrient_need": "A requirement cannot be negative.",
@@ -141,4 +153,44 @@ export default {
   "error.invalid.unknown_measure_code": "That measure is not in the official catalogue.",
   "error.invalid.invalid_intensity":
     "The intensity needs its unit (traps, diffusers…) and must be greater than zero.",
+
+  // Eco-schemes — 9.1 extensive grazing (RD 1048/2022 art. 30.2 ter).
+  "error.invalid.practice_not_grazing":
+    "That eco-scheme is not evidenced by a grazing. Choose extensive grazing, sustainable mowing, communal pastures or plant cover.",
+  "error.invalid.no_animals": "Name at least one group of animals.",
+  "error.invalid.incomplete_animal_line":
+    "Every group of animals needs a species and the livestock holding's REGA.",
+  "error.invalid.nonpositive_volume": "The volume must be greater than zero.",
+  "error.invalid.premises_kind_mismatch":
+    "That registry entry does not belong to this register: premises go in 3.4 and vehicles in 3.5.",
+  "error.invalid.premises_not_on_farm": "The premises or vehicle belongs to another holding.",
+  "error.invalid.premises_kind_in_use":
+    "The type cannot change while treatments in the other register name this entry. Correct or delete those treatments first.",
+  "error.invalid.premises_on_produce_record":
+    "A postharvest treatment treats plant produce, not premises or a vehicle.",
+  "error.invalid.nonpositive_animal_count": "The number of animals must be greater than zero.",
+
+  // 9.2 sustainable mowing and "9.6" communal pastures (RD 1048/2022 art. 31 and annex IV).
+  "error.invalid.practice_not_operation":
+    "Extensive grazing is recorded in register 9.1, not as an operation: its duty is the grazing dates.",
+  // Sowing register (RD 1048/2022 art. 45.2, crops grown under water).
+  "error.invalid.flooded_before_sown":
+    "The flooding date cannot precede the sowing date: this is a dry-sowing register — the seed goes in first, the water follows.",
+
+  // 9.4 and 9.5 covers (RD 1048/2022 arts. 42 and 43).
+  "error.invalid.practice_not_cover":
+    "That eco-scheme does not establish a cover. Only plant covers (P6) and inert covers of pruning residue (P7) are recorded here.",
+  "error.invalid.incomplete_widths":
+    "The cover width, the free canopy width and the date they were measured are a single annotation: give all three or leave all three blank.",
+  "error.invalid.nonpositive_width": "Widths must be greater than zero.",
+  "error.invalid.not_a_maintenance_kind":
+    "Model 9.4 records only mowing, brush cutting and grazing as cover maintenance. Other operations go in register 9.2.",
+  "error.invalid.maintenance_on_an_inert_cover":
+    "Art. 43 requires no maintenance annotation for an inert cover: only its establishment date and the two widths.",
+  "error.invalid.animals_on_a_non_grazing_line":
+    "Only grazing carries animal groups; remove them from the mowing or brush-cutting line.",
+  "error.invalid.cover_not_found": "That cover no longer exists.",
+  "error.invalid.cover_on_another_farm": "That cover belongs to another holding.",
+  "error.invalid.cover_practice_mismatch":
+    "Maintenance must be recorded under the same eco-scheme as the cover it maintains.",
 };

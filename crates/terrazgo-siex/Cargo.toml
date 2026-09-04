@@ -1,0 +1,52 @@
+[package]
+name = "terrazgo-siex"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo SIEX export — projects the farm record book into the official CUE exchange descriptor (FEGA Anexo VI)"
+
+[lints]
+workspace = true
+
+# A top-layer CONSUMER, like terrazgo-recordbook and the shell: it holds no
+# state, writes no user data, and projects ONE document from what the crates
+# below it hold. It may depend on several modules where a module never may, and
+# nothing depends on it except src-tauri.
+#
+# It is a SIBLING of terrazgo-recordbook, not a layer of it: the two project the
+# same registers into different documents, for different readers, under
+# different rules — the book is the Spanish official form for a human inspector,
+# this is a machine exchange format with frozen aliases, a precheck and schema
+# validation. Neither depends on the other.
+#
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+terrazgo-core = { workspace = true }
+# The treatment domain: TratamFito and the three non-field blocks, plus
+# Analitica. Also the SIEX code mappings for its own lookups.
+module-cue = { workspace = true }
+# Fertilizacion, PlanAbonado and Riego.
+module-fertilisation = { workspace = true }
+# Pastoreo, LaboresCulturales and DatosCubierta.
+module-ecoscheme = { workspace = true }
+rusqlite = { workspace = true }
+# Only for `db::migrations`: the export needs the composed schema of everything
+# it reads. It owns no migrations of its own.
+rusqlite_migration = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# This crate owns its diagnostics for the same reason the record book does: it
+# reads several modules, so returning any one of their error types would
+# misreport where a failure came from. thiserror keeps it library-style.
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+# The tests validate the serialized output against the vendored official CUE
+# JSON Schema (docs/references/cue-schema-3.11.4.json). Dev-only on purpose:
+# the default features pull reqwest/rustls, which must never reach the shipped
+# binary or the mobile cross-compile.
+jsonschema = { workspace = true }
+# Shared fixtures (tests/common re-exports them).
+terrazgo-testkit = { workspace = true }

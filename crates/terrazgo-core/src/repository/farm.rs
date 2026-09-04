@@ -17,6 +17,7 @@ use crate::models::{
     Farm, FarmDetail, FarmEsExtension, FarmEsFields, FarmRepresentative, FarmRepresentativeFields,
     NewFarm, NewPlot, Plot, PlotDetail, PlotEsExtension, PlotEsFields, UpdateFarm, UpdatePlot,
 };
+use crate::sql::children_by_parent;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
@@ -235,13 +236,26 @@ pub fn list_plots(conn: &Connection, farm_id: &str) -> Result<Vec<PlotDetail>> {
     let plots = stmt
         .query_map([farm_id], map_plot)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    plots
+    // One extension read for the whole farm rather than one per plot. An
+    // extension is at most one row per parent, so the grouped read hands back a
+    // vector of length 0 or 1 and `into_iter().next()` is the Option again.
+    let ids: Vec<String> = plots.iter().map(|p| p.id.clone()).collect();
+    let mut extensions = children_by_parent(
+        conn,
+        "SELECT * FROM plot_es_extension WHERE plot_id IN ({ids}) ORDER BY plot_id",
+        &ids,
+        map_plot_extension,
+        |es| es.plot_id.clone(),
+    )?;
+    Ok(plots
         .into_iter()
-        .map(|plot| {
-            let es = get_plot_extension(conn, &plot.id)?;
-            Ok(PlotDetail { plot, es })
+        .map(|plot| PlotDetail {
+            es: extensions
+                .remove(&plot.id)
+                .and_then(|rows| rows.into_iter().next()),
+            plot,
         })
-        .collect()
+        .collect())
 }
 
 /// Full-row update. `farm_id` is immutable by design (see `UpdatePlot`).
@@ -551,16 +565,6 @@ fn insert_plot_extension(
     )?;
     log_insert(tx, "plot_es_extension", plot_id, None, actor, &ext)?;
     Ok(ext)
-}
-
-fn get_plot_extension(conn: &Connection, plot_id: &str) -> Result<Option<PlotEsExtension>> {
-    Ok(conn
-        .query_row(
-            "SELECT * FROM plot_es_extension WHERE plot_id = ?1",
-            [plot_id],
-            map_plot_extension,
-        )
-        .optional()?)
 }
 
 fn reconcile_plot_extension(

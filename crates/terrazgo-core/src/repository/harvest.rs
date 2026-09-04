@@ -23,6 +23,7 @@ use crate::models::{
     HarvestPlot, HarvestRecord, HarvestRecordDetail, NewHarvestPlot, NewHarvestRecord,
     UpdateHarvestRecord,
 };
+use crate::sql::children_by_parent;
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
@@ -245,6 +246,26 @@ pub fn get_harvest_record(conn: &Connection, id: &str) -> Result<HarvestRecordDe
     Ok(HarvestRecordDetail { record, plots })
 }
 
+/// Every harvest of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_harvest_records_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<HarvestRecordDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM harvest_record
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY harvested_on, id",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_with_details(conn, records)
+}
+
 /// Oldest first, the order a record book reads in.
 pub fn list_harvest_records(
     conn: &Connection,
@@ -259,13 +280,7 @@ pub fn list_harvest_records(
     let records = stmt
         .query_map(params![season_id, farm_id], map_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| {
-            let plots = plots_of(conn, &record.id)?;
-            Ok(HarvestRecordDetail { record, plots })
-        })
-        .collect()
+    all_with_details(conn, records)
 }
 
 /// Whether any harvest hangs off this season — half the guard
@@ -486,6 +501,30 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
 }
 
 // --- mapping ---------------------------------------------------------------
+
+/// [`with_details`]-style hydration for a whole list, in ONE child statement
+/// rather than one per record. The single-record paths keep their point
+/// queries: a `WHERE id = ?` has nothing to hoist.
+fn all_with_details(
+    conn: &Connection,
+    records: Vec<HarvestRecord>,
+) -> Result<Vec<HarvestRecordDetail>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut plots = children_by_parent(
+        conn,
+        "SELECT * FROM harvest_plot WHERE harvest_record_id IN ({ids}) ORDER BY harvest_record_id, id",
+        &ids,
+        map_plot,
+        |p| p.harvest_record_id.clone(),
+    )?;
+    Ok(records
+        .into_iter()
+        .map(|record| HarvestRecordDetail {
+            plots: plots.remove(&record.id).unwrap_or_default(),
+            record,
+        })
+        .collect())
+}
 
 fn plots_of(conn: &Connection, harvest_record_id: &str) -> Result<Vec<HarvestPlot>> {
     let mut stmt =

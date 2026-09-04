@@ -11,7 +11,7 @@
   // path since the platform answer of 2026-08-02, so the command and its
   // precheck stay compiled and tested while nothing offers them (see
   // docs/siex-export.md).
-  import { formatDate, t } from "../i18n.js";
+  import { formatDate, formatNumber, t } from "../i18n.js";
   import { invoke } from "./backend.js";
   import { notify, run } from "./notifications.svelte.js";
   import TzSelect from "./TzSelect.svelte";
@@ -51,15 +51,13 @@
   // different statements, and "undetermined" is the app admitting it cannot
   // measure the holding.
   function dutySentence(gap) {
+    // Only the "undetermined" wording counts plots, and only it has plural
+    // variants; the other two ignore `count` and resolve to their bare key.
     return t(`advisory.duty_${gap.duty}`, {
       surface: formatNumber(gap.arable_permanent_ha),
       irrigated: formatNumber(gap.irrigated_ha),
-      plots: gap.plots_without_land_use + gap.plots_without_area,
+      count: gap.plots_without_land_use + gap.plots_without_area,
     });
-  }
-
-  function formatNumber(value) {
-    return String(Number(value.toFixed(2))).replace(".", ",");
   }
 
   function advisoryIsClean(check) {
@@ -70,8 +68,19 @@
       check.operators_missing_licence.length === 0 &&
       check.registers_undeclared.length === 0 &&
       check.fertilisation_absent === null &&
-      check.irrigation_absent === null
+      check.irrigation_absent === null &&
+      check.covers_missing_widths.length === 0 &&
+      check.inert_covers_established_late.length === 0 &&
+      check.covers_missing_maintenance.length === 0 &&
+      check.grazing_records_without_end.length === 0
     );
+  }
+
+  // Section 9's findings name a record by the date that identifies it in its
+  // own register — the establishment date for a cover, the start of grazing for
+  // a grazing — which is what the register lists them by.
+  function coverDates(refs) {
+    return refs.map((ref) => formatDate(ref.established_on)).join("; ");
   }
 
   // --- printable cuaderno (PDF) --------------------------------------------
@@ -150,6 +159,75 @@
   function recordLabel(ref) {
     return `${formatDate(ref.application_date)} — ${ref.product_name ?? t("treatment.non_chemical")}`;
   }
+
+  /// The advisory as ROWS rather than eleven hand-written blocks: each finding
+  /// is a title and what it is about, in the order the book is read. Built as
+  /// data because the table takes one shape and the list is what varies —
+  /// eleven `{#if}` blocks each spelling out its own markup was how a finding
+  /// came to be worded three different ways.
+  ///
+  /// `key` is the field name the backend answered under, so it is stable and
+  /// unique without inventing an id.
+  const findings = $derived.by(() => {
+    if (!advisory) return [];
+    const rows = [];
+    const add = (key, list, detail) => {
+      const present = Array.isArray(list) ? list.length > 0 : list !== null;
+      if (present) rows.push({ key, title: t(`advisory.${key}`), detail: detail() });
+    };
+
+    add("farm_fields", advisory.farm_missing_fields, () =>
+      advisory.farm_missing_fields.map((f) => t(`advisory.field_${f}`)).join(", "),
+    );
+    add("missing_crop", advisory.treatments_missing_crop, () =>
+      advisory.treatments_missing_crop
+        .map((ref) => `${ref.plot_name} (${formatDate(ref.application_date)})`)
+        .join("; "),
+    );
+    add("missing_efficacy", advisory.treatments_missing_efficacy, () =>
+      advisory.treatments_missing_efficacy.map(recordLabel).join("; "),
+    );
+    add("missing_licence", advisory.operators_missing_licence, () =>
+      advisory.operators_missing_licence.map((o) => o.full_name).join("; "),
+    );
+    add("registers_undeclared", advisory.registers_undeclared, () =>
+      advisory.registers_undeclared.map((code) => t(`register_kind.${code}`)).join(", "),
+    );
+    add("fertilisation_absent", advisory.fertilisation_absent, () =>
+      dutySentence(advisory.fertilisation_absent),
+    );
+    add("irrigation_absent", advisory.irrigation_absent, () =>
+      dutySentence(advisory.irrigation_absent),
+    );
+    // Section 9's findings. All four are record-triggered: a holding that
+    // claimed no eco-scheme records nothing here and hears nothing.
+    add(
+      "covers_missing_widths",
+      advisory.covers_missing_widths,
+      () =>
+        `${t("advisory.covers_missing_widths_hint")} ${coverDates(advisory.covers_missing_widths)}`,
+    );
+    add(
+      "inert_covers_established_late",
+      advisory.inert_covers_established_late,
+      () =>
+        `${t("advisory.inert_covers_established_late_hint")} ${coverDates(
+          advisory.inert_covers_established_late,
+        )}`,
+    );
+    add("covers_missing_maintenance", advisory.covers_missing_maintenance, () =>
+      coverDates(advisory.covers_missing_maintenance),
+    );
+    add(
+      "grazing_records_without_end",
+      advisory.grazing_records_without_end,
+      () =>
+        `${t("advisory.grazing_records_without_end_hint")} ${advisory.grazing_records_without_end
+          .map((ref) => formatDate(ref.started_on))
+          .join("; ")}`,
+    );
+    return rows;
+  });
 </script>
 
 <div class="view-head">
@@ -190,75 +268,27 @@
     <h3>{t("advisory.title")}</h3>
   </div>
   <p class="detail">{t("advisory.hint")}</p>
-  <ul class="card-list">
-    {#if advisory.farm_missing_fields.length > 0}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.farm_fields")}</strong>
-          <span class="detail">
-            {advisory.farm_missing_fields.map((f) => t(`advisory.field_${f}`)).join(", ")}
-          </span>
-          <a href="#/farms">{t("nav.farms")}</a>
-        </div>
-      </li>
-    {/if}
-    {#if advisory.treatments_missing_crop.length > 0}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.missing_crop")}</strong>
-          <span class="detail">
-            {advisory.treatments_missing_crop
-              .map((ref) => `${ref.plot_name} (${formatDate(ref.application_date)})`)
-              .join("; ")}
-          </span>
-        </div>
-      </li>
-    {/if}
-    {#if advisory.treatments_missing_efficacy.length > 0}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.missing_efficacy")}</strong>
-          <span class="detail">
-            {advisory.treatments_missing_efficacy.map(recordLabel).join("; ")}
-          </span>
-        </div>
-      </li>
-    {/if}
-    {#if advisory.operators_missing_licence.length > 0}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.missing_licence")}</strong>
-          <span class="detail">
-            {advisory.operators_missing_licence.map((o) => o.full_name).join("; ")}
-          </span>
-        </div>
-      </li>
-    {/if}
-    {#if advisory.registers_undeclared.length > 0}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.registers_undeclared")}</strong>
-          <span class="detail">
-            {advisory.registers_undeclared.map((code) => t(`register_kind.${code}`)).join(", ")}
-          </span>
-        </div>
-      </li>
-    {/if}
-    {#if advisory.fertilisation_absent}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.fertilisation_absent")}</strong>
-          <span class="detail">{dutySentence(advisory.fertilisation_absent)}</span>
-        </div>
-      </li>
-    {/if}
-    {#if advisory.irrigation_absent}
-      <li class="card">
-        <div class="stack">
-          <strong>{t("advisory.irrigation_absent")}</strong>
-          <span class="detail">{dutySentence(advisory.irrigation_absent)}</span>
-        </div>
-      </li>
-    {/if}
-  </ul>
+  <!-- `rows-static`: a finding is a statement about the book, not a record to
+       open. What the farmer does about one is go to the register it names. -->
+  <div class="table-wrap">
+    <table class="data-table rows-static">
+      <thead>
+        <tr>
+          <th>{t("column.finding")}</th>
+          <th>{t("column.detail")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {#each findings as finding (finding.key)}
+          <tr>
+            <td class="col-name">{finding.title}</td>
+            <td class="col-muted">{finding.detail}</td>
+          </tr>
+        {/each}
+      </tbody>
+    </table>
+  </div>
+  {#if advisory.farm_missing_fields.length > 0}
+    <p class="detail"><a href="#/farms">{t("nav.farms")}</a></p>
+  {/if}
 {/if}

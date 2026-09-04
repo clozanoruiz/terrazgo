@@ -105,13 +105,16 @@ pub fn update_season(
 /// Soft delete, for a season created by mistake. Refuses while the season still
 /// holds crops (`invalid.season_in_use`) — see the module doc for why.
 ///
-/// This guard covers only the core side — crops and the commercialised
-/// harvest. The CUE registers (treatments, the non-field ones, treated seed,
+/// This guard covers only the core side — crops, the sowing register and the
+/// commercialised harvest. The CUE registers (treatments, the non-field ones, treated seed,
 /// analyses) also hang off a season, but they belong to module-cue and core may
 /// never reference a module table, so the shell command checks that half before
 /// calling here (the same chaining the zone-flag command does).
 pub fn soft_delete_season(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    if super::crop::season_has_crops(conn, id)? || super::harvest::season_has_harvests(conn, id)? {
+    if super::crop::season_has_crops(conn, id)?
+        || super::sowing::season_has_sowings(conn, id)?
+        || super::harvest::season_has_harvests(conn, id)?
+    {
         return Err(CoreError::Invalid("season_in_use"));
     }
     let tx = conn.transaction()?;

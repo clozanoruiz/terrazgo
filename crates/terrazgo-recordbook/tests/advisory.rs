@@ -4,20 +4,39 @@
 //! The book completeness advisory: what the record book is missing, reported
 //! and never enforced.
 //!
-//! The rules pinned here come from the two decrees the book answers to —
-//! RD 1311/2012 Anexo III Parte I (A.1's identity, B.e's crop, B.j's efficacy)
-//! and RD 1051/2022 art. 4-5 (the fertilisation and irrigation duty, and the
-//! exemption that may excuse it). Every finding is advisory: `report.rs`
-//! forbids a gate on the printed book, because a farmer must be able to print
-//! for an inspection while some registry data is still incomplete.
+//! The rules pinned here come from the three decrees the book answers to —
+//! RD 1311/2012 Anexo III Parte I (A.1's identity, B.e's crop, B.j's efficacy),
+//! RD 1051/2022 art. 4-5 (the fertilisation and irrigation duty, and the
+//! exemption that may excuse it), and RD 1048/2022 arts. 30, 42 and 43 (the
+//! eco-scheme annotations). Every finding is advisory: `report.rs` forbids a
+//! gate on the printed book, because a farmer must be able to print for an
+//! inspection while some registry data is still incomplete.
+//!
+//! Section 9's checks are **record-triggered**, and the tests below pin that
+//! too: the app cannot know which eco-schemes were claimed in the solicitud
+//! única, so a holding that recorded no cover and no grazing must hear nothing
+//! about either.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+mod common;
+
+use common::db;
 
 use module_cue::models::*;
 use module_cue::repository as repo;
+use module_ecoscheme::models::{
+    CoverMaintenanceLine, GRAZING_MAINTENANCE, GrazingAnimal, NewGrazingRecord, NewSoilCover,
+    UpdateSoilCover,
+};
 use rusqlite::Connection;
 use terrazgo_core::models::{NewGeoFeature, PlotEsFields};
 use terrazgo_recordbook::advisory::Duty;
-use terrazgo_recordbook::{book_advisory, open_in_memory};
+use terrazgo_recordbook::book_advisory;
+
+/// The day the advisory is asked on. Passed in rather than read from the clock
+/// so a test pins a date rule instead of drifting with the calendar; the
+/// fixture's campaign has no end date, so only the tests that give it one care.
+const TODAY: &str = "2026-07-01";
 
 struct Fixture {
     season_id: String,
@@ -193,7 +212,6 @@ fn insert_crop(
             irrigation_code: irrigation.map(Into::into),
             growing_environment_code: None,
             gip_system_code: None,
-            sown_on: None,
             crop_code: None,
             source: None,
             source_campaign: None,
@@ -216,6 +234,7 @@ fn treatment(
             farm_id: fx.farm_id.clone(),
             application_date: "2026-05-01".into(),
             application_end_date: None,
+            drying_date: None,
             application_time: None,
             product_id: Some(fx.product_id.clone()),
             country_code: None,
@@ -251,14 +270,14 @@ fn treatment(
 
 #[test]
 fn a_complete_small_holding_reports_only_what_it_cannot_know() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     let plot = insert_verified_plot(&mut conn, &fx.farm_id, "La Vega", 3.0, "TA");
     let crop = insert_crop(&mut conn, &plot, &fx.season_id, Some("rainfed"));
     let (record, plots) = treatment(&fx, &plot, Some(&crop));
     repo::insert_treatment_record(&mut conn, record, plots, None).unwrap();
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert!(advisory.farm_missing_fields.is_empty());
     assert!(advisory.treatments_missing_crop.is_empty());
     assert!(advisory.treatments_missing_efficacy.is_empty());
@@ -281,7 +300,7 @@ fn a_complete_small_holding_reports_only_what_it_cannot_know() {
 fn missing_identity_fields_are_named_one_by_one() {
     // Anexo III Parte I A.1.a-b. They print blank in a binding section, which
     // is exactly what an advisory exists to point at.
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let farm = repo::insert_farm(
         &mut conn,
         NewFarm {
@@ -306,7 +325,7 @@ fn missing_identity_fields_are_named_one_by_one() {
     )
     .unwrap();
 
-    let advisory = book_advisory(&conn, &season.id, &farm.id).unwrap();
+    let advisory = book_advisory(&conn, &season.id, &farm.id, TODAY).unwrap();
     assert_eq!(
         advisory.farm_missing_fields,
         vec!["address", "owner_name", "owner_tax_id"]
@@ -316,13 +335,13 @@ fn missing_identity_fields_are_named_one_by_one() {
 #[test]
 fn a_treated_plot_without_a_crop_is_reported_with_its_plot_name() {
     // Anexo III Parte I B.e: "cultivo, indicando especie y variedad".
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     let plot = insert_verified_plot(&mut conn, &fx.farm_id, "El Páramo", 2.0, "TA");
     let (record, plots) = treatment(&fx, &plot, None);
     repo::insert_treatment_record(&mut conn, record, plots, None).unwrap();
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert_eq!(advisory.treatments_missing_crop.len(), 1);
     assert_eq!(advisory.treatments_missing_crop[0].plot_name, "El Páramo");
     assert_eq!(
@@ -335,7 +354,7 @@ fn a_treated_plot_without_a_crop_is_reported_with_its_plot_name() {
 fn an_unassessed_efficacy_is_reported_and_a_recorded_one_is_not() {
     // B.j is binding, but efficacy is observed AFTER the application — which is
     // why this is advisory here and refused at export instead.
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     let plot = insert_verified_plot(&mut conn, &fx.farm_id, "La Vega", 2.0, "TA");
     let crop = insert_crop(&mut conn, &plot, &fx.season_id, None);
@@ -343,7 +362,7 @@ fn an_unassessed_efficacy_is_reported_and_a_recorded_one_is_not() {
     record.efficacy_code = None;
     let stored = repo::insert_treatment_record(&mut conn, record, plots, None).unwrap();
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert_eq!(advisory.treatments_missing_efficacy.len(), 1);
     assert_eq!(
         advisory.treatments_missing_efficacy[0]
@@ -353,13 +372,13 @@ fn an_unassessed_efficacy_is_reported_and_a_recorded_one_is_not() {
     );
 
     repo::set_treatment_efficacy(&mut conn, &stored.id, Some("good".into()), None).unwrap();
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert!(advisory.treatments_missing_efficacy.is_empty());
 }
 
 #[test]
 fn an_applicator_without_a_licence_is_reported_once_however_many_records() {
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     conn.execute(
         "UPDATE operator SET licence_number = NULL WHERE id = ?1",
@@ -373,7 +392,7 @@ fn an_applicator_without_a_licence_is_reported_once_however_many_records() {
         repo::insert_treatment_record(&mut conn, record, plots, None).unwrap();
     }
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert_eq!(advisory.operators_missing_licence.len(), 1);
     assert_eq!(
         advisory.operators_missing_licence[0].full_name,
@@ -385,11 +404,11 @@ fn an_applicator_without_a_licence_is_reported_once_however_many_records() {
 fn a_register_answers_with_rows_or_with_a_stated_no() {
     // Three states, one finding: silence. A register that holds records has
     // answered, and so has one whose "APLICA TRATAMIENTO: NO" is stored.
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     let plot = insert_verified_plot(&mut conn, &fx.farm_id, "La Vega", 2.0, "TA");
 
-    let before = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let before = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert_eq!(before.registers_undeclared.len(), 4);
 
     repo::set_register_declaration(
@@ -413,6 +432,8 @@ fn a_register_answers_with_rows_or_with_a_stated_no() {
             seed_quantity_kg: None,
             seed_lot: None,
             treatment_kind_code: None,
+            acquired_on: None,
+            sowing_record_id: None,
             product_name: "Celest Trio".into(),
             product_registration_number: None,
             product_active_substance: None,
@@ -428,7 +449,7 @@ fn a_register_answers_with_rows_or_with_a_stated_no() {
     )
     .unwrap();
 
-    let after = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let after = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     assert_eq!(
         after.registers_undeclared,
         vec!["postharvest".to_string(), "storage_premises".to_string()]
@@ -438,12 +459,12 @@ fn a_register_answers_with_rows_or_with_a_stated_no() {
 #[test]
 fn the_second_decrees_sections_are_reported_only_while_empty() {
     // RD 1051/2022 art. 5.d and 5.e, in force since 1 Jan 2026.
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     let plot = insert_verified_plot(&mut conn, &fx.farm_id, "La Vega", 40.0, "TA");
     let crop = insert_crop(&mut conn, &plot, &fx.season_id, Some("drip"));
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     let gap = advisory.fertilisation_absent.as_ref().unwrap();
     // 40 ha of arable, all of it irrigated: nothing about this holding is
     // exempt.
@@ -477,7 +498,7 @@ fn the_second_decrees_sections_are_reported_only_while_empty() {
     )
     .unwrap();
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     // Section 8 has answered; section 6 still has not.
     assert!(advisory.irrigation_absent.is_none());
     assert!(advisory.fertilisation_absent.is_some());
@@ -487,7 +508,7 @@ fn the_second_decrees_sections_are_reported_only_while_empty() {
 fn a_plot_never_verified_leaves_the_exemption_undetermined() {
     // No SIGPAC boundary, so no land use — the advisory says it cannot judge
     // rather than excusing a holding it cannot measure.
-    let mut conn = open_in_memory().unwrap();
+    let mut conn = db();
     let fx = fixture(&mut conn);
     repo::insert_plot(
         &mut conn,
@@ -501,8 +522,279 @@ fn a_plot_never_verified_leaves_the_exemption_undetermined() {
     )
     .unwrap();
 
-    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
     let gap = advisory.fertilisation_absent.as_ref().unwrap();
     assert_eq!(gap.duty, Duty::Undetermined);
     assert_eq!(gap.plots_without_land_use, 1);
+}
+
+// --- section 9, RD 1048/2022 -----------------------------------------------
+
+/// A live cover over one plot, with no widths and no maintenance — the state a
+/// cover is in between art. 42.1.a's deadline and the two that follow it.
+fn new_cover(fx: &Fixture, plot_id: &str, practice: &str, established_on: &str) -> NewSoilCover {
+    NewSoilCover {
+        season_id: fx.season_id.clone(),
+        farm_id: fx.farm_id.clone(),
+        practice_code: practice.into(),
+        // TIPO_COBERTURA_SUELO 2 "Cubierta vegetal sembrada" / 4 "Cubierta
+        // inerte de restos de poda".
+        cover_type_code: if practice == "inert_cover" { "4" } else { "2" }.into(),
+        established_on: established_on.into(),
+        width_m: None,
+        free_canopy_width_m: None,
+        widths_stated_on: None,
+        notes: None,
+        plot_ids: vec![plot_id.into()],
+        maintenance: Vec::new(),
+    }
+}
+
+fn new_grazing(fx: &Fixture, plot_id: &str, ended_on: Option<&str>) -> NewGrazingRecord {
+    NewGrazingRecord {
+        season_id: fx.season_id.clone(),
+        farm_id: fx.farm_id.clone(),
+        practice_code: "extensive_grazing".into(),
+        plot_group_ref: None,
+        soil_cover_id: None,
+        started_on: "2026-04-01".into(),
+        ended_on: ended_on.map(Into::into),
+        notes: None,
+        plot_ids: vec![plot_id.into()],
+        // ESPECIE_ANIMAL 03 = Ovinos.
+        animals: vec![GrazingAnimal {
+            id: String::new(),
+            grazing_record_id: String::new(),
+            species_code: "03".into(),
+            rega_code: "ES071234560001".into(),
+            animal_count: 120,
+        }],
+    }
+}
+
+/// Close the fixture's campaign, which is what turns an open grazing into a
+/// finding. Through the repository rather than raw SQL, so the audit trail sees
+/// what a farmer editing the campaign would produce.
+fn close_season_on(conn: &mut Connection, season_id: &str, ends_on: &str) {
+    terrazgo_core::repository::update_season(
+        conn,
+        season_id,
+        terrazgo_core::models::UpdateSeason {
+            campaign_year: 2026,
+            label: "2025/2026".into(),
+            starts_on: None,
+            ends_on: Some(ends_on.into()),
+        },
+        None,
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_holding_outside_the_eco_scheme_regime_hears_nothing_about_section_9() {
+    // The checks are record-triggered on purpose: the app cannot know which
+    // eco-schemes were claimed in the solicitud única, so an empty section 9 is
+    // the normal state of most holdings and never a finding. There is no
+    // `SectionGap` here and there must not be one.
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    insert_verified_plot(&mut conn, &fx.farm_id, "La Vega", 3.0, "OV");
+    close_season_on(&mut conn, &fx.season_id, "2026-06-30");
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert!(advisory.covers_missing_widths.is_empty());
+    assert!(advisory.inert_covers_established_late.is_empty());
+    assert!(advisory.covers_missing_maintenance.is_empty());
+    assert!(advisory.grazing_records_without_end.is_empty());
+}
+
+#[test]
+fn a_cover_without_its_widths_is_reported_until_they_are_stated() {
+    // Arts. 42.1.e / 43.1.b: "la anchura de la cubierta y la anchura libre de
+    // la proyección de copa". The annotation falls due later than the
+    // establishment one, so this is not a lateness finding — it is the second
+    // of art. 42's three annotations, still outstanding.
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    let plot = insert_verified_plot(&mut conn, &fx.farm_id, "Olivar Alto", 8.0, "OV");
+    let cover = module_ecoscheme::repository::insert_soil_cover(
+        &mut conn,
+        new_cover(&fx, &plot, "plant_cover", "2026-03-15"),
+        None,
+    )
+    .unwrap();
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(advisory.covers_missing_widths.len(), 1);
+    assert_eq!(
+        advisory.covers_missing_widths[0].established_on,
+        "2026-03-15"
+    );
+    assert_eq!(
+        advisory.covers_missing_widths[0].practice_code,
+        "plant_cover"
+    );
+    assert!(!advisory.is_clean());
+
+    // The triple is all-or-none, so stating it answers the annotation.
+    module_ecoscheme::repository::update_soil_cover(
+        &mut conn,
+        &cover.record.id,
+        UpdateSoilCover {
+            practice_code: "plant_cover".into(),
+            cover_type_code: "2".into(),
+            established_on: "2026-03-15".into(),
+            width_m: Some(2.0),
+            free_canopy_width_m: Some(1.5),
+            widths_stated_on: Some("2026-06-20".into()),
+            notes: None,
+            plot_ids: vec![plot],
+            maintenance: vec![CoverMaintenanceLine {
+                id: String::new(),
+                kind_code: "mowing".into(),
+                performed_on: "2026-05-10".into(),
+                performed_end_date: None,
+                animals: Vec::new(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert!(advisory.covers_missing_widths.is_empty());
+    assert!(advisory.covers_missing_maintenance.is_empty());
+}
+
+#[test]
+fn an_inert_cover_established_after_15_april_is_reported() {
+    // Art. 43.1.a: the establishment date "no podrá ser posterior al 15 de
+    // abril". The strongest finding in the set — and still advisory, because
+    // the book records what happened and does not decide whether an aid was
+    // earned.
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    let plot = insert_verified_plot(&mut conn, &fx.farm_id, "Olivar Alto", 8.0, "OV");
+    module_ecoscheme::repository::insert_soil_cover(
+        &mut conn,
+        new_cover(&fx, &plot, "inert_cover", "2026-05-02"),
+        None,
+    )
+    .unwrap();
+    module_ecoscheme::repository::insert_soil_cover(
+        &mut conn,
+        new_cover(&fx, &plot, "inert_cover", "2026-04-15"),
+        None,
+    )
+    .unwrap();
+    // A LIVE cover has no such limit: art. 42 sets none.
+    module_ecoscheme::repository::insert_soil_cover(
+        &mut conn,
+        new_cover(&fx, &plot, "plant_cover", "2026-06-30"),
+        None,
+    )
+    .unwrap();
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(advisory.inert_covers_established_late.len(), 1);
+    assert_eq!(
+        advisory.inert_covers_established_late[0].established_on,
+        "2026-05-02"
+    );
+}
+
+#[test]
+fn a_live_cover_with_no_maintenance_is_reported_and_an_inert_one_never_is() {
+    // Art. 42.1.c asks for "el tipo de mantenimiento que realiza sobre la
+    // cubierta"; art. 43 asks for no maintenance at all, which is why the
+    // register refuses a line against an inert cover and why this check must
+    // not reach one.
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    let plot = insert_verified_plot(&mut conn, &fx.farm_id, "Olivar Alto", 8.0, "OV");
+    module_ecoscheme::repository::insert_soil_cover(
+        &mut conn,
+        new_cover(&fx, &plot, "plant_cover", "2026-03-15"),
+        None,
+    )
+    .unwrap();
+    module_ecoscheme::repository::insert_soil_cover(
+        &mut conn,
+        new_cover(&fx, &plot, "inert_cover", "2026-03-20"),
+        None,
+    )
+    .unwrap();
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(advisory.covers_missing_maintenance.len(), 1);
+    assert_eq!(
+        advisory.covers_missing_maintenance[0].practice_code,
+        "plant_cover"
+    );
+
+    // A grazing counts as maintenance just as a siega does — art. 42.1.c names
+    // three ways, and each is stored in the register that owns it.
+    let mut maintained = new_cover(&fx, &plot, "plant_cover", "2026-03-16");
+    maintained.maintenance = vec![CoverMaintenanceLine {
+        id: String::new(),
+        kind_code: GRAZING_MAINTENANCE.into(),
+        performed_on: "2026-05-01".into(),
+        performed_end_date: None,
+        animals: vec![GrazingAnimal {
+            id: String::new(),
+            grazing_record_id: String::new(),
+            species_code: "03".into(),
+            rega_code: "ES071234560001".into(),
+            animal_count: 40,
+        }],
+    }];
+    module_ecoscheme::repository::insert_soil_cover(&mut conn, maintained, None).unwrap();
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(advisory.covers_missing_maintenance.len(), 1);
+    assert_eq!(
+        advisory.covers_missing_maintenance[0].established_on,
+        "2026-03-15"
+    );
+}
+
+#[test]
+fn an_open_grazing_is_reported_only_once_its_campaign_has_closed() {
+    // Art. 30.2 ter's month runs from the date annotated, and model 9.1's
+    // footnote counts it from the END of grazing — so an open record is not
+    // late, and the finding is that the book cannot show the annotation
+    // finished once the campaign is over.
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    let plot = insert_verified_plot(&mut conn, &fx.farm_id, "Pasto Alto", 22.0, "PS");
+    module_ecoscheme::repository::insert_grazing_record(
+        &mut conn,
+        new_grazing(&fx, &plot, None),
+        None,
+    )
+    .unwrap();
+    module_ecoscheme::repository::insert_grazing_record(
+        &mut conn,
+        new_grazing(&fx, &plot, Some("2026-06-15")),
+        None,
+    )
+    .unwrap();
+
+    // The campaign has no end date yet: nothing in the book says it is over.
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert!(advisory.grazing_records_without_end.is_empty());
+
+    close_season_on(&mut conn, &fx.season_id, "2026-09-30");
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert!(
+        advisory.grazing_records_without_end.is_empty(),
+        "the campaign has not closed yet on {TODAY}"
+    );
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, "2026-10-01").unwrap();
+    assert_eq!(advisory.grazing_records_without_end.len(), 1);
+    assert_eq!(
+        advisory.grazing_records_without_end[0].started_on,
+        "2026-04-01"
+    );
 }

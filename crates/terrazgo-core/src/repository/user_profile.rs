@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! User profile CRUD. Soft-delete only: profile ids are the future author
-//! stamp on `record_change.actor`, so a departed worker's row must keep
-//! resolving in years-old audit trails. The ACTIVE profile is a per-device
-//! choice stored in settings.json, not in this table.
+//! User profile CRUD. Soft-delete only: profile ids are the author stamp
+//! every repository write puts on `record_change.actor`, so a departed
+//! worker's row must keep resolving in years-old audit trails. The ACTIVE
+//! profile is a per-device choice stored in settings.json, not in this table.
 
 use super::validate_name;
 use crate::audit::{log_delete, log_insert, log_update};

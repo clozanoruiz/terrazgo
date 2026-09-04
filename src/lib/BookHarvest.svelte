@@ -14,15 +14,22 @@
   //
   // Section 4 is metadata only. The analysis bulletin itself stays in the
   // farmer's folder; this register says where to find it.
-  import { formatDate, t, tCode } from "../i18n.js";
+  import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
-  import { notify, run } from "./notifications.svelte.js";
+  import { run } from "./notifications.svelte.js";
+  import TzCheckbox from "./TzCheckbox.svelte";
+  import NumberInput from "./NumberInput.svelte";
   import DateInput from "./DateInput.svelte";
   import PlantProductPicker from "./PlantProductPicker.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
 
   let { farmId, seasonId, countryCode, plots, crops } = $props();
 
@@ -171,8 +178,16 @@
     analysisFormOpen = true;
   }
 
-  function submitAnalysis(event) {
-    event.preventDefault();
+  function hideAnalysisForm() {
+    analysisFormOpen = false;
+    editingAnalysisId = null;
+  }
+
+  /// The row the analyses inspector is editing, so its delete button knows
+  /// which record it is about. Null while creating.
+  const editingAnalysis = $derived(analyses.find((d) => d.record.id === editingAnalysisId) ?? null);
+
+  async function submitAnalysis() {
     const payload = {
       sampled_on: sampledOn,
       material_kind_code: materialKind,
@@ -191,28 +206,25 @@
       analysis_type_codes: [...checkedAnalysisTypes],
       substance_codes: substanceRows.filter((row) => row.code).map((row) => row.code),
     };
-    run(async () => {
-      if (editingAnalysisId) {
-        await invoke("update_analysis_record", {
-          analysisRecordId: editingAnalysisId,
-          update: payload,
-        });
-      } else {
-        await invoke("create_analysis_record", {
-          record: { ...payload, season_id: seasonId, farm_id: farmId },
-        });
-      }
-      notify(t("message.analysis_saved"));
-      analysisFormOpen = false;
-      load();
-    });
+    if (editingAnalysisId) {
+      await invoke("update_analysis_record", {
+        analysisRecordId: editingAnalysisId,
+        update: payload,
+      });
+    } else {
+      await invoke("create_analysis_record", {
+        record: { ...payload, season_id: seasonId, farm_id: farmId },
+      });
+    }
+    hideAnalysisForm();
+    load();
   }
 
   function deleteAnalysis(record) {
     run(async () => {
       if (!(await confirmDialog(t("analysis.delete_confirm")))) return;
       await invoke("delete_analysis_record", { analysisRecordId: record.id });
-      notify(t("message.analysis_deleted"));
+      hideAnalysisForm();
       load();
     });
   }
@@ -255,8 +267,28 @@
     harvestFormOpen = true;
   }
 
-  function submitHarvest(event) {
-    event.preventDefault();
+  function hideHarvestForm() {
+    harvestFormOpen = false;
+    editingHarvestId = null;
+  }
+
+  /// The row the harvest inspector is editing, so its delete button knows
+  /// which record it is about. Null while creating.
+  const editingHarvest = $derived(harvests.find((d) => d.record.id === editingHarvestId) ?? null);
+
+  /// The quantity cell: value and unit travel together or the cell is blank,
+  /// because a figure with no unit says nothing.
+  function quantityCell(record) {
+    if (record.quantity_value === null) return "";
+    return `${formatNumber(record.quantity_value)} ${tCode("unit", record.quantity_unit_code)}`;
+  }
+
+  /// One record's origin plots in a cell.
+  function plotsCell(originPlots) {
+    return originPlots.map((p) => plotName(p.plot_id)).join(", ");
+  }
+
+  async function submitHarvest() {
     // Value and unit travel together or not at all: the printed form leaves the
     // cell to be filled by hand, and a quantity with no unit says nothing.
     const stated = harvestQuantity !== "" && harvestQuantity !== null;
@@ -275,28 +307,25 @@
       notes: harvestNotes.trim() || null,
       plots: submittedPlots(harvestPlots),
     };
-    run(async () => {
-      if (editingHarvestId) {
-        await invoke("update_harvest_record", {
-          harvestRecordId: editingHarvestId,
-          update: payload,
-        });
-      } else {
-        await invoke("create_harvest_record", {
-          record: { ...payload, season_id: seasonId, farm_id: farmId },
-        });
-      }
-      notify(t("message.harvest_saved"));
-      harvestFormOpen = false;
-      load();
-    });
+    if (editingHarvestId) {
+      await invoke("update_harvest_record", {
+        harvestRecordId: editingHarvestId,
+        update: payload,
+      });
+    } else {
+      await invoke("create_harvest_record", {
+        record: { ...payload, season_id: seasonId, farm_id: farmId },
+      });
+    }
+    hideHarvestForm();
+    load();
   }
 
   function deleteHarvest(record) {
     run(async () => {
       if (!(await confirmDialog(t("harvest.delete_confirm")))) return;
       await invoke("delete_harvest_record", { harvestRecordId: record.id });
-      notify(t("message.harvest_deleted"));
+      hideHarvestForm();
       load();
     });
   }
@@ -315,148 +344,142 @@
     </div>
   </div>
 
-  <ul class="card-list">
-    {#each harvests as { record, plots: originPlots } (record.id)}
-      <li class="card">
-        <div class="stack">
-          <strong>
-            {formatDate(record.harvested_on)} — {record.product_name}
-            {#if record.quantity_value !== null}
-              · {t("harvest.quantity_detail", {
-                quantity: record.quantity_value,
-                unit: tCode("unit", record.quantity_unit_code),
-              })}
-            {/if}
-          </strong>
-          <span class="detail">
-            {record.buyer_name}
-            {#if record.buyer_tax_id}
-              · {record.buyer_tax_id}
-            {/if}
-            {#if record.lot_number}
-              · {t("harvest.lot_detail", { lot: record.lot_number })}
-            {/if}
-          </span>
-          <span class="detail">
-            {originPlots.map((p) => plotName(p.plot_id)).join(", ")}
-            {#if record.delivery_note_ref}
-              · {record.delivery_note_ref}
-            {/if}
-          </span>
+  <TzWorkspace
+    open={harvestFormOpen}
+    title={editingHarvestId ? productName : t("harvest.new")}
+    onclose={hideHarvestForm}
+    ondelete={editingHarvest ? () => deleteHarvest(editingHarvest.record) : null}
+  >
+    {#snippet list()}
+      {#if harvests.length === 0}
+        <p class="table-empty">{t("table.empty")}</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table" use:resizableColumns={"harvests"}>
+            <thead>
+              <tr>
+                <th>{t("column.date")}</th>
+                <th>{t("column.product")}</th>
+                <th class="col-num">{t("column.quantity")}</th>
+                <th>{t("column.buyer")}</th>
+                <th>{t("column.lot")}</th>
+                <th>{t("column.plots")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each harvests as entry (entry.record.id)}
+                {@const record = entry.record}
+                <tr
+                  class:selected={editingHarvestId === record.id}
+                  onclick={(e) => opensRow(e) && showHarvestForm(entry)}
+                >
+                  <td class="col-name">
+                    <button type="button" class="row-open" onclick={() => showHarvestForm(entry)}>
+                      {formatDate(record.harvested_on)}
+                    </button>
+                  </td>
+                  <td class="col-muted">{record.product_name}</td>
+                  <td class="col-muted col-num">{quantityCell(record)}</td>
+                  <td class="col-muted">{record.buyer_name}</td>
+                  <td class="col-muted">{record.lot_number ?? ""}</td>
+                  <td class="col-muted">{plotsCell(entry.plots)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
-        <button type="button" onclick={() => showHarvestForm({ record, plots: originPlots })}>
-          {t("form.edit")}
-        </button>
-        <button type="button" class="btn-danger" onclick={() => deleteHarvest(record)}>
-          {t("form.delete")}
-        </button>
-      </li>
-    {/each}
-  </ul>
+      {/if}
+    {/snippet}
 
-  {#if harvestFormOpen}
-    <form onsubmit={submitHarvest}>
-      <div class="form-grid">
-        <DateInput label={t("harvest.harvested_on")} required bind:value={harvestedOn} />
-        <label>
-          <span>{t("harvest.product")}</span>
-          <PlantProductPicker
-            bind:name={productName}
-            bind:code={plantProductCode}
-            {countryCode}
-            required
-          />
-          <small>{t("harvest.product_hint")}</small>
-        </label>
-        <label>
-          <span>{t("harvest.quantity")}</span>
-          <input type="number" step="any" min="0.001" bind:value={harvestQuantity} />
-        </label>
-        <TzSelect
-          label={t("harvest.unit")}
-          items={codeItems(harvestUnits, "unit")}
-          bind:value={harvestUnit}
-        />
-        <label>
-          <span>{t("harvest.delivery_note")}</span>
-          <input bind:value={deliveryNote} />
-        </label>
-        <label><span>{t("harvest.lot")}</span><input bind:value={lotNumber} /></label>
-        <label>
-          <span>{t("treatment.notes")}</span>
-          <input bind:value={harvestNotes} />
-        </label>
-      </div>
-
-      <fieldset class="subsection">
-        <legend>{t("harvest.buyer_section")}</legend>
+    {#snippet inspector(formId)}
+      <TzForm id={formId} onsubmit={submitHarvest}>
         <div class="form-grid">
+          <DateInput label={t("harvest.harvested_on")} required bind:value={harvestedOn} />
           <label>
-            <span>{t("harvest.buyer_name")}</span>
-            <input required bind:value={buyerName} />
-          </label>
-          <label><span>{t("harvest.buyer_tax_id")}</span><input bind:value={buyerTaxId} /></label>
-          <label>
-            <span>{t("harvest.buyer_address")}</span>
-            <input bind:value={buyerAddress} />
-          </label>
-          <label>
-            <span>{t("harvest.buyer_registry")}</span>
-            <input bind:value={buyerRegistry} />
-            <small>{t("harvest.buyer_registry_hint")}</small>
-          </label>
-        </div>
-      </fieldset>
-
-      <fieldset class="subsection">
-        <legend>{t("harvest.plots_section")}</legend>
-        {#each harvestPlots as row, index (row)}
-          <div class="form-grid plot-row">
-            <TzSelect
-              label={t("crop.plot")}
-              items={nameItems(
-                plots,
-                (p) => p.plot.name,
-                (p) => p.plot.id,
-              )}
+            <span>{t("harvest.product")}</span>
+            <PlantProductPicker
+              bind:name={productName}
+              bind:code={plantProductCode}
+              {countryCode}
               required
-              bind:value={row.plotId}
-              onchange={() => onPlotChosen(row)}
             />
-            <TzSelect
-              label={t("treatment.crop")}
-              items={nameItems(
-                cropsOfPlot(row.plotId),
-                (crop) => `${crop.species_name}${crop.variety ? ` — ${crop.variety}` : ""}`,
-              )}
-              nullable
-              nullLabel=""
-              bind:value={row.cropId}
-            />
-            {#if harvestPlots.length > 1}
-              <button
-                type="button"
-                class="btn-danger"
-                onclick={() => harvestPlots.splice(index, 1)}
-              >
-                {t("treatment.remove")}
-              </button>
-            {/if}
-          </div>
-        {/each}
-        <button type="button" onclick={() => harvestPlots.push(emptyPlotRow())}>
-          {t("treatment.add_plot")}
-        </button>
-      </fieldset>
+            <small>{t("harvest.product_hint")}</small>
+          </label>
+          <NumberInput label={t("harvest.quantity")} min={0.001} bind:value={harvestQuantity} />
+          <TzSelect
+            label={t("harvest.unit")}
+            items={codeItems(harvestUnits, "unit")}
+            bind:value={harvestUnit}
+          />
+          <TextInput label={t("harvest.delivery_note")} bind:value={deliveryNote} />
+          <TextInput label={t("harvest.lot")} bind:value={lotNumber} />
+          <TextInput label={t("treatment.notes")} bind:value={harvestNotes} />
+        </div>
 
+        <fieldset class="subsection">
+          <legend>{t("harvest.buyer_section")}</legend>
+          <div class="form-grid">
+            <TextInput label={t("harvest.buyer_name")} required bind:value={buyerName} />
+            <TextInput label={t("harvest.buyer_tax_id")} bind:value={buyerTaxId} />
+            <TextInput label={t("harvest.buyer_address")} bind:value={buyerAddress} />
+            <TextInput label={t("harvest.buyer_registry")} bind:value={buyerRegistry}>
+              <small>{t("harvest.buyer_registry_hint")}</small>
+            </TextInput>
+          </div>
+        </fieldset>
+
+        <fieldset class="subsection">
+          <legend>{t("harvest.plots_section")}</legend>
+          {#each harvestPlots as row, index (row)}
+            <div class="form-grid plot-row">
+              <TzSelect
+                label={t("crop.plot")}
+                items={nameItems(
+                  plots,
+                  (p) => p.plot.name,
+                  (p) => p.plot.id,
+                )}
+                required
+                bind:value={row.plotId}
+                onchange={() => onPlotChosen(row)}
+              />
+              <TzSelect
+                label={t("treatment.crop")}
+                items={nameItems(
+                  cropsOfPlot(row.plotId),
+                  (crop) => `${crop.species_name}${crop.variety ? ` — ${crop.variety}` : ""}`,
+                )}
+                nullable
+                nullLabel=""
+                bind:value={row.cropId}
+              />
+              {#if harvestPlots.length > 1}
+                <button
+                  type="button"
+                  class="btn-danger"
+                  onclick={() => harvestPlots.splice(index, 1)}
+                >
+                  {t("treatment.remove")}
+                </button>
+              {/if}
+            </div>
+          {/each}
+          <button type="button" onclick={() => harvestPlots.push(emptyPlotRow())}>
+            {t("treatment.add_plot")}
+          </button>
+        </fieldset>
+      </TzForm>
+    {/snippet}
+
+    {#snippet actions(formId)}
       <div class="form-actions">
-        <button type="submit">{t("form.save")}</button>
-        <button type="button" class="btn-cancel" onclick={() => (harvestFormOpen = false)}>
+        <button type="submit" form={formId}>{t("form.save")}</button>
+        <button type="button" class="btn-cancel" onclick={hideHarvestForm}>
           {t("form.cancel")}
         </button>
       </div>
-    </form>
-  {/if}
+    {/snippet}
+  </TzWorkspace>
 
   <div class="view-head">
     <h3>{t("analysis.title")}</h3>
@@ -468,208 +491,219 @@
   </div>
   <p class="detail">{t("analysis.keep_hint")}</p>
 
-  <ul class="card-list">
-    {#each analyses as detail (detail.record.id)}
-      {@const record = detail.record}
-      {@const sampledPlots = detail.plots}
-      <li class="card">
-        <div class="stack">
-          <strong>
-            {formatDate(record.sampled_on)} — {tCode(
-              "analysis_material",
-              record.material_kind_code,
-            )}
-            {#if record.bulletin_number}
-              · {t("analysis.bulletin_detail", { bulletin: record.bulletin_number })}
-            {/if}
-          </strong>
-          {#if record.lab_name}
-            <span class="detail">
-              {record.lab_name}
-              {#if record.lab_tax_id}
-                · {record.lab_tax_id}
-              {/if}
-            </span>
-          {/if}
-          <span class="detail">
-            {sampledPlots.map((p) => plotName(p.plot_id)).join(", ")}
-          </span>
-          {#if record.substances_detected}
-            <span class="detail">{record.substances_detected}</span>
-          {/if}
+  <TzWorkspace
+    open={analysisFormOpen}
+    title={editingAnalysisId ? formatDate(sampledOn) : t("analysis.new")}
+    onclose={hideAnalysisForm}
+    ondelete={editingAnalysis ? () => deleteAnalysis(editingAnalysis.record) : null}
+  >
+    {#snippet list()}
+      {#if analyses.length === 0}
+        <p class="table-empty">{t("table.empty")}</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="data-table" use:resizableColumns={"analyses"}>
+            <thead>
+              <tr>
+                <th>{t("column.date")}</th>
+                <th>{t("column.material")}</th>
+                <th>{t("column.bulletin")}</th>
+                <th>{t("column.lab")}</th>
+                <th>{t("column.plots")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each analyses as detail (detail.record.id)}
+                {@const record = detail.record}
+                <tr
+                  class:selected={editingAnalysisId === record.id}
+                  onclick={(e) => opensRow(e) && showAnalysisForm(detail)}
+                >
+                  <td class="col-name">
+                    <button type="button" class="row-open" onclick={() => showAnalysisForm(detail)}>
+                      {formatDate(record.sampled_on)}
+                    </button>
+                  </td>
+                  <td class="col-muted">
+                    {tCode("analysis_material", record.material_kind_code)}
+                  </td>
+                  <td class="col-muted">{record.bulletin_number ?? ""}</td>
+                  <td class="col-muted">{record.lab_name ?? ""}</td>
+                  <td class="col-muted">{plotsCell(detail.plots)}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         </div>
-        <button type="button" onclick={() => showAnalysisForm(detail)}>
-          {t("form.edit")}
-        </button>
-        <button type="button" class="btn-danger" onclick={() => deleteAnalysis(record)}>
-          {t("form.delete")}
-        </button>
-      </li>
-    {/each}
-  </ul>
+      {/if}
+    {/snippet}
 
-  {#if analysisFormOpen}
-    <form onsubmit={submitAnalysis}>
-      <div class="form-grid">
-        <DateInput label={t("analysis.sampled_on")} required bind:value={sampledOn} />
-        <TzSelect
-          label={t("analysis.material")}
-          items={codeItems(analysisMaterials, "analysis_material")}
-          required
-          bind:value={materialKind}
-        />
-        <label>
-          <span>{t("analysis.bulletin")}</span>
-          <input bind:value={bulletinNumber} />
-        </label>
-        <label><span>{t("analysis.lab_name")}</span><input bind:value={labName} /></label>
-        <label><span>{t("analysis.lab_address")}</span><input bind:value={labAddress} /></label>
-        <label><span>{t("analysis.lab_tax_id")}</span><input bind:value={labTaxId} /></label>
-        <label>
-          <span>{t("analysis.substances")}</span>
-          <input bind:value={substances} />
-          <small>{t("analysis.substances_hint")}</small>
-        </label>
-        <label>
-          <span>{t("treatment.notes")}</span>
-          <input bind:value={analysisNotes} />
-        </label>
-      </div>
-
-      <fieldset class="subsection">
-        <legend>{t("analysis.types")}</legend>
-        <p class="detail">{t("analysis.types_hint")}</p>
-        <div class="checkbox-grid">
-          {#each analysisTypes as kind (kind.code)}
-            <label class="checkbox">
-              <input type="checkbox" value={kind.code} bind:group={checkedAnalysisTypes} />
-              <span>{tCode("analysis_type", kind.code)}</span>
-            </label>
-          {/each}
+    {#snippet inspector(formId)}
+      <TzForm id={formId} onsubmit={submitAnalysis}>
+        <div class="form-grid">
+          <DateInput label={t("analysis.sampled_on")} required bind:value={sampledOn} />
+          <TzSelect
+            label={t("analysis.material")}
+            items={codeItems(analysisMaterials, "analysis_material")}
+            required
+            bind:value={materialKind}
+          />
+          <TextInput label={t("analysis.bulletin")} bind:value={bulletinNumber} />
+          <TextInput label={t("analysis.lab_name")} bind:value={labName} />
+          <TextInput label={t("analysis.lab_address")} bind:value={labAddress} />
+          <TextInput label={t("analysis.lab_tax_id")} bind:value={labTaxId} />
+          <TextInput label={t("analysis.substances")} bind:value={substances}>
+            <small>{t("analysis.substances_hint")}</small>
+          </TextInput>
+          <TextInput label={t("treatment.notes")} bind:value={analysisNotes} />
         </div>
-      </fieldset>
 
-      <fieldset class="subsection">
-        <legend>{t("analysis.substances_coded")}</legend>
-        <p class="detail">{t("analysis.substances_coded_hint")}</p>
-        {#each substanceRows as row, index (row)}
-          <div class="form-grid plot-row">
-            <!-- The filter box is gone: the combobox's own input IS the
-                 trigger, so one control does what two used to. -->
-            <TzCombobox
-              label={t("analysis.substance")}
-              items={substanceItems()}
-              placeholder={t("analysis.substance_filter_hint")}
-              bind:value={row.code}
-            />
-            <button type="button" class="btn-danger" onclick={() => substanceRows.splice(index, 1)}>
-              {t("treatment.remove")}
-            </button>
-          </div>
-        {/each}
-        <button type="button" onclick={() => substanceRows.push(emptySubstanceRow())}>
-          {t("analysis.add_substance")}
-        </button>
-      </fieldset>
-
-      {#if soilApplies}
         <fieldset class="subsection">
-          <legend>{t("analysis.soil_section")}</legend>
-          <p class="detail">{t("analysis.soil_hint")}</p>
-          <div class="form-grid">
-            <label>
-              <span>{t("analysis.soil_ph")}</span>
-              <input type="number" step="any" min="0" max="14" bind:value={soil.ph} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_organic_matter")}</span>
-              <input
-                type="number"
-                step="any"
-                min="0"
-                max="100"
-                bind:value={soil.organic_matter_pct}
+          <legend>{t("analysis.types")}</legend>
+          <p class="detail">{t("analysis.types_hint")}</p>
+          <div class="checkbox-grid">
+            {#each analysisTypes as kind (kind.code)}
+              <TzCheckbox
+                label={tCode("analysis_type", kind.code)}
+                value={kind.code}
+                bind:group={checkedAnalysisTypes}
               />
-            </label>
-            <label>
-              <span>{t("analysis.soil_p")}</span>
-              <input type="number" step="any" min="0" bind:value={soil.available_p_mg_kg} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_k")}</span>
-              <input type="number" step="any" min="0" bind:value={soil.available_k_mg_kg} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_n")}</span>
-              <input type="number" step="any" min="0" max="100" bind:value={soil.total_n_pct} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_conductivity")}</span>
-              <input type="number" step="any" min="0" bind:value={soil.conductivity_ds_m} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_sand")}</span>
-              <input type="number" step="any" min="0" max="100" bind:value={soil.sand_pct} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_silt")}</span>
-              <input type="number" step="any" min="0" max="100" bind:value={soil.silt_pct} />
-            </label>
-            <label>
-              <span>{t("analysis.soil_clay")}</span>
-              <input type="number" step="any" min="0" max="100" bind:value={soil.clay_pct} />
-            </label>
+            {/each}
           </div>
         </fieldset>
-      {/if}
 
-      <fieldset class="subsection">
-        <legend>{t("analysis.plots_section")}</legend>
-        {#each analysisPlots as row, index (row)}
-          <div class="form-grid plot-row">
-            <TzSelect
-              label={t("crop.plot")}
-              items={nameItems(
-                plots,
-                (p) => p.plot.name,
-                (p) => p.plot.id,
-              )}
-              required
-              bind:value={row.plotId}
-              onchange={() => onPlotChosen(row)}
-            />
-            <TzSelect
-              label={t("treatment.crop")}
-              items={nameItems(
-                cropsOfPlot(row.plotId),
-                (crop) => `${crop.species_name}${crop.variety ? ` — ${crop.variety}` : ""}`,
-              )}
-              nullable
-              nullLabel=""
-              bind:value={row.cropId}
-            />
-            {#if analysisPlots.length > 1}
+        <fieldset class="subsection">
+          <legend>{t("analysis.substances_coded")}</legend>
+          <p class="detail">{t("analysis.substances_coded_hint")}</p>
+          {#each substanceRows as row, index (row)}
+            <div class="form-grid plot-row">
+              <!-- The filter box is gone: the combobox's own input IS the
+                 trigger, so one control does what two used to. -->
+              <TzCombobox
+                label={t("analysis.substance")}
+                items={substanceItems()}
+                placeholder={t("analysis.substance_filter_hint")}
+                bind:value={row.code}
+              />
               <button
                 type="button"
                 class="btn-danger"
-                onclick={() => analysisPlots.splice(index, 1)}
+                onclick={() => substanceRows.splice(index, 1)}
               >
                 {t("treatment.remove")}
               </button>
-            {/if}
-          </div>
-        {/each}
-        <button type="button" onclick={() => analysisPlots.push(emptyPlotRow())}>
-          {t("treatment.add_plot")}
-        </button>
-      </fieldset>
+            </div>
+          {/each}
+          <button type="button" onclick={() => substanceRows.push(emptySubstanceRow())}>
+            {t("analysis.add_substance")}
+          </button>
+        </fieldset>
 
+        {#if soilApplies}
+          <fieldset class="subsection">
+            <legend>{t("analysis.soil_section")}</legend>
+            <p class="detail">{t("analysis.soil_hint")}</p>
+            <div class="form-grid">
+              <NumberInput label={t("analysis.soil_ph")} min={0} max={14} bind:value={soil.ph} />
+              <NumberInput
+                label={t("analysis.soil_organic_matter")}
+                min={0}
+                max={100}
+                bind:value={soil.organic_matter_pct}
+              />
+              <NumberInput
+                label={t("analysis.soil_p")}
+                min={0}
+                bind:value={soil.available_p_mg_kg}
+              />
+              <NumberInput
+                label={t("analysis.soil_k")}
+                min={0}
+                bind:value={soil.available_k_mg_kg}
+              />
+              <NumberInput
+                label={t("analysis.soil_n")}
+                min={0}
+                max={100}
+                bind:value={soil.total_n_pct}
+              />
+              <NumberInput
+                label={t("analysis.soil_conductivity")}
+                min={0}
+                bind:value={soil.conductivity_ds_m}
+              />
+              <NumberInput
+                label={t("analysis.soil_sand")}
+                min={0}
+                max={100}
+                bind:value={soil.sand_pct}
+              />
+              <NumberInput
+                label={t("analysis.soil_silt")}
+                min={0}
+                max={100}
+                bind:value={soil.silt_pct}
+              />
+              <NumberInput
+                label={t("analysis.soil_clay")}
+                min={0}
+                max={100}
+                bind:value={soil.clay_pct}
+              />
+            </div>
+          </fieldset>
+        {/if}
+
+        <fieldset class="subsection">
+          <legend>{t("analysis.plots_section")}</legend>
+          {#each analysisPlots as row, index (row)}
+            <div class="form-grid plot-row">
+              <TzSelect
+                label={t("crop.plot")}
+                items={nameItems(
+                  plots,
+                  (p) => p.plot.name,
+                  (p) => p.plot.id,
+                )}
+                required
+                bind:value={row.plotId}
+                onchange={() => onPlotChosen(row)}
+              />
+              <TzSelect
+                label={t("treatment.crop")}
+                items={nameItems(
+                  cropsOfPlot(row.plotId),
+                  (crop) => `${crop.species_name}${crop.variety ? ` — ${crop.variety}` : ""}`,
+                )}
+                nullable
+                nullLabel=""
+                bind:value={row.cropId}
+              />
+              {#if analysisPlots.length > 1}
+                <button
+                  type="button"
+                  class="btn-danger"
+                  onclick={() => analysisPlots.splice(index, 1)}
+                >
+                  {t("treatment.remove")}
+                </button>
+              {/if}
+            </div>
+          {/each}
+          <button type="button" onclick={() => analysisPlots.push(emptyPlotRow())}>
+            {t("treatment.add_plot")}
+          </button>
+        </fieldset>
+      </TzForm>
+    {/snippet}
+
+    {#snippet actions(formId)}
       <div class="form-actions">
-        <button type="submit">{t("form.save")}</button>
-        <button type="button" class="btn-cancel" onclick={() => (analysisFormOpen = false)}>
+        <button type="submit" form={formId}>{t("form.save")}</button>
+        <button type="button" class="btn-cancel" onclick={hideAnalysisForm}>
           {t("form.cancel")}
         </button>
       </div>
-    </form>
-  {/if}
+    {/snippet}
+  </TzWorkspace>
 {/if}

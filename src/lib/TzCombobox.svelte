@@ -12,8 +12,10 @@
   // to the OS, so long lists must narrow before they render.
   //
   // Same contract as TzSelect: the code string goes in and comes out.
+  import { Check, ChevronDown } from "@lucide/svelte";
   import { Combobox } from "bits-ui";
   import { t } from "../i18n.js";
+  import { refusalStore } from "./formRefusal.js";
   import { fold, searchItems } from "./collate.js";
 
   let {
@@ -26,6 +28,8 @@
     required = false,
     disabled = false,
     class: klass = "",
+    /// Names this field inside its form, for TzForm's `anchors`.
+    name = "",
     onchange = null,
   } = $props();
 
@@ -47,6 +51,18 @@
 
   let proxy = $state(null);
   let showError = $state(false);
+
+  // A backend refusal the form chose to hang on this field. Display only — it
+  // never becomes a validity, so it cannot wedge the next submit.
+  const refusals = refusalStore();
+  const refusal = $derived(name && refusals ? (refusals.byName[name] ?? "") : "");
+
+  // Through setCustomValidity rather than a `required` attribute, so
+  // validationMessage is OUR string and not the browser's OS-language one —
+  // see DateInput for the measurement.
+  const error = $derived(required && !value ? t("form.required") : "");
+
+  $effect(() => proxy?.setCustomValidity(error));
 
   function commit(next) {
     value = next ?? "";
@@ -82,15 +98,7 @@
         onfocus={() => (open = true)}
       />
       <Combobox.Trigger class="tz-field-trigger" aria-label={t("form.open_list")}>
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          aria-hidden="true"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
+        <ChevronDown />
       </Combobox.Trigger>
     </div>
 
@@ -105,16 +113,7 @@
               {#snippet children({ selected })}
                 <span>{item.label}</span>
                 {#if selected}
-                  <svg
-                    class="tz-option-check"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
-                  >
-                    <path d="M20 6L9 17l-5-5" />
-                  </svg>
+                  <Check class="tz-option-check" />
                 {/if}
               {/snippet}
             </Combobox.Item>
@@ -139,8 +138,9 @@
     class="tz-validity"
     bind:this={proxy}
     {value}
-    {required}
+    {name}
     {disabled}
+    data-tz-label={label}
     tabindex="-1"
     aria-hidden="true"
     onfocus={() => document.getElementById(uid)?.focus()}
@@ -148,7 +148,10 @@
   />
 
   {#if hint}<small>{hint}</small>{/if}
-  {#if showError}
-    <small class="tz-field-error">{t("form.required")}</small>
+  {#if showError && error}
+    <small class="tz-field-error">{error}</small>
+  {/if}
+  {#if refusal}
+    <small class="tz-field-error">{refusal}</small>
   {/if}
 </div>

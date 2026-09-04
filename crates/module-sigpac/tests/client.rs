@@ -10,17 +10,19 @@
 // helpers — the file-level allow is the workspace convention.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::{
+    CAMPAIGNS, DECLARED, DECLARED_EMPTY, DECLARED_SECONDARY, FITOSANITARIOS, NITRATOS, RECINFO,
+    RECINFO_BY_POINT, RECINFO_NOT_FOUND, RED_NATURA, seed_resource, seed_resource_at_time,
+    today_stamp,
+};
+
 use module_sigpac::client::{recinfo_cache_key, recinto_by_reference};
 use module_sigpac::models::parse_recinto_response;
 use module_sigpac::reference::SigpacRef;
-use rusqlite::Connection;
-use std::sync::Mutex;
 use terrazgo_geo::GeoError;
 use terrazgo_geo::db::open_cache_in_memory;
-
-const RECINFO: &[u8] = include_bytes!("fixtures/recinfo.geojson");
-const RECINFO_NOT_FOUND: &[u8] = include_bytes!("fixtures/recinfo-notfound.geojson");
-const RECINFO_BY_POINT: &[u8] = include_bytes!("fixtures/recinfobypoint.geojson");
 
 fn palencia_ref() -> SigpacRef {
     SigpacRef::from_parts(["34", "10", "0", "0", "604", "5021", "13"]).unwrap()
@@ -97,7 +99,7 @@ fn malformed_response_is_a_stable_error() {
 
 #[test]
 fn client_serves_a_cached_lookup_without_network() {
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     let reference = palencia_ref();
     seed_resource(&cache, &recinfo_cache_key(&reference), RECINFO);
 
@@ -109,37 +111,7 @@ fn client_serves_a_cached_lookup_without_network() {
     assert_eq!(recinto.land_use(), Some("PA"));
 }
 
-fn seed_resource(cache: &Mutex<Connection>, key: &str, data: &[u8]) {
-    seed_resource_at(cache, key, data, "2026-07-08T00:00:00Z");
-}
-
-/// Seed with an explicit fetch time. The declared-crops fallback re-asks an
-/// EMPTY current-campaign answer that was stored on an earlier day, so any
-/// test about a trusted empty must seed it as today's — otherwise the test
-/// silently depends on the machine having network.
-fn seed_resource_at(cache: &Mutex<Connection>, key: &str, data: &[u8], fetched_at: &str) {
-    cache
-        .lock()
-        .unwrap()
-        .execute(
-            "INSERT INTO resource (key, data, content_type, fetched_at)
-             VALUES (?1, ?2, 'application/json', ?3)",
-            rusqlite::params![key, data, fetched_at],
-        )
-        .unwrap();
-}
-
-/// Today, as the cache writes it.
-fn today_stamp() -> String {
-    format!("{}T00:00:00Z", terrazgo_core::date::today_utc())
-}
-
 // --- zone intersections + campaign (P4, fixtures harvested 2026-07-08) -----
-
-const NITRATOS: &[u8] = include_bytes!("fixtures/intersection-nitratos.json");
-const FITOSANITARIOS: &[u8] = include_bytes!("fixtures/intersection-fitosanitarios.json");
-const RED_NATURA: &[u8] = include_bytes!("fixtures/intersection-red-natura.json");
-const CAMPAIGNS: &[u8] = include_bytes!("fixtures/geopackages-listing.html");
 
 #[test]
 fn intersection_fixtures_parse_inside_and_outside() {
@@ -170,12 +142,12 @@ fn intersection_fixtures_parse_inside_and_outside() {
 fn current_campaign_reads_the_max_year_from_the_listing() {
     use module_sigpac::client::current_campaign;
 
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     seed_resource(&cache, "sigpac/campaigns", CAMPAIGNS);
     // The harvested listing names 2025/ and 2026/ → current campaign 2026.
     assert_eq!(current_campaign(&cache, false).unwrap(), 2026);
 
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     seed_resource(&cache, "sigpac/campaigns", b"<html>no years here</html>");
     assert!(matches!(
         current_campaign(&cache, false),
@@ -186,10 +158,6 @@ fn current_campaign_reads_the_max_year_from_the_listing() {
 // --- declared crops: OGC API Features `cultivo_declarado` -------------------
 // Fixtures harvested live 2026-08-03: recinto 47/163/0/0/11/40/1 (Valladolid,
 // campaign 2025) and 47/219/0/0/11/28/2, which declares a secondary crop.
-
-const DECLARED: &[u8] = include_bytes!("fixtures/cultivo-declarado.json");
-const DECLARED_EMPTY: &[u8] = include_bytes!("fixtures/cultivo-declarado-empty.json");
-const DECLARED_SECONDARY: &[u8] = include_bytes!("fixtures/cultivo-declarado-secondary.json");
 
 fn valladolid_ref() -> SigpacRef {
     SigpacRef::from_parts(["47", "163", "0", "0", "11", "40", "1"]).unwrap()
@@ -267,9 +235,9 @@ fn declared_crops_cache_key_carries_the_campaign() {
 fn fallback_serves_the_previous_campaign_and_labels_it() {
     use module_sigpac::client::{declared_crops_cache_key, declared_crops_with_fallback};
 
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     let reference = valladolid_ref();
-    seed_resource_at(
+    seed_resource_at_time(
         &cache,
         &declared_crops_cache_key(2026, &reference),
         DECLARED_EMPTY,
@@ -297,7 +265,7 @@ fn fallback_serves_the_previous_campaign_and_labels_it() {
 fn fallback_trusts_a_stored_current_campaign_answer() {
     use module_sigpac::client::{declared_crops_cache_key, declared_crops_with_fallback};
 
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     let reference = valladolid_ref();
     seed_resource(
         &cache,
@@ -319,9 +287,9 @@ fn fallback_trusts_a_stored_current_campaign_answer() {
 fn fallback_reports_none_when_both_campaigns_answered_empty() {
     use module_sigpac::client::{declared_crops_cache_key, declared_crops_with_fallback};
 
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     let reference = valladolid_ref();
-    seed_resource_at(
+    seed_resource_at_time(
         &cache,
         &declared_crops_cache_key(2026, &reference),
         DECLARED_EMPTY,
@@ -346,7 +314,7 @@ fn fallback_reports_none_when_both_campaigns_answered_empty() {
 fn cached_probe_reads_without_fetching() {
     use terrazgo_geo::fetch;
 
-    let cache = Mutex::new(open_cache_in_memory().unwrap());
+    let cache = open_cache_in_memory().unwrap();
     assert!(
         fetch::cached(&cache, "sigpac/cultivos/2025/x")
             .unwrap()

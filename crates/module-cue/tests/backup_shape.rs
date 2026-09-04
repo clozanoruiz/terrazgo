@@ -11,20 +11,17 @@
 //! these tests are what keep that list honest as `0001` keeps changing.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::TempFile;
+
 use rusqlite::Connection;
-use std::path::PathBuf;
+use std::path::Path;
 use terrazgo_core::backup::{export_backup, validate_backup};
 use terrazgo_core::error::CoreError;
 
-fn temp_path(name: &str) -> PathBuf {
-    let mut path = std::env::temp_dir();
-    path.push(format!("terrazgo-cue-backup-{}-{name}", std::process::id()));
-    let _ = std::fs::remove_file(&path);
-    path
-}
-
 /// A database at the composed (core + module) schema, i.e. what the app runs.
-fn composed_db(path: &PathBuf) -> Connection {
+fn composed_db(path: &Path) -> Connection {
     module_cue::open(path).unwrap()
 }
 
@@ -35,18 +32,16 @@ fn user_version(conn: &Connection) -> i64 {
 
 #[test]
 fn a_fresh_composed_backup_satisfies_the_module_shape() {
-    let source_path = temp_path("fresh-src.db");
-    let dest = temp_path("fresh-dest.db");
-    let conn = composed_db(&source_path);
+    let source_path = TempFile::reserve("fresh-src.db");
+    let dest = TempFile::reserve("fresh-dest.db");
+    let conn = composed_db(source_path.path());
     let current = user_version(&conn);
 
-    export_backup(&conn, &dest).unwrap();
-    let info = validate_backup(&dest, current, module_cue::BACKUP_SHAPE).unwrap();
+    export_backup(&conn, dest.path()).unwrap();
+    let info = validate_backup(dest.path(), current, module_cue::BACKUP_SHAPE).unwrap();
     assert_eq!(info.schema_version, current);
 
     drop(conn);
-    let _ = std::fs::remove_file(&source_path);
-    let _ = std::fs::remove_file(&dest);
 }
 
 /// The file this slice's `0001` edit creates: same `user_version`, missing the
@@ -60,13 +55,13 @@ fn a_backup_taken_before_the_interval_and_total_columns_is_refused() {
         "total_quantity_value",
         "total_quantity_unit_code",
     ] {
-        let source_path = temp_path(&format!("stale-src-{column}.db"));
-        let dest = temp_path(&format!("stale-dest-{column}.db"));
-        let conn = composed_db(&source_path);
+        let source_path = TempFile::reserve(&format!("stale-src-{column}.db"));
+        let dest = TempFile::reserve(&format!("stale-dest-{column}.db"));
+        let conn = composed_db(source_path.path());
         let current = user_version(&conn);
-        export_backup(&conn, &dest).unwrap();
+        export_backup(&conn, dest.path()).unwrap();
 
-        let copy = Connection::open(&dest).unwrap();
+        let copy = Connection::open(dest.path()).unwrap();
         copy.execute(
             &format!("ALTER TABLE treatment_record DROP COLUMN {column}"),
             [],
@@ -76,15 +71,13 @@ fn a_backup_taken_before_the_interval_and_total_columns_is_refused() {
 
         assert!(
             matches!(
-                validate_backup(&dest, current, module_cue::BACKUP_SHAPE),
+                validate_backup(dest.path(), current, module_cue::BACKUP_SHAPE),
                 Err(CoreError::Invalid("backup_invalid"))
             ),
             "a same-version backup without treatment_record.{column} must be refused"
         );
 
         drop(conn);
-        let _ = std::fs::remove_file(&source_path);
-        let _ = std::fs::remove_file(&dest);
     }
 }
 
@@ -93,13 +86,13 @@ fn a_backup_taken_before_the_interval_and_total_columns_is_refused() {
 /// and why every module schema edit has to extend `BACKUP_SHAPE`.
 #[test]
 fn the_core_fingerprint_alone_cannot_catch_a_module_table() {
-    let source_path = temp_path("core-only-src.db");
-    let dest = temp_path("core-only-dest.db");
-    let conn = composed_db(&source_path);
+    let source_path = TempFile::reserve("core-only-src.db");
+    let dest = TempFile::reserve("core-only-dest.db");
+    let conn = composed_db(source_path.path());
     let current = user_version(&conn);
-    export_backup(&conn, &dest).unwrap();
+    export_backup(&conn, dest.path()).unwrap();
 
-    let copy = Connection::open(&dest).unwrap();
+    let copy = Connection::open(dest.path()).unwrap();
     copy.execute(
         "ALTER TABLE treatment_record DROP COLUMN application_end_date",
         [],
@@ -107,10 +100,8 @@ fn the_core_fingerprint_alone_cannot_catch_a_module_table() {
     .unwrap();
     drop(copy);
 
-    assert!(validate_backup(&dest, current, &[]).is_ok());
-    assert!(validate_backup(&dest, current, module_cue::BACKUP_SHAPE).is_err());
+    assert!(validate_backup(dest.path(), current, &[]).is_ok());
+    assert!(validate_backup(dest.path(), current, module_cue::BACKUP_SHAPE).is_err());
 
     drop(conn);
-    let _ = std::fs::remove_file(&source_path);
-    let _ = std::fs::remove_file(&dest);
 }

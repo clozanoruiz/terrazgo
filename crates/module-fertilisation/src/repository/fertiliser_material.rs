@@ -227,6 +227,31 @@ pub fn get_fertiliser_material(conn: &Connection, id: &str) -> Result<Fertiliser
     })
 }
 
+/// The material a stored record names, RETIRED ONES INCLUDED — the SIEX export.
+///
+/// A fertilisation record freezes only what section 6 prints; the full C.h
+/// composition the descriptor asks for stays on the registry row, which is
+/// soft-deleted precisely so a record written years ago can still resolve it.
+/// The ordinary getter filters those out, which is right for a picker and wrong
+/// for an export of a past campaign.
+pub fn get_fertiliser_material_for_export(
+    conn: &Connection,
+    id: &str,
+) -> Result<FertiliserMaterialDetail> {
+    let material = conn
+        .query_row(
+            "SELECT * FROM fertiliser_material WHERE id = ?1",
+            [id],
+            map_material,
+        )
+        .map_err(no_rows_to_not_found)?;
+    let nutrients = nutrients_of(conn, &material.id)?;
+    Ok(FertiliserMaterialDetail {
+        material,
+        nutrients,
+    })
+}
+
 /// The registry, alphabetically — a picker's order, not a record book's.
 pub fn list_fertiliser_materials(conn: &Connection) -> Result<Vec<FertiliserMaterialDetail>> {
     let mut stmt =

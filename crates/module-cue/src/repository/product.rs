@@ -352,6 +352,33 @@ fn product_authorisations(
     Ok(authorisations)
 }
 
+/// The authorisation a stored record cites, matched on the number it froze.
+///
+/// **The number is what the record legally names**, so the export resolves the
+/// authorisation's kind by it rather than by an id: a product whose registration
+/// was replaced keeps the old row addressable, and one whose row is gone falls
+/// back to the default kind at the caller — which is what every record predating
+/// `kind_code` was.
+///
+/// `find_` rather than `get_`, the `find_export_alias` convention: no match is a
+/// `None` the caller resolves, not an error.
+pub fn find_product_authorisation(
+    conn: &Connection,
+    product_id: &str,
+    country_code: &str,
+    authorisation_number: &str,
+) -> Result<Option<ProductAuthorisation>> {
+    let found = conn
+        .query_row(
+            "SELECT * FROM product_authorisation
+             WHERE product_id = ?1 AND country_code = ?2 AND authorisation_number = ?3",
+            params![product_id, country_code, authorisation_number],
+            map_authorisation,
+        )
+        .optional()?;
+    Ok(found)
+}
+
 /// Register a per-country authorisation number for a product (multi-country case).
 pub fn add_product_authorisation(
     conn: &mut Connection,

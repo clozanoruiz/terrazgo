@@ -25,20 +25,21 @@ use terrazgo_core::audit;
 
 pub use fertilisation::{
     get_fertilisation_record, insert_fertilisation_record, list_fertilisation_records,
-    soft_delete_fertilisation_record, update_fertilisation_record,
+    list_fertilisation_records_for_export, soft_delete_fertilisation_record,
+    update_fertilisation_record,
 };
 pub use fertiliser_material::{
-    get_fertiliser_material, insert_fertiliser_material, list_fertiliser_materials,
-    soft_delete_fertiliser_material, update_fertiliser_material,
+    get_fertiliser_material, get_fertiliser_material_for_export, insert_fertiliser_material,
+    list_fertiliser_materials, soft_delete_fertiliser_material, update_fertiliser_material,
 };
 pub use plan::{
     get_fertilisation_plan, insert_fertilisation_plan, list_fertilisation_plans,
-    soft_delete_fertilisation_plan, update_fertilisation_plan,
+    list_fertilisation_plans_for_export, soft_delete_fertilisation_plan, update_fertilisation_plan,
 };
 
 pub use irrigation::{
     get_irrigation_record, insert_irrigation_record, list_irrigation_records,
-    soft_delete_irrigation_record, update_irrigation_record,
+    list_irrigation_records_for_export, soft_delete_irrigation_record, update_irrigation_record,
 };
 pub use lookup::{
     list_application_methods, list_fertilisation_types, list_irrigation_methods,

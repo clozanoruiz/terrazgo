@@ -123,11 +123,25 @@ fn collect_candidates(
     // to open — filtered in SQL rather than in Rust because that is where the
     // rule belongs, and because reading a NULL into a `String` would fail the
     // whole refresh and leave the holding with NO alerts at all.
+    //
+    // `phi_end_date >= today` is a candidate BOUND, not the window rule: a
+    // window is `[application_date, phi_end_date)`, so one that has ended
+    // cannot contain today and there is nothing to derive from it. Every row it
+    // excludes is one `phi_window_is_active` would have rejected a moment
+    // later, which is what makes it safe to narrow here — the rule itself stays
+    // in one place, below. Without the bound this reads every treatment the
+    // holding has ever recorded, on a function that runs at startup and after
+    // every write.
+    //
+    // Narrowing the candidates is also HOW a lapsed alert disappears:
+    // `reconcile` deletes whatever it did not re-derive. That is behaviour, not
+    // speed, so `alerts.rs` pins it rather than assuming it.
     let mut stmt = tx.prepare(
         "SELECT id, season_id, application_date, phi_end_date
-         FROM treatment_record WHERE deleted_at IS NULL AND phi_end_date IS NOT NULL",
+         FROM treatment_record
+         WHERE deleted_at IS NULL AND phi_end_date IS NOT NULL AND phi_end_date >= ?1",
     )?;
-    let rows = stmt.query_map([], |r| {
+    let rows = stmt.query_map([today], |r| {
         Ok((
             r.get::<_, String>(0)?,
             r.get::<_, String>(1)?,
@@ -183,40 +197,24 @@ fn collect_candidates(
 /// re-checks and rollovers) and the due date is the campaign's year end
 /// (drift-corrected by reconcile at rollover). Older campaigns are history,
 /// never alert sources.
+///
+/// "Latest per (plot, zone kind)" is core's rule, not this function's, since
+/// 2026-08-24: it used to be a correlated `MAX(campaign)` evaluated once per
+/// row here, which grows quadratically in campaigns and disagreed in principle
+/// with the reduction the plot cards were doing in JavaScript. One reader, one
+/// rule — see `list_latest_zone_flags`.
 fn zone_candidates(tx: &Transaction, out: &mut Vec<Candidate>) -> Result<()> {
-    let mut stmt = tx.prepare(
-        "SELECT f.plot_id, f.zone_type_code, f.status, f.campaign
-         FROM plot_zone_flag f
-         JOIN plot p ON p.id = f.plot_id AND p.deleted_at IS NULL
-         WHERE f.deleted_at IS NULL
-           AND f.campaign = (SELECT MAX(f2.campaign) FROM plot_zone_flag f2
-                             WHERE f2.deleted_at IS NULL
-                               AND f2.plot_id = f.plot_id
-                               AND f2.zone_type_code = f.zone_type_code)",
-    )?;
-    let rows = stmt.query_map([], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, String>(2)?,
-            r.get::<_, i64>(3)?,
-        ))
-    })?;
-    // Multiple sources could one day flag the same (plot, kind) in the same
-    // campaign; alert identity is (type, plot), so emit each key once.
-    let mut seen = std::collections::HashSet::new();
-    for row in rows {
-        let (plot_id, zone_type_code, status, campaign) = row?;
-        let Some(alert_type_code) = zone_alert_type(&zone_type_code) else {
+    for flag in terrazgo_core::repository::list_latest_zone_flags(tx)? {
+        let Some(alert_type_code) = zone_alert_type(&flag.zone_type_code) else {
             continue;
         };
-        if zone_alert_is_active(&status) && seen.insert((alert_type_code, plot_id.clone())) {
+        if zone_alert_is_active(&flag.status) {
             out.push(Candidate {
                 alert_type_code,
                 season_id: None,
                 subject_table: "plot",
-                subject_id: plot_id,
-                due_date: format!("{campaign}-12-31"),
+                subject_id: flag.plot_id,
+                due_date: format!("{}-12-31", flag.campaign),
                 lead_days_used: None,
             });
         }

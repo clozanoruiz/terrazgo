@@ -19,7 +19,12 @@
 //! print a record book (see [`NameCollator::new`]).
 //!
 //! The frontend does the same job with `Intl.Collator` over the same CLDR data
-//! (`src/lib/collate.js`), so a picker on screen and a cell in the PDF agree.
+//! and the same options (`src/lib/collate.js`), so the RULES are the same on
+//! both sides. Which language's rules apply is not: this book uses its own
+//! report language and the screen uses the one being read. They coincide
+//! whenever those match — the common case — and genuinely differ otherwise,
+//! since Castilian files `ñ` as a letter after `n` (so *Peña* after *Penz*)
+//! where Catalan and English fold it beside `n`.
 
 use std::cmp::Ordering;
 

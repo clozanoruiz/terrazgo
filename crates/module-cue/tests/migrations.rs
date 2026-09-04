@@ -3,6 +3,12 @@
 
 //! Migration tests (docs/architecture.md testing strategy #3): every migration must apply cleanly
 //! to a fresh database AND on top of the previous version.
+//!
+//! What is asserted here is CUE's own schema, on the composed sequence.
+//! Core's constraints — the NOT NULL on `farm.country_code`, foreign-key
+//! enforcement — are core's to pin, in `terrazgo-core/tests/migrations.rs`;
+//! re-asserting them here made the composed run say the same thing twice and
+//! made core's schema look like something this module owns.
 
 use module_cue::db::migrations;
 use rusqlite::Connection;
@@ -55,24 +61,6 @@ fn applies_cleanly_on_top_of_previous_version() {
 }
 
 #[test]
-fn farm_without_country_is_rejected_by_the_schema() {
-    let mut conn = Connection::open_in_memory().unwrap();
-    migrations().to_latest(&mut conn).unwrap();
-
-    // country_code is NOT NULL: the database itself must reject a country-less farm,
-    // even for writes that bypass the repository (external scripts, future sync).
-    let result = conn.execute(
-        "INSERT INTO farm (id, name, created_at, updated_at)
-         VALUES ('f1', 'No country', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-        [],
-    );
-    assert!(
-        result.is_err(),
-        "farm without country_code must be rejected by NOT NULL"
-    );
-}
-
-#[test]
 fn duplicate_alert_for_the_same_condition_is_rejected_by_the_schema() {
     let mut conn = Connection::open_in_memory().unwrap();
     migrations().to_latest(&mut conn).unwrap();
@@ -89,19 +77,4 @@ fn duplicate_alert_for_the_same_condition_is_rejected_by_the_schema() {
         duplicate.is_err(),
         "second alert for the same condition must violate UNIQUE"
     );
-}
-
-#[test]
-fn foreign_keys_are_enforced() {
-    let mut conn = Connection::open_in_memory().unwrap();
-    conn.pragma_update(None, "foreign_keys", true).unwrap();
-    migrations().to_latest(&mut conn).unwrap();
-
-    // Inserting a plot with a non-existent farm_id must be rejected.
-    let result = conn.execute(
-        "INSERT INTO plot (id, farm_id, name, created_at, updated_at)
-         VALUES ('p1', 'no-such-farm', 'x', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-        [],
-    );
-    assert!(result.is_err(), "foreign key violation should fail");
 }

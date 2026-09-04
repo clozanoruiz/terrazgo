@@ -13,7 +13,8 @@
   // ground (label restrictions, bees, heat), no timezone is stored anywhere,
   // and a UTC round-trip would print back an hour the farmer never recorded.
   import { TimeField } from "bits-ui";
-  import { localeTag, t } from "../i18n.js";
+  import { formatTag, t } from "../i18n.js";
+  import { refusalStore } from "./formRefusal.js";
   import { toTime, fromTime } from "./dateValue.js";
 
   let {
@@ -23,6 +24,8 @@
     required = false,
     disabled = false,
     class: klass = "",
+    /// Names this field inside its form, for TzForm's `anchors`.
+    name = "",
     onchange = null,
   } = $props();
 
@@ -31,6 +34,18 @@
 
   let proxy = $state(null);
   let showError = $state(false);
+
+  // A backend refusal the form chose to hang on this field. Display only — it
+  // never becomes a validity, so it cannot wedge the next submit.
+  const refusals = refusalStore();
+  const refusal = $derived(name && refusals ? (refusals.byName[name] ?? "") : "");
+
+  // Through setCustomValidity rather than a `required` attribute, so
+  // validationMessage is OUR string and not the browser's OS-language one —
+  // see DateInput for the measurement.
+  const error = $derived(required && !value ? t("form.required") : "");
+
+  $effect(() => proxy?.setCustomValidity(error));
 
   function commit(next) {
     value = fromTime(next);
@@ -48,7 +63,7 @@
     value={timeValue}
     onValueChange={commit}
     {disabled}
-    locale={localeTag()}
+    locale={formatTag()}
     hourCycle="24"
     granularity="minute"
   >
@@ -73,8 +88,9 @@
     class="tz-validity"
     bind:this={proxy}
     {value}
-    {required}
+    {name}
     {disabled}
+    data-tz-label={label}
     tabindex="-1"
     aria-hidden="true"
     onfocus={() => document.getElementById(uid)?.focus()}
@@ -82,7 +98,10 @@
   />
 
   {#if hint}<small>{hint}</small>{/if}
-  {#if showError}
-    <small class="tz-field-error">{t("form.required")}</small>
+  {#if showError && error}
+    <small class="tz-field-error">{error}</small>
+  {/if}
+  {#if refusal}
+    <small class="tz-field-error">{refusal}</small>
   {/if}
 </div>

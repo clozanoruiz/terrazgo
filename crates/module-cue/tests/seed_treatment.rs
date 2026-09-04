@@ -11,6 +11,10 @@
 //! there is nothing a later edit elsewhere could silently rewrite.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::last_change;
+
 use module_cue::models::*;
 use module_cue::open_in_memory;
 use module_cue::repository as repo;
@@ -84,6 +88,8 @@ fn sample(fx: &Fixture) -> NewSeedTreatment {
         seed_quantity_kg: Some(680.0),
         seed_lot: Some("L-2025-4471".into()),
         treatment_kind_code: Some("purchased_es".into()),
+        acquired_on: None,
+        sowing_record_id: None,
         product_name: "Celest Trio".into(),
         product_registration_number: Some("ES-24.876".into()),
         product_active_substance: Some("fludioxonil + difenoconazol".into()),
@@ -95,25 +101,6 @@ fn sample(fx: &Fixture) -> NewSeedTreatment {
             surface_sown_ha: 3.2,
         }],
     }
-}
-
-fn last_change(
-    conn: &Connection,
-    table: &str,
-    id: &str,
-) -> (String, serde_json::Value, serde_json::Value) {
-    conn.query_row(
-        "SELECT operation, payload FROM record_change
-         WHERE entity_table = ?1 AND entity_id = ?2
-         ORDER BY changed_at DESC, id DESC LIMIT 1",
-        [table, id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    )
-    .map(|(op, payload)| {
-        let mut doc: serde_json::Value = serde_json::from_str(&payload).unwrap();
-        (op, doc["before"].take(), doc["after"].take())
-    })
-    .unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +285,8 @@ fn a_sowing_can_be_corrected_in_full_and_logs_both_images() {
             seed_quantity_kg: Some(700.0),
             seed_lot: Some("L-2025-4472".into()),
             treatment_kind_code: Some("on_farm".into()),
+            acquired_on: None,
+            sowing_record_id: None,
             product_name: "Celest Trio Extra".into(),
             product_registration_number: None,
             product_active_substance: None,
@@ -343,6 +332,8 @@ fn correcting_the_sown_plots_reconciles_them_and_logs_each_change() {
             seed_quantity_kg: saved.record.seed_quantity_kg,
             seed_lot: saved.record.seed_lot.clone(),
             treatment_kind_code: saved.record.treatment_kind_code.clone(),
+            acquired_on: None,
+            sowing_record_id: None,
             product_name: saved.record.product_name.clone(),
             product_registration_number: saved.record.product_registration_number.clone(),
             product_active_substance: saved.record.product_active_substance.clone(),
@@ -392,6 +383,8 @@ fn changing_only_a_surface_updates_the_existing_plot_row() {
             seed_quantity_kg: saved.record.seed_quantity_kg,
             seed_lot: saved.record.seed_lot.clone(),
             treatment_kind_code: saved.record.treatment_kind_code.clone(),
+            acquired_on: None,
+            sowing_record_id: None,
             product_name: saved.record.product_name.clone(),
             product_registration_number: saved.record.product_registration_number.clone(),
             product_active_substance: saved.record.product_active_substance.clone(),
@@ -634,4 +627,240 @@ fn the_seed_treatment_kind_is_optional_but_never_invented() {
         repo::insert_seed_treatment(&mut conn, invented, None).unwrap_err(),
         module_cue::CueError::Invalid("unknown_seed_treatment_kind")
     ));
+}
+
+// ---------------------------------------------------------------------------
+// The link to core's sowing register (`SiembraPlantacion.MaterialTratado`)
+// ---------------------------------------------------------------------------
+//
+// The column lives on THIS side because a module may reference a core table and
+// never the reverse — which happens to be the direction the exchange format
+// points too (`UsoSemillaTratada.IdAjenaSiembraPlant`) and the right
+// cardinality: one sowing can use several lots, each naming it.
+
+fn insert_sowing(conn: &mut Connection, season_id: &str, farm_id: &str, plot_id: &str) -> String {
+    terrazgo_core::repository::insert_sowing_record(
+        conn,
+        terrazgo_core::models::NewSowingRecord {
+            season_id: season_id.into(),
+            farm_id: farm_id.into(),
+            kind_code: "sowing".into(),
+            sown_on: "2025-11-10".into(),
+            sowing_end_date: None,
+            flooded_on: None,
+            seed_quantity_kg: Some(680.0),
+            notes: None,
+            plots: vec![terrazgo_core::models::NewSowingPlot {
+                plot_id: plot_id.into(),
+                crop_id: None,
+            }],
+        },
+        None,
+    )
+    .unwrap()
+    .record
+    .id
+}
+
+#[test]
+fn a_record_may_name_the_sowing_that_used_its_seed() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let sowing_id = insert_sowing(&mut conn, &fx.season_id, &fx.farm_id, &fx.plot_a);
+
+    let linked = NewSeedTreatment {
+        sowing_record_id: Some(sowing_id.clone()),
+        acquired_on: Some("2025-10-27".into()),
+        ..sample(&fx)
+    };
+    let saved = repo::insert_seed_treatment(&mut conn, linked, None).unwrap();
+    assert_eq!(saved.record.sowing_record_id, Some(sowing_id.clone()));
+    assert_eq!(saved.record.acquired_on.as_deref(), Some("2025-10-27"));
+
+    // Reachable from the sowing's side, which is how the export reads it.
+    let from_sowing = repo::list_seed_treatments_for_sowing(&conn, &sowing_id).unwrap();
+    assert_eq!(from_sowing.len(), 1);
+    assert_eq!(from_sowing[0].id, saved.record.id);
+}
+
+#[test]
+fn the_link_may_not_reach_another_holding_or_another_campaign() {
+    // The foreign key alone would allow both. The export reads this link to
+    // state `MaterialTratado` on that sowing, so a cross-farm link would put one
+    // farmer's treated seed in another's descriptor — the `plot_not_on_farm`
+    // rule, one table over.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+
+    let other_farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Otra finca".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            country_code: "es".into(),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+    let other_plot = repo::insert_plot(
+        &mut conn,
+        NewPlot {
+            farm_id: other_farm.clone(),
+            name: "Parcela ajena".into(),
+            area_ha: Some(2.0),
+            es: None,
+        },
+        None,
+    )
+    .unwrap()
+    .id;
+    let elsewhere = insert_sowing(&mut conn, &fx.season_id, &other_farm, &other_plot);
+    assert!(matches!(
+        repo::insert_seed_treatment(
+            &mut conn,
+            NewSeedTreatment {
+                sowing_record_id: Some(elsewhere),
+                ..sample(&fx)
+            },
+            None,
+        )
+        .unwrap_err(),
+        module_cue::error::CueError::Invalid("sowing_not_on_farm")
+    ));
+
+    let next_season = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            campaign_year: 2027,
+            label: "2026/2027".into(),
+            starts_on: None,
+            ends_on: None,
+        },
+        None,
+    )
+    .unwrap();
+    let next_year = insert_sowing(&mut conn, &next_season.id, &fx.farm_id, &fx.plot_a);
+    assert!(matches!(
+        repo::insert_seed_treatment(
+            &mut conn,
+            NewSeedTreatment {
+                sowing_record_id: Some(next_year),
+                ..sample(&fx)
+            },
+            None,
+        )
+        .unwrap_err(),
+        module_cue::error::CueError::Invalid("sowing_not_on_farm")
+    ));
+}
+
+#[test]
+fn a_link_to_a_withdrawn_sowing_is_refused_and_a_withdrawn_record_stops_counting() {
+    // A link is a statement about a LIVE register, in both directions: it cannot
+    // be made to a soft-deleted sowing, and a soft-deleted seed record stops
+    // asserting that the sowing used treated material.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let sowing_id = insert_sowing(&mut conn, &fx.season_id, &fx.farm_id, &fx.plot_a);
+    let saved = repo::insert_seed_treatment(
+        &mut conn,
+        NewSeedTreatment {
+            sowing_record_id: Some(sowing_id.clone()),
+            ..sample(&fx)
+        },
+        None,
+    )
+    .unwrap();
+
+    repo::soft_delete_seed_treatment(&mut conn, &saved.record.id, None).unwrap();
+    assert!(
+        repo::list_seed_treatments_for_sowing(&conn, &sowing_id)
+            .unwrap()
+            .is_empty()
+    );
+
+    terrazgo_core::repository::soft_delete_sowing_record(&mut conn, &sowing_id, None).unwrap();
+    assert!(matches!(
+        repo::insert_seed_treatment(
+            &mut conn,
+            NewSeedTreatment {
+                sowing_record_id: Some(sowing_id),
+                ..sample(&fx)
+            },
+            None,
+        )
+        .unwrap_err(),
+        module_cue::error::CueError::NotFound
+    ));
+}
+
+#[test]
+fn a_correction_can_add_or_drop_the_link_and_the_purchase_date() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let sowing_id = insert_sowing(&mut conn, &fx.season_id, &fx.farm_id, &fx.plot_a);
+    let saved = repo::insert_seed_treatment(&mut conn, sample(&fx), None).unwrap();
+    assert_eq!(saved.record.sowing_record_id, None);
+
+    let base = sample(&fx);
+    let linked = repo::update_seed_treatment(
+        &mut conn,
+        &saved.record.id,
+        UpdateSeedTreatment {
+            sown_on: base.sown_on.clone(),
+            species_name: base.species_name.clone(),
+            variety: base.variety.clone(),
+            crop_code: base.crop_code.clone(),
+            seed_quantity_kg: base.seed_quantity_kg,
+            seed_lot: base.seed_lot.clone(),
+            treatment_kind_code: base.treatment_kind_code.clone(),
+            acquired_on: Some("2025-10-27".into()),
+            sowing_record_id: Some(sowing_id.clone()),
+            product_name: base.product_name.clone(),
+            product_registration_number: base.product_registration_number.clone(),
+            product_active_substance: base.product_active_substance.clone(),
+            product_id: None,
+            notes: base.notes.clone(),
+            plots: vec![NewSeedTreatmentPlot {
+                plot_id: fx.plot_a.clone(),
+                surface_sown_ha: 3.2,
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(linked.record.sowing_record_id, Some(sowing_id));
+    assert_eq!(linked.record.acquired_on.as_deref(), Some("2025-10-27"));
+
+    let unlinked = repo::update_seed_treatment(
+        &mut conn,
+        &saved.record.id,
+        UpdateSeedTreatment {
+            sown_on: base.sown_on,
+            species_name: base.species_name,
+            variety: base.variety,
+            crop_code: base.crop_code,
+            seed_quantity_kg: base.seed_quantity_kg,
+            seed_lot: base.seed_lot,
+            treatment_kind_code: base.treatment_kind_code,
+            acquired_on: None,
+            sowing_record_id: None,
+            product_name: base.product_name,
+            product_registration_number: base.product_registration_number,
+            product_active_substance: base.product_active_substance,
+            product_id: None,
+            notes: base.notes,
+            plots: vec![NewSeedTreatmentPlot {
+                plot_id: fx.plot_a.clone(),
+                surface_sown_ha: 3.2,
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(unlinked.record.sowing_record_id, None);
+    assert_eq!(unlinked.record.acquired_on, None);
 }

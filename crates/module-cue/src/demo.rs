@@ -16,8 +16,9 @@
 use crate::error::Result;
 use crate::models::{
     NewAnalysisPlot, NewAnalysisRecord, NewCrop, NewFarm, NewMachinery, NewNonFieldTreatment,
-    NewOperator, NewPlot, NewProduct, NewProductAuthorisation, NewSeason, NewSeedTreatment,
-    NewSeedTreatmentPlot, NewTreatmentPlot, NewTreatmentProblem, NewTreatmentRecord,
+    NewOperator, NewPlot, NewPremises, NewProduct, NewProductAuthorisation, NewSeason,
+    NewSeedTreatment, NewSeedTreatmentPlot, NewTreatmentPlot, NewTreatmentProblem,
+    NewTreatmentRecord,
 };
 use crate::repository;
 use rusqlite::Connection;
@@ -302,7 +303,6 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             irrigation_code: Some("rainfed".into()),
             growing_environment_code: Some("open_air".into()),
             gip_system_code: Some("atria".into()),
-            sown_on: Some("2025-11-10".into()),
             crop_code: None,
             source: None,
             source_campaign: None,
@@ -322,7 +322,6 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             irrigation_code: Some("rainfed".into()),
             growing_environment_code: Some("open_air".into()),
             gip_system_code: Some("atria".into()),
-            sown_on: Some("2025-11-12".into()),
             crop_code: None,
             source: None,
             source_campaign: None,
@@ -344,7 +343,6 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             // Deliberately unstated: the 2.1 GIP column then prints blank,
             // which is what "no consta" has to look like.
             gip_system_code: None,
-            sown_on: Some("2025-11-20".into()),
             crop_code: None,
             source: None,
             source_campaign: None,
@@ -365,7 +363,6 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             irrigation_code: Some("sprinkler".into()),
             growing_environment_code: Some("open_air".into()),
             gip_system_code: Some("integrated_production".into()),
-            sown_on: Some("2026-04-20".into()),
             crop_code: None,
             source: None,
             source_campaign: None,
@@ -399,6 +396,54 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             // A mobile sprayer registers in ROMA (REGANIP is aircraft/fixed installations).
             roma_number: Some("VA-00123".into()),
             reganip_number: None,
+        },
+        None,
+    )?;
+
+    // --- the premises registry (models 3.4 and 3.5) --------------------------
+    // Registry rows only, and deliberately no record naming them: the demo's
+    // 3.3 SÍ / 3.5 NO / 3.4 neither arrangement below shows all three states of
+    // the model's "APLICA TRATAMIENTO" box, and filling 3.4 would cost one.
+    terrazgo_core::repository::insert_premises(
+        conn,
+        NewPremises {
+            farm_id: farm.id.clone(),
+            kind_code: "building".into(),
+            name: "Almacén de grano".into(),
+            address: Some("Camino de la Vega, 4, 47170 Renedo de Esgueva".into()),
+            vehicle_model: None,
+            plate: None,
+            // A plausible urban-style reference; the app never validates the
+            // shape, and Anexo V types it as twenty characters. Both Spanish
+            // registry fields ride flat and land in premises_es_extension.
+            cadastral_reference: Some("47170A00500123 0000WX".into()),
+            // What Edificaciones[].IdEdificacion wants — REA's own code for
+            // this building, which the farmer reads off their REA papers.
+            rea_installation_code: Some("4700123456".into()),
+            // EDIFICACIONES_INSTALACIONES 3 = "Almacén de productos y materias
+            // primas", which is where the treated grain of model 3.3 sits.
+            class_code: Some("3".into()),
+            volume_m3: Some(1200.0),
+            notes: None,
+        },
+        None,
+    )?;
+    terrazgo_core::repository::insert_premises(
+        conn,
+        NewPremises {
+            farm_id: farm.id.clone(),
+            kind_code: "vehicle".into(),
+            name: "Remolque bañera".into(),
+            address: None,
+            vehicle_model: Some("Rigual RB-14".into()),
+            plate: Some("VA-04512-R".into()),
+            // Buildings only: a trailer has a matrícula, and FEGA's catalogue
+            // of edificaciones e instalaciones holds no vehicles.
+            class_code: None,
+            cadastral_reference: None,
+            rea_installation_code: None,
+            volume_m3: Some(24.0),
+            notes: None,
         },
         None,
     )?;
@@ -497,6 +542,8 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             // Unstated: a triazole fungicide restricts no hour, so Reglamento
             // (UE) 2023/564's footnote 4 does not make the hour relevant here.
             application_time: None,
+            // Wheat is not a flooded crop, so there is no field to dry.
+            drying_date: None,
             product_id: Some(prosaro.id.clone()),
             country_code: None, // derived from the farm
             dose_value: Some(1.0),
@@ -564,6 +611,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             // A single-day pass, and the total left unstated — the honest
             // everyday state, and what a blank cell looks like in the book.
             application_end_date: None,
+            drying_date: None,
             // Stated, and this is the case Reglamento (UE) 2023/564's footnote
             // 4 is about: a pyrethroid's label restricts application to outside
             // bee flight hours, so the hour is part of what makes the record
@@ -619,6 +667,7 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             farm_id: farm.id.clone(),
             application_date: "2026-05-04".into(),
             application_end_date: None,
+            drying_date: None,
             // Neither field stated: hanging diffusers is restricted to no hour
             // and to no growth stage, so both of the annex's conditional cells
             // print blank — which is the ordinary case.
@@ -657,6 +706,34 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
         None,
     )?;
 
+    // --- how the wheat began (core's sowing register) ----------------------
+    // Sown, not planted; the same act the treated-seed record below describes,
+    // which is why that record names this one.
+    let wheat_sowing = terrazgo_core::repository::insert_sowing_record(
+        conn,
+        terrazgo_core::models::NewSowingRecord {
+            season_id: season.id.clone(),
+            farm_id: farm.id.clone(),
+            kind_code: "sowing".into(),
+            sown_on: "2025-11-10".into(),
+            sowing_end_date: Some("2025-11-12".into()),
+            flooded_on: None,
+            seed_quantity_kg: Some(680.0),
+            notes: None,
+            plots: vec![
+                terrazgo_core::models::NewSowingPlot {
+                    plot_id: la_vega.id.clone(),
+                    crop_id: Some(wheat_la_vega.id.clone()),
+                },
+                terrazgo_core::models::NewSowingPlot {
+                    plot_id: el_paramo.id.clone(),
+                    crop_id: Some(wheat_el_paramo.id.clone()),
+                },
+            ],
+        },
+        None,
+    )?;
+
     // --- a sowing with treated seed (model 3.2) ----------------------------
     // The product is captured off the sack's label: treated seed names a
     // product the farmer never bought as such, so there is no registry row.
@@ -673,6 +750,9 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             seed_lot: Some("L-2025-4471".into()),
             // TIPO_TRATAMIENTO 4: bought already treated, in Spain.
             treatment_kind_code: Some("purchased_es".into()),
+            // Bought a fortnight before it went in the ground.
+            acquired_on: Some("2025-10-27".into()),
+            sowing_record_id: Some(wheat_sowing.record.id.clone()),
             product_name: "Celest Trio".into(),
             product_registration_number: Some("ES-24.876".into()),
             product_active_substance: Some("fludioxonil + difenoconazol".into()),
@@ -704,6 +784,8 @@ pub fn seed_demo(conn: &mut Connection) -> Result<DemoSeedSummary> {
             farm_id: farm.id.clone(),
             country_code: None,
             subject_kind_code: "postharvest".into(),
+            // Produce, not a place: a postharvest record names no premises.
+            premises_id: None,
             treated_on: "2026-08-20".into(),
             subject_description: "Trigo blando de la cosecha 2026, silo 2".into(),
             // PROD_VEGETAL 85 = Granos de trigo (the harvested produce, not

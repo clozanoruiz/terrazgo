@@ -207,6 +207,104 @@ fn placeholders(value: &str) -> BTreeSet<String> {
     names
 }
 
+/// The six CLDR plural categories. A key whose last segment is one of these is
+/// a plural variant — `<key>.one`, `<key>.other`, and the `few`/`many`/`zero`/
+/// `two` that a locale beyond the three shipped today would bring.
+const PLURAL_CATEGORIES: [&str; 6] = ["zero", "one", "two", "few", "many", "other"];
+
+/// The categories each language actually uses — exactly what `Intl.PluralRules`
+/// selects among in `src/i18n.js`. Castilian, English and Catalan are all
+/// two-form; a locale that is not (Polish's four, Romanian's three) records its
+/// own set here on the day it is added, which is also what stops it being added
+/// with half its plural strings missing.
+fn required_categories(locale: &str) -> &'static [&'static str] {
+    match locale {
+        "ca" | "en" | "es" => &["one", "other"],
+        other => panic!(
+            "no CLDR plural categories recorded for locale '{other}' — add its set beside the \
+             others, taking it from Intl.PluralRules"
+        ),
+    }
+}
+
+/// Every plural group in `dict`: the stem before the category, mapped to the
+/// categories defined for it.
+///
+/// A stem counts as a plural group only when ALL of its direct children are
+/// category names. That is what keeps a lookup namespace out of it: the codes
+/// under `reason_category` include one literally called `other`, beside `pest`
+/// and `disease`, and it is a schema code rather than a plural form.
+fn plural_groups(dict: &Dictionary) -> BTreeMap<&str, BTreeSet<&str>> {
+    let mut children: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for key in dict.keys() {
+        if let Some((stem, last)) = key.rsplit_once('.') {
+            children.entry(stem).or_default().insert(last);
+        }
+    }
+    children
+        .into_iter()
+        .filter(|(_, segments)| segments.iter().all(|s| PLURAL_CATEGORIES.contains(s)))
+        .collect()
+}
+
+/// A plural key must define every category its language uses — no more, no
+/// fewer. A missing `one` is the "1 días" defect this layer exists to close; an
+/// extra category is a form the locale's rules will never select, so it would
+/// sit there looking translated and never print.
+#[test]
+fn plural_key_groups_define_every_category_their_language_uses() {
+    for (locale, dict) in dictionaries() {
+        let required: BTreeSet<&str> = required_categories(&locale).iter().copied().collect();
+        for (stem, found) in plural_groups(&dict) {
+            assert_eq!(
+                found, required,
+                "'{locale}': plural key '{stem}' defines {found:?}, but {locale} selects among \
+                 {required:?}"
+            );
+        }
+    }
+}
+
+/// A `{count}` glued to a WORD is being counted by that word, so the key must
+/// carry plural forms — this is the "Se han añadido 1 líneas" / "1 días" defect
+/// stated mechanically instead of as advice.
+///
+/// The discriminator is what follows the placeholder, because that is what
+/// separates the two ways of writing a count. Prose counts the noun after it
+/// ("{count} catálogos") and inflects; the "Label: N" form puts punctuation
+/// there ("Sin cambios: {count}.", "({count})", "{count} × {species}") and is
+/// correct at any figure. A number that sits before a word but does NOT inflect
+/// it — "…y {n} más" — is not a `count` at all and is named accordingly, which
+/// is why this needs no exemption list.
+///
+/// It cannot judge whether a translation READS well; that stays a human job.
+/// It does catch the structural precondition, in every locale, including ones
+/// added later by someone whose language nobody here reviews.
+#[test]
+fn a_count_that_inflects_a_following_word_has_plural_forms() {
+    for (locale, dict) in dictionaries() {
+        let groups = plural_groups(&dict);
+        for (key, value) in &dict {
+            let stem = key.rsplit_once('.').map(|(s, _)| s).unwrap_or(key);
+            if groups.contains_key(stem) {
+                continue; // already pluralized
+            }
+            let Some(after) = value.split_once("{count}").map(|(_, rest)| rest) else {
+                continue;
+            };
+            let Some(next) = after.trim_start().chars().next() else {
+                continue;
+            };
+            assert!(
+                !next.is_alphabetic(),
+                "'{locale}': '{key}' puts {{count}} straight before a word, so that word agrees \
+                 with it — give the key .one/.other forms, or write it in the \"Label: N\" form \
+                 that reads correctly at any figure.\n  {value}"
+            );
+        }
+    }
+}
+
 #[test]
 fn locale_dictionaries_define_identical_key_sets() {
     let dicts = dictionaries();
@@ -232,13 +330,26 @@ fn placeholders_match_across_locales() {
     let mut locales = dicts.iter();
     let (reference_locale, reference) = locales.next().expect("at least one dictionary");
     for (locale, dict) in locales {
+        let plural_stems = plural_groups(dict);
         for (key, value) in dict {
             let Some(reference_value) = reference.get(key) else {
                 continue; // key-set parity is the previous test's job
             };
+            let (mut here, mut there) = (placeholders(value), placeholders(reference_value));
+            // A plural variant may spell its count out or leave it implicit —
+            // "Se ha añadido UNA línea" reads better than "1 línea", and English
+            // wants "One composition line added." Only `count` is forgiven, and
+            // only where the key really is a plural form; every other
+            // placeholder must still match, in every variant.
+            if key
+                .rsplit_once('.')
+                .is_some_and(|(stem, _)| plural_stems.contains_key(stem))
+            {
+                here.remove("count");
+                there.remove("count");
+            }
             assert_eq!(
-                placeholders(value),
-                placeholders(reference_value),
+                here, there,
                 "placeholders for key '{key}' differ between '{locale}' and '{reference_locale}'"
             );
         }

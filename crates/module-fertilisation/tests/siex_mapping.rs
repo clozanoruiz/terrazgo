@@ -11,19 +11,15 @@
 //! form. Both lists here are small and closed, so both get the full treatment.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::db_with_catalogues;
+use module_fertilisation::models::Lookup;
 use module_fertilisation::repository as repo;
 use module_fertilisation::siex;
 use rusqlite::Connection;
 use std::collections::HashSet;
-use terrazgo_core::catalogue::{active_codes, ensure_catalogues};
-
-/// In-memory database with the real vendored catalogue snapshot imported —
-/// the state a running app is always in.
-fn db_with_catalogues() -> Connection {
-    let mut conn = module_fertilisation::open_in_memory().unwrap();
-    ensure_catalogues(&mut conn).unwrap();
-    conn
-}
+use terrazgo_core::catalogue::active_codes;
 
 fn assert_bijective(
     conn: &Connection,
@@ -121,7 +117,16 @@ fn fertilisation_type_map_matches_the_vendored_catalogue() {
 #[test]
 fn application_method_map_matches_the_vendored_catalogue() {
     let conn = db_with_catalogues();
-    let lookups = repo::list_application_methods(&conn).unwrap();
+    // The lookup carries a third column, so it is not a plain `Lookup` — the
+    // bijection check cares only about the codes.
+    let lookups: Vec<Lookup> = repo::list_application_methods(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|row| Lookup {
+            code: row.code,
+            i18n_key: row.i18n_key,
+        })
+        .collect();
     assert_bijective(
         &conn,
         &lookups,

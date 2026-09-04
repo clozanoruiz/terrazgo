@@ -40,7 +40,7 @@ pub mod region;
 use crate::collate::NameCollator;
 use error::Result;
 use labels::Labels;
-use module_cue::export::crop_groups;
+use module_cue::crop_groups;
 use module_cue::models::TreatmentRecordWithPlots;
 use module_cue::repository::{
     list_analysis_records, list_non_field_treatments, list_register_declarations,
@@ -51,7 +51,7 @@ use module_fertilisation::agronomy::{Accumulator, dose_as_kg_per_ha, nutrient_un
 use rusqlite::Connection;
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use terrazgo_core::catalogue::CatalogueCode;
 use terrazgo_report::{Cell, Column, RenderedPdf, RenderedWorkbook, Sheet, Workbook};
 
@@ -100,6 +100,33 @@ pub struct Cuaderno {
     plan_rows: Vec<PlanRow>,
     /// Section 8 — the irrigation register (RD 1051/2022 art. 5.e).
     irrigation: Vec<IrrigationRow>,
+    /// Section 9.1 — extensive grazing (RD 1048/2022 art. 30.2 ter). The book's
+    /// third decree; empty for every holding that claims no ecorrégimen, which
+    /// is most of them.
+    grazing: Vec<GrazingRow>,
+    /// Section 9.2 — siega sostenible, pivoted onto the plot the model's row
+    /// actually is (arts. 31 and 31.4.d).
+    mowing: Vec<MowingRow>,
+    /// The book's "9.6" — the pastos comunales register anexo IV orders and the
+    /// printed model gives no page to.
+    communal: Vec<CommunalRow>,
+    /// Both of the above, unpivoted, for the spreadsheet: one row per
+    /// operation, with the duty it evidences as a filterable column.
+    operations: Vec<OperationSheetRow>,
+    /// Section 9.3 — the five dates art. 45.2 names, gathered per plot from
+    /// three tables in three crates.
+    flooded: Vec<FloodedRow>,
+    /// The sowing register itself. No page of the model prints it; its dates
+    /// feed 9.2 and 9.3, and this is the only place it can be read whole.
+    sowings: Vec<SowingSheetRow>,
+    /// Section 9.4 — the live covers of art. 42, with the three maintenance
+    /// columns art. 42.1.c fills from two other registers.
+    plant_covers: Vec<CoverRow>,
+    /// Section 9.5 — the inert covers of art. 43, which take no maintenance.
+    inert_covers: Vec<CoverRow>,
+    /// Both of the above for the spreadsheet, with the practice, the kind of
+    /// cover and the widths' own annotation date the pages have no column for.
+    covers: Vec<CoverSheetRow>,
     /// Which conditional registers the farmer explicitly declared empty.
     declared_empty: Vec<String>,
 }
@@ -299,6 +326,52 @@ fn assemble(
     )?;
     let harvest = harvest_rows(conn, season_id, farm_id, plots)?;
     let irrigation = irrigation_rows(conn, season_id, farm_id, plots)?;
+    // Read ONCE and used twice: model 9.1's own rows, and model 9.4's Pastoreo
+    // column. The two partition the register on `soil_cover_id`, so neither a
+    // second read nor a second filter pass is needed.
+    let grazing_details =
+        module_ecoscheme::repository::list_grazing_records(conn, season_id, farm_id)?;
+    let grazing = grazing_rows(
+        conn,
+        catalogues,
+        &farm.farm.country_code,
+        plots,
+        &grazing_details,
+    )?;
+    // Read ONCE and used three ways: the sowing register's own tab, model
+    // 9.2's "Siembra" column, and model 9.3's "siembra en seco" and
+    // "inundación". A second read per page would be three queries for one
+    // table (the `crop_areas` rule).
+    let sowing_details = terrazgo_core::repository::list_sowing_records(conn, season_id, farm_id)?;
+    // Read here rather than inside `operation_rows`, so both registers this
+    // section reads arrive the same way and the projection function stays a
+    // projection.
+    let operation_details =
+        module_ecoscheme::repository::list_cultural_operations(conn, season_id, farm_id)?;
+    let operations = operation_rows(
+        conn,
+        catalogues,
+        &farm.farm.country_code,
+        plots,
+        language,
+        &operation_details,
+        &sowing_details,
+    )?;
+    let flooded = flooded_rows(plots, &sowing_details, &records, &operations.flooded);
+    let sowings = sowing_sheet_rows(&sowing_details, plots, language);
+    let cover_details = module_ecoscheme::repository::list_soil_covers(conn, season_id, farm_id)?;
+    let covers = cover_rows(
+        conn,
+        catalogues,
+        &farm.farm.country_code,
+        plots,
+        language,
+        CoverSources {
+            covers: &cover_details,
+            grazings: &grazing_details,
+            operations: &operations.cover_maintenance,
+        },
+    )?;
     let fertilisation = fertilisation_rows(
         conn,
         catalogues,
@@ -369,6 +442,15 @@ fn assemble(
         materials,
         plan_rows,
         irrigation,
+        grazing,
+        mowing: operations.mowing,
+        communal: operations.communal,
+        operations: operations.sheet,
+        flooded,
+        sowings,
+        plant_covers: covers.plant,
+        inert_covers: covers.inert,
+        covers: covers.sheet,
         declared_empty,
     })
 }
@@ -390,11 +472,39 @@ struct PlotRows {
 struct PlotIndex {
     orders: HashMap<String, usize>,
     names: HashMap<String, String>,
+    /// The plot's full SIGPAC reference as one colon-joined string, for the
+    /// registers whose model column asks for the reference itself rather than
+    /// a cross-reference to table 2.1 — section 9.1 is the first. Empty when
+    /// the plot carries no reference, so the page prints the plot's name alone
+    /// instead of a string of colons.
+    references: HashMap<String, String>,
+    /// The same reference broken into the parts a register prints as columns of
+    /// their own — model 9.2 identifies its row the way table 2.1 does, rather
+    /// than by cross-reference. Kept per PLOT and not on `PlotRow`, because
+    /// that type carries one row per (plot, crop) while 9.2's row is a plot.
+    sigpac: HashMap<String, PlotSigpac>,
     /// Orders those names the way the book's language does. It lives here
     /// because this is the type that knows what a plot is called, and because
     /// every register that prints a list of plot names already takes it — so
     /// the collator reaches them without a new parameter apiece.
     collator: NameCollator,
+}
+
+/// The parcel-register facts a register prints in columns of their own, held
+/// once per plot. Every part may be blank on its own — a plot the farmer
+/// entered by hand carries none of them, and a blank cell is a true statement
+/// where an invented one would not be.
+#[derive(Clone, Default)]
+struct PlotSigpac {
+    province: String,
+    municipality: String,
+    polygon: String,
+    parcel: String,
+    enclosure: String,
+    /// The provider's own surface, never the farmer's `plot.area_ha`: model
+    /// 9.2's column says "Superficie SIGPAC", and merging the two is what the
+    /// parcel register's whole separation exists to prevent.
+    area_ha: Option<f64>,
 }
 
 /// One row of model table 2.1: a plot, and one of the crops on it.
@@ -463,6 +573,29 @@ fn plot_rows(
         // beside the user's own figure and are never merged with it.
         let province = ref_part(es.and_then(|e| e.sigpac_province.as_ref()));
         let municipality = ref_part(es.and_then(|e| e.sigpac_municipality.as_ref()));
+        let reference = sigpac_reference(&[
+            &province,
+            &municipality,
+            &ref_part(es.and_then(|e| e.sigpac_aggregate.as_ref())),
+            &ref_part(es.and_then(|e| e.sigpac_zone.as_ref())),
+            &ref_part(es.and_then(|e| e.sigpac_polygon.as_ref())),
+            &ref_part(es.and_then(|e| e.sigpac_parcel.as_ref())),
+            &ref_part(es.and_then(|e| e.sigpac_enclosure.as_ref())),
+        ]);
+        if !reference.is_empty() {
+            index.references.insert(detail.plot.id.clone(), reference);
+        }
+        index.sigpac.insert(
+            detail.plot.id.clone(),
+            PlotSigpac {
+                province: province.clone(),
+                municipality: municipality.clone(),
+                polygon: ref_part(es.and_then(|e| e.sigpac_polygon.as_ref())),
+                parcel: ref_part(es.and_then(|e| e.sigpac_parcel.as_ref())),
+                enclosure: ref_part(es.and_then(|e| e.sigpac_enclosure.as_ref())),
+                area_ha: facts.and_then(|f| f.official_area_ha),
+            },
+        );
         let base = PlotRow {
             order,
             name: detail.plot.name.clone(),
@@ -1116,6 +1249,11 @@ struct TreatmentRow {
     /// annex, "where relevant"). No Spanish form has a column for it, so it
     /// folds into the date cell. `None` prints nothing.
     time: Option<String>,
+    /// Model 9.3's "fecha de seca": the day the flooded field was dried so this
+    /// treatment could be applied (RD 1048/2022 art. 45.2). It rides in the
+    /// treatments tab because that is the register that owns the fact — the
+    /// field is dried in order to spray. `None` = not a flooded crop.
+    drying_date: Option<String>,
     /// The treated crop's growth stages, resolved (the stored code is not the
     /// BBCH number). The annex places the stage inside the "Crop or
     /// situation/land use" column, so the PDF folds the BBCH number into the
@@ -1354,6 +1492,7 @@ fn treatment_rows(
                 date: record.application_date.clone(),
                 end_date: record.application_end_date.clone(),
                 time: record.application_time.clone(),
+                drying_date: record.drying_date.clone(),
                 growth_stages: growth_stages_of(conn, catalogues, &group),
                 surface_ha: surface,
                 crop_area_ha: crop_area,
@@ -1737,6 +1876,8 @@ struct FertilisationRow {
     /// C.i / art. 5.g. The model has no box for it, so it rides in the material
     /// cell and takes a column of its own in the sheet.
     sludge: bool,
+    /// The twin's `GestionSostInsu`; no printed cell carries it.
+    sustainable_inputs: bool,
     delivery_note: String,
     /// The three richness figures the model prints; each `None` stays blank,
     /// never zero.
@@ -1864,6 +2005,7 @@ fn fertilisation_rows(
                 None,
             ),
             sludge: record.sludge_application,
+            sustainable_inputs: record.sustainable_input_management,
             delivery_note: record.delivery_note_ref.unwrap_or_default(),
             richness_n: record.richness_n_snapshot,
             richness_p2o5: record.richness_p2o5_snapshot,
@@ -2386,6 +2528,830 @@ fn irrigation_rows(
     Ok(rows)
 }
 
+// ---------------------------------------------------------------------------
+// Section 9.1 — pastoreo extensivo (RD 1048/2022 art. 30.2 ter)
+// ---------------------------------------------------------------------------
+
+/// Model 9.1 — one grazing, on one line per animal group.
+///
+/// The model's last three columns (especie, REGA, nº animales) describe ONE
+/// group of animals, while the dates and the plots describe the grazing. A
+/// grazing that moved sheep and goats onto the same pasture therefore prints
+/// two lines that repeat the dates — the same shape section 2.2's water points
+/// use, and the reason the row carries its own animal fields rather than a
+/// list.
+struct GrazingRow {
+    /// Model 9.1 column 1, filled by the farmer when the plots lie more than
+    /// 10 km from the main livestock installation.
+    group_ref: String,
+    /// Column 2 asks for the reference, not the cross-reference every other
+    /// register uses — so this is the SIGPAC reference where the plot carries
+    /// one, and the plot's name where it does not.
+    plot_reference: String,
+    /// The cross-reference to table 2.1, kept beside the reference because the
+    /// spreadsheet filters on it and because a plot with no SIGPAC reference
+    /// still has an order number.
+    plot_orders: Vec<usize>,
+    plot_names: String,
+    /// ISO `YYYY-MM-DD`; both renderers format it their own way — the PDF as
+    /// dd/mm/yyyy prose, the sheet as a real date cell that sorts.
+    started_on: String,
+    /// Empty while the animals are still grazing. The annotation deadline runs
+    /// from this date, so a blank here is "not finished", never "not recorded".
+    ended_on: String,
+    /// The species NAME, resolved against `ESPECIE_ANIMAL` — a catalogue label,
+    /// so it prints verbatim in every language.
+    species: String,
+    rega: String,
+    animal_count: i64,
+    notes: String,
+}
+
+/// Model 9.1's rows.
+///
+/// **A grazing that maintains a cover does not print here.** Art. 42.1.c counts
+/// pastoreo as one of three ways a live cover is maintained, and model 9.4
+/// prints it as a column of its own, so the two pages partition the register on
+/// `soil_cover_id`: without one it is the P1 duty this page records, with one it
+/// is the P6 maintenance 9.4 records. Printing it on both would show a cover
+/// grazing as if it were extensive grazing, on a document an inspector reads.
+fn grazing_rows(
+    conn: &Connection,
+    catalogues: &CatalogueCache,
+    country_code: &str,
+    plots: &PlotIndex,
+    details: &[module_ecoscheme::models::GrazingRecordDetail],
+) -> Result<Vec<GrazingRow>> {
+    let species_catalogue = module_ecoscheme::siex::animal_species_catalogue(country_code);
+    let mut rows = Vec::new();
+    for detail in details
+        .iter()
+        .filter(|detail| detail.record.soil_cover_id.is_none())
+    {
+        let record = &detail.record;
+        let (orders, names) =
+            plot_cross_reference(detail.plots.iter().map(|p| p.plot_id.as_str()), plots);
+        // Several plots grazed together are what the model's own column calls a
+        // "grupo de parcelas", so their references join in one cell.
+        let mut references: Vec<&str> = detail
+            .plots
+            .iter()
+            .filter_map(|p| plots.references.get(&p.plot_id).map(String::as_str))
+            .collect();
+        references.sort_unstable();
+        let plot_reference = if references.is_empty() {
+            names.clone()
+        } else {
+            references.join(" · ")
+        };
+
+        for animal in &detail.animals {
+            rows.push(GrazingRow {
+                group_ref: record.plot_group_ref.clone().unwrap_or_default(),
+                plot_reference: plot_reference.clone(),
+                plot_orders: orders.clone(),
+                plot_names: names.clone(),
+                started_on: record.started_on.clone(),
+                ended_on: record.ended_on.clone().unwrap_or_default(),
+                species: catalogue_label(
+                    conn,
+                    catalogues,
+                    species_catalogue,
+                    &animal.species_code,
+                    None,
+                ),
+                rega: animal.rega_code.clone(),
+                animal_count: animal.animal_count,
+                notes: record.notes.clone().unwrap_or_default(),
+            });
+        }
+    }
+    Ok(rows)
+}
+
+// ---------------------------------------------------------------------------
+// Section 9.2 + the book's "9.6" — cultural operations (RD 1048/2022 arts. 31,
+// 31.4.d and anexo IV)
+// ---------------------------------------------------------------------------
+
+/// One dated activity as a printed cell fragment.
+///
+/// Model 9.2's cells accumulate dates rather than holding one: footnote (1)
+/// allows two cuts a year, and nothing stops a farmer tilling twice. So each
+/// column is a list, and the label rides along only where the model's own
+/// footnote (4) asks for the activity as well as the date.
+struct DatedActivity {
+    /// ISO `YYYY-MM-DD`; the renderers format their own way.
+    performed_on: String,
+    /// Empty for a single day's work — the register distinguishes the two, so
+    /// the cell must not invent an interval.
+    performed_end_date: String,
+    /// Empty in the columns whose heading already names the activity.
+    label: String,
+}
+
+/// Model 9.2 — one row per PLOT, which is what the model's own row is: it
+/// carries the SIGPAC parts and the surface in columns of their own, the way
+/// table 2.1 does, and then accumulates dates by activity.
+///
+/// So this page is a PIVOT of the register rather than a listing of it. The
+/// spreadsheet unfolds it back to one row per operation, where filtering and
+/// sorting are the point.
+struct MowingRow {
+    /// Table 2.1's order number — the model's "Id. de parcelas" column.
+    order: usize,
+    sigpac: PlotSigpac,
+    mowing: Vec<DatedActivity>,
+    tillage: Vec<DatedActivity>,
+    /// Model 9.2's "Siembra" column. **Empty until seam 3**: `TIPO_LABOR`
+    /// publishes no siembra code, so this module's owned vocabulary has none
+    /// either, and a sowing is its own register — `sowing_record` in core,
+    /// which seam 3 builds and wires in here.
+    sowing: Vec<DatedActivity>,
+    maintenance: Vec<DatedActivity>,
+}
+
+/// The book's "9.6" — the register anexo IV orders and the model has no page
+/// for. One row per operation, the shape every other register in the book uses,
+/// because there is no official form to follow here.
+struct CommunalRow {
+    plot_orders: Vec<usize>,
+    plot_names: String,
+    performed_on: String,
+    performed_end_date: String,
+    /// The kind as prose, plus the free description where one was given.
+    activity: String,
+}
+
+/// One operation as the spreadsheet wants it: unpivoted, with the duty it
+/// evidences and the residue destination — two facts no printed page carries,
+/// the first because the PDF answers it by which page a row is on, the second
+/// because it is the twin's field and not the model's.
+struct OperationSheetRow {
+    /// Owned rather than borrowed from `Labels`, because the accessors fall
+    /// back to printing an unknown code ITSELF — so the string may come from
+    /// the record rather than from the label table.
+    practice: String,
+    kind: String,
+    performed_on: String,
+    performed_end_date: String,
+    plot_orders: Vec<usize>,
+    plot_names: String,
+    activity_description: String,
+    residue_destination: String,
+    notes: String,
+}
+
+/// What [`operation_rows`] returns: the same register read once and projected
+/// four ways.
+struct OperationRows {
+    mowing: Vec<MowingRow>,
+    communal: Vec<CommunalRow>,
+    sheet: Vec<OperationSheetRow>,
+    /// Art. 45.2's nivelación and caballones dates, per plot — model 9.3's two
+    /// added columns. Collected in this pass rather than re-read, because the
+    /// rows live in the same table as 9.2's.
+    flooded: HashMap<String, FloodedOperations>,
+    /// Art. 42.1.c's maintenance, keyed by the cover it maintained — model
+    /// 9.4's Siega and Desbrozado columns.
+    ///
+    /// Collected here, in the ONE pass over the register, rather than queried
+    /// per printed cover row: the book's reads must not grow with the rows it
+    /// prints (the `crop_areas` rule), and its own test would catch a
+    /// per-row query.
+    cover_maintenance: HashMap<String, CoverMaintenance>,
+}
+
+/// The two of art. 45.2's five dates that are cultural operations.
+#[derive(Default)]
+struct FloodedOperations {
+    levelling: Vec<DatedActivity>,
+    ridging: Vec<DatedActivity>,
+}
+
+/// The two of model 9.4's three maintenance columns that are cultural
+/// operations.
+///
+/// The third, Pastoreo, is a grazing record, so [`cover_rows`] keys it out of
+/// the grazing slice instead — the same shape as `FloodedOperations`, which
+/// carries the two of art. 45.2's five dates that are operations. Model 9.5 has
+/// no maintenance columns at all: art. 43 asks for none.
+#[derive(Default)]
+struct CoverMaintenance {
+    mowing: Vec<DatedActivity>,
+    brush_cutting: Vec<DatedActivity>,
+}
+
+/// Reads the cultural-operation register ONCE and projects it onto the two
+/// pages and the tab that show it.
+///
+/// The split is `practice_code`, which is the whole reason the module holds one
+/// table where the model prints several pages: art. 31's mowing and anexo IV's
+/// comunal maintenance are the same act recorded against different duties. The
+/// practices seams 3 and 4 print (`flooded_biodiversity`, `plant_cover`,
+/// `inert_cover`) are readable here already and are deliberately left off both
+/// pages until those seams give them one — they still reach the spreadsheet, so
+/// nothing captured is invisible in the meantime.
+fn operation_rows(
+    conn: &Connection,
+    catalogues: &CatalogueCache,
+    country_code: &str,
+    plots: &PlotIndex,
+    language: ReportLanguage,
+    details: &[module_ecoscheme::models::CulturalOperationDetail],
+    sowings: &[terrazgo_core::models::SowingRecordDetail],
+) -> Result<OperationRows> {
+    let labels = language.labels();
+    let residue_catalogue = module_ecoscheme::siex::residue_destination_catalogue(country_code);
+
+    // 9.2's pivot, keyed by plot. A BTreeMap on the table-2.1 order number so
+    // the page reads down the parcel list the way section 2.1 does, without a
+    // sort afterwards.
+    let mut pivot: BTreeMap<usize, MowingRow> = BTreeMap::new();
+    let mut communal = Vec::new();
+    let mut sheet = Vec::new();
+    let mut flooded: HashMap<String, FloodedOperations> = HashMap::new();
+    let mut cover_maintenance: HashMap<String, CoverMaintenance> = HashMap::new();
+
+    for detail in details {
+        let record = &detail.record;
+        let (orders, names) =
+            plot_cross_reference(detail.plots.iter().map(|p| p.plot_id.as_str()), plots);
+        let kind = labels.operation_kind(&record.operation_kind_code);
+        let description = record.activity_description.clone().unwrap_or_default();
+        let end = record.performed_end_date.clone().unwrap_or_default();
+
+        sheet.push(OperationSheetRow {
+            practice: labels.eco_practice(&record.practice_code).to_string(),
+            kind: kind.to_string(),
+            performed_on: record.performed_on.clone(),
+            performed_end_date: end.clone(),
+            plot_orders: orders.clone(),
+            plot_names: names.clone(),
+            activity_description: description.clone(),
+            residue_destination: catalogue_label(
+                conn,
+                catalogues,
+                residue_catalogue,
+                record
+                    .residue_destination_code
+                    .as_deref()
+                    .unwrap_or_default(),
+                None,
+            ),
+            notes: record.notes.clone().unwrap_or_default(),
+        });
+
+        match record.practice_code.as_str() {
+            "sustainable_mowing" => {
+                for plot in &detail.plots {
+                    let Some(&order) = plots.orders.get(&plot.plot_id) else {
+                        continue;
+                    };
+                    let row = pivot.entry(order).or_insert_with(|| MowingRow {
+                        order,
+                        sigpac: plots.sigpac.get(&plot.plot_id).cloned().unwrap_or_default(),
+                        mowing: Vec::new(),
+                        tillage: Vec::new(),
+                        sowing: Vec::new(),
+                        maintenance: Vec::new(),
+                    });
+                    // Only the "otras actividades" column names what was done —
+                    // the other two are headed by their activity, so repeating
+                    // it in the cell would print "Siega" under "Siega".
+                    let named =
+                        !matches!(record.operation_kind_code.as_str(), "mowing" | "tillage");
+                    let entry = DatedActivity {
+                        performed_on: record.performed_on.clone(),
+                        performed_end_date: end.clone(),
+                        label: if named {
+                            activity_text(kind, &description)
+                        } else {
+                            String::new()
+                        },
+                    };
+                    // Which of the model's four activity columns takes the
+                    // date. `no_tillage` deliberately does NOT go under
+                    // "Laboreo": a date there states that the ground was
+                    // worked, which is the opposite of what the record says —
+                    // so it joins "otras actividades", where its name prints
+                    // beside the date and the cell reads true.
+                    match record.operation_kind_code.as_str() {
+                        "mowing" => row.mowing.push(entry),
+                        "tillage" => row.tillage.push(entry),
+                        _ => row.maintenance.push(entry),
+                    }
+                }
+            }
+            "communal_pasture" => communal.push(CommunalRow {
+                plot_orders: orders,
+                plot_names: names,
+                performed_on: record.performed_on.clone(),
+                performed_end_date: end,
+                activity: activity_text(kind, &description),
+            }),
+            // Art. 45.2's nivelación and construcción de caballones — two of
+            // the five dates it names, and two the printed model has no column
+            // for. They are gathered per plot here and printed by 9.3, which
+            // adds the columns.
+            "flooded_biodiversity" => {
+                for plot in &detail.plots {
+                    let entry = flooded.entry(plot.plot_id.clone()).or_default();
+                    let dated = DatedActivity {
+                        performed_on: record.performed_on.clone(),
+                        performed_end_date: end.clone(),
+                        label: String::new(),
+                    };
+                    match record.operation_kind_code.as_str() {
+                        "levelling" => entry.levelling.push(dated),
+                        "ridging" => entry.ridging.push(dated),
+                        // Any other work on a flooded plot is still recorded
+                        // and still reaches the operations tab; art. 45.2 names
+                        // five dates and this page prints exactly those.
+                        _ => {}
+                    }
+                }
+            }
+            // Art. 42.1.c — the maintenance performed ON a cover, which model
+            // 9.4 prints as its Siega and Desbrozado columns. Keyed by the
+            // cover rather than by the plot: the model's row here is the
+            // cover, not the parcel, because one cover carries one
+            // establishment date and one pair of widths however many plots it
+            // was established over.
+            //
+            // An operation filed against a cover practice with NO cover named
+            // is still a real record and still reaches the operations tab — it
+            // is the poda whose residue became a P7 cover, most often — but it
+            // has no cell on 9.4, which prints the maintenance OF a cover.
+            "plant_cover" | "inert_cover" => {
+                let Some(cover_id) = record.soil_cover_id.as_deref() else {
+                    continue;
+                };
+                let entry = cover_maintenance.entry(cover_id.to_string()).or_default();
+                let dated = DatedActivity {
+                    performed_on: record.performed_on.clone(),
+                    performed_end_date: end.clone(),
+                    label: String::new(),
+                };
+                match record.operation_kind_code.as_str() {
+                    "mowing" => entry.mowing.push(dated),
+                    "brush_cutting" => entry.brush_cutting.push(dated),
+                    // The register accepts only these two plus a grazing as
+                    // maintenance, so nothing else can arrive here — and if it
+                    // ever did, the model has no column for it.
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Model 9.2's "Siembra" column. It is fed from the SOWING register rather
+    // than from a cultural-operation kind, because `TIPO_LABOR` publishes no
+    // siembra code and this module's owned vocabulary therefore has none: a
+    // sowing is its own register, in core. Only the plots already on this page
+    // gain a date — a sowing on a plot that recorded no P2 activity is not
+    // evidence of sustainable mowing.
+    for detail in sowings {
+        for plot in &detail.plots {
+            let Some(&order) = plots.orders.get(&plot.plot_id) else {
+                continue;
+            };
+            if let Some(row) = pivot.get_mut(&order) {
+                row.sowing.push(DatedActivity {
+                    performed_on: detail.record.sown_on.clone(),
+                    performed_end_date: detail.record.sowing_end_date.clone().unwrap_or_default(),
+                    label: String::new(),
+                });
+            }
+        }
+    }
+
+    Ok(OperationRows {
+        mowing: pivot.into_values().collect(),
+        communal,
+        sheet,
+        flooded,
+        cover_maintenance,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Sections 9.4 and 9.5 — cubiertas (RD 1048/2022 arts. 42 and 43)
+// ---------------------------------------------------------------------------
+
+/// One row of model 9.4 or 9.5 — and here the model's row is the COVER, not the
+/// plot.
+///
+/// That is the difference from 9.2 and 9.3, which pivot onto the parcel: a
+/// cover has one establishment date and one pair of widths however many plots
+/// it was established over, so there is nothing to accumulate per plot and the
+/// register's own row is already the printed one. The plots ride in the "Id.
+/// Parcelas" cell as cross-references, the way the book's "9.6" does it.
+///
+/// The maintenance columns belong to 9.4 alone; 9.5 leaves them unread, because
+/// art. 43 asks for no maintenance of an inert cover.
+struct CoverRow {
+    /// Table 2.1's order numbers — the model's "Id. Parcelas" column.
+    plot_orders: Vec<usize>,
+    plot_names: String,
+    established_on: String,
+    /// Blank until art. 42.1.e's separate annotation is made. A blank cell is
+    /// the honest statement that the widths are not stated yet, and the
+    /// advisory is what says so out loud.
+    width_m: String,
+    free_canopy_width_m: String,
+    mowing: Vec<DatedActivity>,
+    brush_cutting: Vec<DatedActivity>,
+    grazing: Vec<DatedActivity>,
+}
+
+/// The covers tab of the workbook: one row per cover, carrying what neither
+/// printed page has a column for — the practice, the kind of cover and the date
+/// the widths were stated.
+struct CoverSheetRow {
+    practice: String,
+    cover_type: String,
+    established_on: String,
+    width_m: Option<f64>,
+    free_canopy_width_m: Option<f64>,
+    widths_stated_on: String,
+    plot_orders: Vec<usize>,
+    plot_names: String,
+    maintenance: String,
+    notes: String,
+}
+
+struct CoverRows {
+    /// Model 9.4 — the live covers of art. 42.
+    plant: Vec<CoverRow>,
+    /// Model 9.5 — the inert covers of art. 43.
+    inert: Vec<CoverRow>,
+    sheet: Vec<CoverSheetRow>,
+}
+
+/// The three registers these two pages are assembled from, already read.
+///
+/// Grouped because art. 42 splits ONE duty across three tables — the cover
+/// carries the establishment date and the widths, the operations carry the
+/// siegas and desbroces, the grazings carry the pastoreos — and passing them
+/// separately said less about them than naming what they are together.
+struct CoverSources<'a> {
+    covers: &'a [module_ecoscheme::models::SoilCoverDetail],
+    grazings: &'a [module_ecoscheme::models::GrazingRecordDetail],
+    /// Keyed by `soil_cover_id`, gathered by [`operation_rows`] in its single
+    /// pass so nothing here queries per printed row.
+    operations: &'a HashMap<String, CoverMaintenance>,
+}
+
+/// Projects the cover register onto its two pages and its tab.
+///
+/// The maintenance arrives already gathered: `operation_rows` collected the
+/// siegas and desbroces in its single pass over the operation register, and the
+/// grazings are picked out of the grazing slice `assemble` read once. Nothing
+/// here queries per printed row.
+fn cover_rows(
+    conn: &Connection,
+    catalogues: &CatalogueCache,
+    country_code: &str,
+    plots: &PlotIndex,
+    language: ReportLanguage,
+    sources: CoverSources<'_>,
+) -> Result<CoverRows> {
+    let labels = language.labels();
+    let cover_catalogue = module_ecoscheme::siex::cover_type_catalogue(country_code);
+
+    // Model 9.4's third maintenance column. A grazing is a register of its own,
+    // so it is not in `sources.operations` — it is keyed out of the grazing
+    // slice here.
+    let mut grazed: HashMap<&str, Vec<DatedActivity>> = HashMap::new();
+    for detail in sources.grazings {
+        let Some(cover_id) = detail.record.soil_cover_id.as_deref() else {
+            continue;
+        };
+        grazed.entry(cover_id).or_default().push(DatedActivity {
+            performed_on: detail.record.started_on.clone(),
+            performed_end_date: detail.record.ended_on.clone().unwrap_or_default(),
+            label: String::new(),
+        });
+    }
+
+    let mut plant = Vec::new();
+    let mut inert = Vec::new();
+    let mut sheet = Vec::new();
+
+    for detail in sources.covers {
+        let record = &detail.record;
+        let (orders, names) =
+            plot_cross_reference(detail.plots.iter().map(|p| p.plot_id.as_str()), plots);
+
+        let maintenance = sources.operations.get(&record.id);
+        let mut mowing = maintenance
+            .map(|m| clone_dates(&m.mowing))
+            .unwrap_or_default();
+        let mut brush_cutting = maintenance
+            .map(|m| clone_dates(&m.brush_cutting))
+            .unwrap_or_default();
+        let mut grazing = grazed
+            .get(record.id.as_str())
+            .map(|dates| clone_dates(dates))
+            .unwrap_or_default();
+        for column in [&mut mowing, &mut brush_cutting, &mut grazing] {
+            column.sort_by(|a, b| a.performed_on.cmp(&b.performed_on));
+        }
+
+        sheet.push(CoverSheetRow {
+            practice: labels.eco_practice(&record.practice_code).to_string(),
+            cover_type: catalogue_label(
+                conn,
+                catalogues,
+                cover_catalogue,
+                &record.cover_type_code,
+                None,
+            ),
+            established_on: record.established_on.clone(),
+            width_m: record.width_m,
+            free_canopy_width_m: record.free_canopy_width_m,
+            widths_stated_on: record.widths_stated_on.clone().unwrap_or_default(),
+            plot_orders: orders.clone(),
+            plot_names: names.clone(),
+            maintenance: format_cover_maintenance(labels, &mowing, &brush_cutting, &grazing),
+            notes: record.notes.clone().unwrap_or_default(),
+        });
+
+        let row = CoverRow {
+            plot_orders: orders,
+            plot_names: names,
+            established_on: record.established_on.clone(),
+            // Blank rather than a zero: art. 42.1.e's annotation has a deadline
+            // of its own and simply has not been made yet.
+            width_m: record.width_m.map(format_number).unwrap_or_default(),
+            free_canopy_width_m: record
+                .free_canopy_width_m
+                .map(format_number)
+                .unwrap_or_default(),
+            mowing,
+            brush_cutting,
+            grazing,
+        };
+        if record.practice_code == "inert_cover" {
+            inert.push(row);
+        } else {
+            plant.push(row);
+        }
+    }
+
+    Ok(CoverRows {
+        plant,
+        inert,
+        sheet,
+    })
+}
+
+/// The workbook's single maintenance cell, where the printed page has three
+/// columns: each activity named, so one column can be filtered and read.
+fn format_cover_maintenance(
+    labels: &Labels,
+    mowing: &[DatedActivity],
+    brush_cutting: &[DatedActivity],
+    grazing: &[DatedActivity],
+) -> String {
+    [
+        (labels.operation_kind("mowing"), mowing),
+        (labels.operation_kind("brush_cutting"), brush_cutting),
+        (labels.s9.s94.grazing, grazing),
+    ]
+    .iter()
+    .filter(|(_, entries)| !entries.is_empty())
+    .map(|(name, entries)| format!("{name}: {}", format_activities(entries)))
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
+// ---------------------------------------------------------------------------
+// Section 9.3 — espacios de biodiversidad en cultivos bajo agua
+// (RD 1048/2022 art. 45.2)
+// ---------------------------------------------------------------------------
+
+/// One row per plot, carrying the FIVE dates art. 45.2 names.
+///
+/// The model prints three of them. A book following the form would not satisfy
+/// the article, so nivelación and construcción de caballones get columns of
+/// their own — placed where the article names them, which happens to leave the
+/// model's own three in their original relative order.
+///
+/// The five come from three tables in three crates: the sowing and flooding
+/// dates from core's `sowing_record`, the drying date from module-cue's
+/// `treatment_record`, and the levelling and ridging dates from
+/// module-ecoscheme's `cultural_operation`. Only this crate can read all three
+/// — it is the consumer above the modules, and modules may not read each other.
+struct FloodedRow {
+    /// Table 2.1's order number — the model's "Id. Parcelas" column.
+    order: usize,
+    levelling: Vec<DatedActivity>,
+    sowing: Vec<DatedActivity>,
+    flooding: Vec<DatedActivity>,
+    drying: Vec<DatedActivity>,
+    ridging: Vec<DatedActivity>,
+}
+
+/// Gathers art. 45.2's five dates per plot.
+///
+/// **Which plots appear is the one judgement here.** A plot enters the page
+/// when it carries evidence of being a *cultivo bajo agua*: a sowing that was
+/// flooded, a cultural operation recorded against `flooded_biodiversity`, or a
+/// treatment that dried the field. Once a plot is in, EVERY sowing on it prints
+/// its date — which is what keeps a dry sowing visible in the month before the
+/// flooding is annotated, since `flooded_on` is filled by a later correction.
+///
+/// A sowing with no flooding date is not, on its own, evidence of a flooded
+/// crop: every wheat sowing on the holding would otherwise land on this page.
+fn flooded_rows(
+    plots: &PlotIndex,
+    sowings: &[terrazgo_core::models::SowingRecordDetail],
+    treatments: &[module_cue::models::TreatmentRecordWithPlots],
+    operations: &HashMap<String, FloodedOperations>,
+) -> Vec<FloodedRow> {
+    // The plots that are known to grow a crop under water.
+    let mut flooded_plots: HashSet<&str> = operations.keys().map(String::as_str).collect();
+    for detail in sowings {
+        if detail.record.flooded_on.is_some() {
+            flooded_plots.extend(detail.plots.iter().map(|p| p.plot_id.as_str()));
+        }
+    }
+    for detail in treatments {
+        if detail.record.drying_date.is_some() {
+            flooded_plots.extend(detail.plots.iter().map(|p| p.plot_id.as_str()));
+        }
+    }
+
+    // Keyed on the table-2.1 order number, so the page reads down the parcel
+    // list the way section 2.1 does.
+    let mut rows: BTreeMap<usize, FloodedRow> = BTreeMap::new();
+    let row_for = |rows: &mut BTreeMap<usize, FloodedRow>, plot_id: &str| -> Option<usize> {
+        if !flooded_plots.contains(plot_id) {
+            return None;
+        }
+        let order = *plots.orders.get(plot_id)?;
+        rows.entry(order).or_insert_with(|| FloodedRow {
+            order,
+            levelling: Vec::new(),
+            sowing: Vec::new(),
+            flooding: Vec::new(),
+            drying: Vec::new(),
+            ridging: Vec::new(),
+        });
+        Some(order)
+    };
+
+    for detail in sowings {
+        for plot in &detail.plots {
+            let Some(order) = row_for(&mut rows, &plot.plot_id) else {
+                continue;
+            };
+            let Some(row) = rows.get_mut(&order) else {
+                continue;
+            };
+            row.sowing.push(DatedActivity {
+                performed_on: detail.record.sown_on.clone(),
+                performed_end_date: detail.record.sowing_end_date.clone().unwrap_or_default(),
+                label: String::new(),
+            });
+            if let Some(flooded_on) = &detail.record.flooded_on {
+                row.flooding.push(DatedActivity {
+                    performed_on: flooded_on.clone(),
+                    performed_end_date: String::new(),
+                    label: String::new(),
+                });
+            }
+        }
+    }
+
+    for detail in treatments {
+        let Some(drying) = &detail.record.drying_date else {
+            continue;
+        };
+        for plot in &detail.plots {
+            let Some(order) = row_for(&mut rows, &plot.plot_id) else {
+                continue;
+            };
+            let Some(row) = rows.get_mut(&order) else {
+                continue;
+            };
+            row.drying.push(DatedActivity {
+                performed_on: drying.clone(),
+                performed_end_date: String::new(),
+                label: String::new(),
+            });
+        }
+    }
+
+    for (plot_id, dates) in operations {
+        let Some(order) = row_for(&mut rows, plot_id) else {
+            continue;
+        };
+        let Some(row) = rows.get_mut(&order) else {
+            continue;
+        };
+        row.levelling.extend(clone_dates(&dates.levelling));
+        row.ridging.extend(clone_dates(&dates.ridging));
+    }
+
+    // Each column reads chronologically, whatever order the tables came back
+    // in — several sowings or two secas on one plot are a list, like 9.2's cuts.
+    for row in rows.values_mut() {
+        for column in [
+            &mut row.levelling,
+            &mut row.sowing,
+            &mut row.flooding,
+            &mut row.drying,
+            &mut row.ridging,
+        ] {
+            column.sort_by(|a, b| a.performed_on.cmp(&b.performed_on));
+        }
+    }
+    rows.into_values().collect()
+}
+
+fn clone_dates(entries: &[DatedActivity]) -> Vec<DatedActivity> {
+    entries
+        .iter()
+        .map(|e| DatedActivity {
+            performed_on: e.performed_on.clone(),
+            performed_end_date: e.performed_end_date.clone(),
+            label: e.label.clone(),
+        })
+        .collect()
+}
+
+/// The sowing register as the spreadsheet carries it — one row per sowing.
+///
+/// No page of the printed model shows this register: its dates appear in 9.2's
+/// "Siembra" column and in 9.3's, and `seed_quantity_kg` appears nowhere at
+/// all. So this tab is where it can be read whole, the `tab_materials`
+/// precedent.
+struct SowingSheetRow {
+    /// Sown or planted, rendered in the book's language. Owned because the
+    /// accessor falls back to the code itself for a value added upstream, the
+    /// `analysis_type` rule.
+    kind: String,
+    sown_on: String,
+    sowing_end_date: String,
+    flooded_on: String,
+    seed_quantity_kg: Option<f64>,
+    plot_orders: Vec<usize>,
+    plot_names: String,
+    crops: String,
+    notes: String,
+}
+
+fn sowing_sheet_rows(
+    sowings: &[terrazgo_core::models::SowingRecordDetail],
+    plots: &PlotIndex,
+    language: ReportLanguage,
+) -> Vec<SowingSheetRow> {
+    let labels = language.labels();
+    sowings
+        .iter()
+        .map(|detail| {
+            let (orders, names) =
+                plot_cross_reference(detail.plots.iter().map(|p| p.plot_id.as_str()), plots);
+            // The frozen crop, not today's: a rename must not rewrite what the
+            // book said was sown.
+            let mut crops: Vec<&str> = detail
+                .plots
+                .iter()
+                .filter_map(|p| p.crop_name_snapshot.as_deref())
+                .collect();
+            crops.sort_unstable();
+            crops.dedup();
+            SowingSheetRow {
+                kind: labels.sowing_kind(&detail.record.kind_code).to_string(),
+                sown_on: detail.record.sown_on.clone(),
+                sowing_end_date: detail.record.sowing_end_date.clone().unwrap_or_default(),
+                flooded_on: detail.record.flooded_on.clone().unwrap_or_default(),
+                seed_quantity_kg: detail.record.seed_quantity_kg,
+                plot_orders: orders,
+                plot_names: names,
+                crops: crops.join("; "),
+                notes: detail.record.notes.clone().unwrap_or_default(),
+            }
+        })
+        .collect()
+}
+
+/// Model 9.2 footnote (4) and the "9.6" activity column: the date carries the
+/// activity too. The coded kind answers most of it; the free description is
+/// what anexo III.B's open-ended list needs, and it appends rather than
+/// replacing so a reader always sees which kind was recorded.
+fn activity_text(kind: &str, description: &str) -> String {
+    if description.is_empty() {
+        kind.to_string()
+    } else {
+        format!("{kind} — {description}")
+    }
+}
+
 /// Anexo III A.3's figures as one printed cell — the model predates A.3 and has
 /// no soil page, so they ride beside the findings. Only what the bulletin
 /// reported appears, each with the unit its field is named for, so a reader can
@@ -2508,6 +3474,20 @@ fn lab_line(row: &AnalysisRow) -> String {
 /// cross-references table 2.1 by order number, the sheet spells the names out
 /// so it can be filtered on its own. Both sorted, so the cell reads the same
 /// however the junction rows happen to come back.
+/// The seven parts of a SIGPAC reference as the one string the visor and every
+/// official form print, `provincia:municipio:agregado:zona:polígono:parcela:recinto`.
+///
+/// A reference is only meaningful whole, so a plot missing any part gets an
+/// empty string rather than a partial one with gaps — the caller then prints
+/// the plot's name, which is a true statement, instead of "47::0:0:12::" which
+/// looks like a reference and is not one.
+fn sigpac_reference(parts: &[&str; 7]) -> String {
+    if parts.iter().any(|part| part.trim().is_empty()) {
+        return String::new();
+    }
+    parts.join(":")
+}
+
 fn plot_cross_reference<'a>(
     plot_ids: impl Iterator<Item = &'a str>,
     plots: &PlotIndex,
@@ -2795,7 +3775,11 @@ impl Cuaderno {
                 // measure was recorded without one.
                 "intensity": match (t.measure_intensity_value, t.measure_intensity_unit_code.as_deref()) {
                     (Some(value), Some(code)) => {
-                        format!("{} {}", format_number(value), labels.intensity_unit(code))
+                        format!(
+                            "{} {}",
+                            format_number(value),
+                            labels.intensity_unit(code, value)
+                        )
                     }
                     _ => String::new(),
                 },
@@ -2979,8 +3963,82 @@ impl Cuaderno {
                     .collect::<Vec<_>>().join("; "),
                 "notes": r.notes,
             })).collect::<Vec<_>>(),
+            "grazing": self.grazing.iter().map(|r| json!({
+                "group_ref": r.group_ref,
+                "plot_reference": r.plot_reference,
+                "started_on": format_date(&r.started_on),
+                // Blank while the animals are still out: the deadline runs from
+                // this date, so an empty cell says "not finished", and the
+                // footnote says exactly that.
+                "ended_on": if r.ended_on.is_empty() { String::new() } else { format_date(&r.ended_on) },
+                // A catalogue label, so it prints verbatim in every language.
+                "species": r.species,
+                "rega": r.rega,
+                "animal_count": r.animal_count.to_string(),
+            })).collect::<Vec<_>>(),
+            "mowing": self.mowing.iter().map(|r| json!({
+                "order": r.order.to_string(),
+                "province": r.sigpac.province,
+                "municipality": r.sigpac.municipality,
+                "polygon": r.sigpac.polygon,
+                "parcel": r.sigpac.parcel,
+                "enclosure": r.sigpac.enclosure,
+                // The provider's surface, blank when unknown — never the
+                // farmer's own figure under a heading that says SIGPAC.
+                "sigpac_area": r.sigpac.area_ha.map(format_number).unwrap_or_default(),
+                "mowing": format_activities(&r.mowing),
+                "tillage": format_activities(&r.tillage),
+                "sowing": format_activities(&r.sowing),
+                "maintenance": format_activities(&r.maintenance),
+            })).collect::<Vec<_>>(),
+            "communal": self.communal.iter().map(|r| json!({
+                "plot_ids": r.plot_orders.iter().map(usize::to_string)
+                    .collect::<Vec<_>>().join(", "),
+                "plots": r.plot_names,
+                "performed_on": format_date(&r.performed_on),
+                "performed_end_date": if r.performed_end_date.is_empty() {
+                    String::new()
+                } else {
+                    format_date(&r.performed_end_date)
+                },
+                "activity": r.activity,
+            })).collect::<Vec<_>>(),
+            "flooded": self.flooded.iter().map(|r| json!({
+                "order": r.order.to_string(),
+                // Art. 45.2's own order. The model's three columns keep their
+                // relative places; the two it lacks sit where the article
+                // names them.
+                "levelling": format_activities(&r.levelling),
+                "sowing": format_activities(&r.sowing),
+                "flooding": format_activities(&r.flooding),
+                "drying": format_activities(&r.drying),
+                "ridging": format_activities(&r.ridging),
+            })).collect::<Vec<_>>(),
+            // Models 9.4 and 9.5. One projection function feeds both, and the
+            // 9.5 rows simply leave the three maintenance cells unread — art.
+            // 43 asks for no maintenance of an inert cover.
+            "plant_covers": self.plant_covers.iter().map(cover_json).collect::<Vec<_>>(),
+            "inert_covers": self.inert_covers.iter().map(cover_json).collect::<Vec<_>>(),
         })
     }
+}
+
+/// One printed cover row, for either page.
+///
+/// The widths print blank rather than as a zero when art. 42.1.e's separate
+/// annotation has not been made yet: a blank cell says "not stated", which is
+/// what is true, while "0" would say the cover has no width.
+fn cover_json(r: &CoverRow) -> serde_json::Value {
+    json!({
+        "plot_ids": r.plot_orders.iter().map(usize::to_string).collect::<Vec<_>>().join(", "),
+        "plots": r.plot_names,
+        "established_on": format_date(&r.established_on),
+        "width": r.width_m,
+        "free_canopy_width": r.free_canopy_width_m,
+        "mowing": format_activities(&r.mowing),
+        "brush_cutting": format_activities(&r.brush_cutting),
+        "grazing": format_activities(&r.grazing),
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -3015,6 +4073,10 @@ impl Cuaderno {
         book.push(self.sheet_materials(labels));
         book.push(self.sheet_plan(labels));
         book.push(self.sheet_irrigation(labels));
+        book.push(self.sheet_grazing(labels));
+        book.push(self.sheet_cultural_operations(labels));
+        book.push(self.sheet_covers(labels));
+        book.push(self.sheet_sowing(labels));
         book
     }
 
@@ -3335,6 +4397,7 @@ impl Cuaderno {
                 Column::new(labels.sheet.date_start, 12.0),
                 Column::new(labels.sheet.date_end, 12.0),
                 Column::new(labels.sheet.application_time, 12.0),
+                Column::new(labels.sheet.drying_date, 14.0),
                 Column::new(labels.sheet.treated_area, 21.0),
                 Column::new(labels.s31.problem, 30.0),
                 Column::new(labels.sheet.operator_order, 13.0),
@@ -3387,6 +4450,8 @@ impl Cuaderno {
                 // with no date and no zone, and Excel's time type would anchor
                 // it to a serial day the record never stated.
                 Cell::text(t.time.as_deref().unwrap_or_default()),
+                // A real date cell, unlike the hour above: this one IS a day.
+                Cell::date(t.drying_date.as_deref()),
                 Cell::Number(t.surface_ha),
                 Cell::text(t.problems.as_str()),
                 Cell::number(t.operator_order.map(|o| o as f64)),
@@ -3433,10 +4498,15 @@ impl Cuaderno {
                 // Value and unit apart, so a column of intensities can be
                 // sorted — the dose rule.
                 Cell::number(t.measure_intensity_value),
+                // The unit still agrees with the value in its neighbouring
+                // cell; with no value recorded it falls to the plural, which
+                // is the form a bare unit column reads best in.
                 Cell::text(
                     t.measure_intensity_unit_code
                         .as_deref()
-                        .map(|c| labels.intensity_unit(c))
+                        .map(|c| {
+                            labels.intensity_unit(c, t.measure_intensity_value.unwrap_or_default())
+                        })
                         .unwrap_or_default(),
                 ),
                 Cell::text(t.measure_registration_number.as_deref().unwrap_or_default()),
@@ -3716,6 +4786,7 @@ impl Cuaderno {
                 Column::new(labels.s6.material, 26.0),
                 Column::new(labels.sheet.material_kind, 24.0),
                 Column::new(labels.sheet.sludge, 14.0),
+                Column::new(labels.sheet.sustainable_inputs, 26.0),
                 Column::new(labels.sheet.richness_n, 12.0),
                 Column::new(labels.sheet.richness_p2o5, 14.0),
                 Column::new(labels.sheet.richness_k2o, 12.0),
@@ -3751,6 +4822,11 @@ impl Cuaderno {
                 Cell::text(r.material_name.as_str()),
                 Cell::text(r.material_kind.as_str()),
                 Cell::text(if r.sludge {
+                    labels.value.yes
+                } else {
+                    labels.value.no
+                }),
+                Cell::text(if r.sustainable_inputs {
                     labels.value.yes
                 } else {
                     labels.value.no
@@ -3980,6 +5056,204 @@ impl Cuaderno {
     }
 }
 
+impl Cuaderno {
+    /// Model 9.1 as a sheet. Where the PDF joins several plots' references into
+    /// one cell, the workbook also carries the table-2.1 order numbers and the
+    /// plot names, so a reader can filter by plot the way every other tab does.
+    fn sheet_grazing(&self, labels: &Labels) -> Sheet {
+        let mut sheet = Sheet::new(
+            labels.sheet.tab_grazing,
+            vec![
+                Column::new(labels.s9.s91.started_on, 20.0),
+                Column::new(labels.s9.s91.ended_on, 20.0),
+                Column::new(labels.s9.s91.group_ref, 20.0),
+                Column::new(labels.s9.s91.plot_reference, 30.0),
+                Column::new(labels.sheet.plot_ids, 13.0),
+                Column::new(labels.sheet.plots, 24.0),
+                Column::new(labels.s9.s91.species, 22.0),
+                Column::new(labels.s9.s91.rega, 18.0),
+                Column::new(labels.s9.s91.animal_count, 16.0),
+                Column::new(labels.s31.notes, 30.0),
+            ],
+        );
+        for r in &self.grazing {
+            sheet.push(vec![
+                Cell::date(Some(&r.started_on)),
+                // Blank while grazing continues — a spreadsheet must not read
+                // an open record as one that ended today.
+                Cell::date((!r.ended_on.is_empty()).then_some(r.ended_on.as_str())),
+                Cell::text(r.group_ref.as_str()),
+                Cell::text(r.plot_reference.as_str()),
+                Cell::text(
+                    r.plot_orders
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                Cell::text(r.plot_names.as_str()),
+                Cell::text(r.species.as_str()),
+                Cell::text(r.rega.as_str()),
+                Cell::Number(r.animal_count as f64),
+                Cell::text(r.notes.as_str()),
+            ]);
+        }
+        sheet
+    }
+
+    /// The sowing register, which no page of the printed model shows.
+    ///
+    /// Its dates reach the book through model 9.2's "Siembra" column and model
+    /// 9.3's, and `seed_quantity_kg` — captured only because the SIEX twin
+    /// requires `Cantidad` — reaches it nowhere at all. So this tab is where
+    /// the register can be read whole, the `tab_materials` precedent.
+    fn sheet_sowing(&self, labels: &Labels) -> Sheet {
+        let mut sheet = Sheet::new(
+            labels.sheet.tab_sowing,
+            vec![
+                Column::new(labels.sheet.sowing_kind, 12.0),
+                Column::new(labels.sheet.date_start, 14.0),
+                Column::new(labels.sheet.date_end, 14.0),
+                Column::new(labels.s9.s93.flooding, 20.0),
+                Column::new(labels.sheet.plot_ids, 13.0),
+                Column::new(labels.sheet.plots, 24.0),
+                Column::new(labels.s31.species, 22.0),
+                Column::new(labels.sheet.seed_quantity, 18.0),
+                Column::new(labels.s31.notes, 30.0),
+            ],
+        );
+        for r in &self.sowings {
+            sheet.push(vec![
+                Cell::text(r.kind.as_str()),
+                Cell::date(Some(&r.sown_on)),
+                Cell::date((!r.sowing_end_date.is_empty()).then_some(r.sowing_end_date.as_str())),
+                // Blank while the field is dry — and for every crop that is
+                // never flooded, which is most of them.
+                Cell::date((!r.flooded_on.is_empty()).then_some(r.flooded_on.as_str())),
+                Cell::text(
+                    r.plot_orders
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                Cell::text(r.plot_names.as_str()),
+                Cell::text(r.crops.as_str()),
+                match r.seed_quantity_kg {
+                    Some(kg) => Cell::Number(kg),
+                    None => Cell::text(""),
+                },
+                Cell::text(r.notes.as_str()),
+            ]);
+        }
+        sheet
+    }
+
+    /// Sections 9.2 and "9.6" as one tab, unpivoted: one row per operation,
+    /// with the duty it evidences in a column of its own.
+    ///
+    /// The PDF answers "which duty" by which page a row is printed on, and
+    /// pivots 9.2 onto the plot because that is what the model's row is. Here
+    /// both choices reverse — a spreadsheet exists to be filtered and sorted,
+    /// and a pivoted cell holding two dates can be read but not sorted, which
+    /// is the whole point of the second renderer.
+    ///
+    /// It carries rows the printed pages do not: the cover and flooded-crop
+    /// practices are captured before seams 3 and 4 give them a page, and
+    /// `residue_destination` is the twin's field, which no page shows at all.
+    /// Nothing recorded is invisible in this tab.
+    fn sheet_cultural_operations(&self, labels: &Labels) -> Sheet {
+        let mut sheet = Sheet::new(
+            labels.sheet.tab_cultural_operations,
+            vec![
+                Column::new(labels.s9.s96.performed_on, 14.0),
+                Column::new(labels.s9.s96.performed_end_date, 14.0),
+                Column::new(labels.sheet.eco_practice, 34.0),
+                Column::new(labels.s9.s96.activity, 24.0),
+                Column::new(labels.sheet.plot_ids, 13.0),
+                Column::new(labels.sheet.plots, 24.0),
+                Column::new(labels.s9.s92.maintenance, 30.0),
+                Column::new(labels.sheet.residue_destination, 34.0),
+                Column::new(labels.s31.notes, 30.0),
+            ],
+        );
+        for r in &self.operations {
+            sheet.push(vec![
+                Cell::date(Some(&r.performed_on)),
+                // Blank for a single day's work: a spreadsheet must not read a
+                // one-day operation as an interval that ended the same day.
+                Cell::date(
+                    (!r.performed_end_date.is_empty()).then_some(r.performed_end_date.as_str()),
+                ),
+                Cell::text(r.practice.as_str()),
+                Cell::text(r.kind.as_str()),
+                Cell::text(
+                    r.plot_orders
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                Cell::text(r.plot_names.as_str()),
+                Cell::text(r.activity_description.as_str()),
+                Cell::text(r.residue_destination.as_str()),
+                Cell::text(r.notes.as_str()),
+            ]);
+        }
+        sheet
+    }
+
+    /// Models 9.4 and 9.5 as one tab, the practice telling the two apart.
+    ///
+    /// One tab rather than two because it is one register, and because the
+    /// columns are identical — 9.5 simply leaves the maintenance cell empty. It
+    /// also carries three things neither printed page has a column for: the
+    /// practice, the kind of cover (`TIPO_COBERTURA_SUELO`, which the twin
+    /// sends) and the date the widths were stated, which is what separates
+    /// "measured in June" from "never measured".
+    fn sheet_covers(&self, labels: &Labels) -> Sheet {
+        let mut sheet = Sheet::new(
+            labels.sheet.tab_covers,
+            vec![
+                Column::new(labels.s9.s94.established_on, 18.0),
+                Column::new(labels.sheet.eco_practice, 34.0),
+                Column::new(labels.s9.s94.plot_ids, 13.0),
+                Column::new(labels.sheet.plots, 24.0),
+                Column::new(labels.sheet.cover_type, 34.0),
+                Column::new(labels.s9.s94.width, 20.0),
+                Column::new(labels.s9.s94.free_canopy_width, 24.0),
+                Column::new(labels.sheet.widths_stated_on, 18.0),
+                Column::new(labels.s9.s94.maintenance, 40.0),
+                Column::new(labels.s31.notes, 30.0),
+            ],
+        );
+        for r in &self.covers {
+            sheet.push(vec![
+                Cell::date(Some(&r.established_on)),
+                Cell::text(r.practice.as_str()),
+                Cell::text(
+                    r.plot_orders
+                        .iter()
+                        .map(usize::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                Cell::text(r.plot_names.as_str()),
+                Cell::text(r.cover_type.as_str()),
+                // Blank rather than 0 when art. 42.1.e's annotation has not
+                // been made: a spreadsheet sums its columns, and a zero width
+                // averaged in would understate every cover on the holding.
+                Cell::number(r.width_m),
+                Cell::number(r.free_canopy_width_m),
+                Cell::date((!r.widths_stated_on.is_empty()).then_some(r.widths_stated_on.as_str())),
+                Cell::text(r.maintenance.as_str()),
+                Cell::text(r.notes.as_str()),
+            ]);
+        }
+        sheet
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Display formatting
 //
@@ -4004,12 +5278,62 @@ fn format_date_interval(start: &str, end: Option<&str>) -> String {
     }
 }
 
+/// One model-9.2 cell: every date recorded for that activity on that plot,
+/// joined — footnote (1) allows two cuts a year, and the column is a list by
+/// design. The activity's name rides along only in the "otras actividades"
+/// column, whose footnote (4) asks for the date **and** what was done.
+///
+/// Separated by the same middle dot the reference cells use, so a reader who
+/// has met one join in this book has met them all.
+fn format_activities(entries: &[DatedActivity]) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            let dates = format_date_interval(
+                &entry.performed_on,
+                (!entry.performed_end_date.is_empty()).then_some(entry.performed_end_date.as_str()),
+            );
+            if entry.label.is_empty() {
+                dates
+            } else {
+                format!("{dates} {}", entry.label)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// Decimal-comma number, up to 4 decimals, trailing zeros trimmed
 /// ("1,5", "2", "0,0375").
+///
+/// Four decimals is an APP convention, not a regulatory one — no decree states
+/// a precision. It is simply enough for every register whose units already
+/// scale (a dose is written in g/ha rather than kg/ha), and the frontend holds
+/// itself to the same precision, so screen and book never show a different
+/// FIGURE. The separator may differ: this book prints in the holding's language
+/// and the app renders in the reader's, so an English reader sees "1234.5"
+/// against this "1234,5". Same digits, each in its own convention.
+///
+/// What it may never do is print a nonzero measurement as "0": a farmer who
+/// recorded 0,00003 wrote a figure, and a zero is a statement they never made
+/// (the rule `amount` follows for blanks). So a value that would round away
+/// widens until its first significant digit shows, rather than being rounded
+/// into a falsehood. Coordinates are the other exception and have their own
+/// formatter at five decimals.
 fn format_number(value: f64) -> String {
-    let s = format!("{value:.4}");
-    let s = s.trim_end_matches('0').trim_end_matches('.');
-    s.replace('.', ",")
+    let trimmed = |text: String| text.trim_end_matches('0').trim_end_matches('.').to_string();
+    let mut out = trimmed(format!("{value:.4}"));
+    if value != 0.0 && out.trim_start_matches('-') == "0" {
+        // 12 is where f64 stops being trustworthy for the values this book
+        // carries; a figure needing more than that is noise, not a measurement.
+        for precision in 5..=12 {
+            out = trimmed(format!("{:.*}", precision, value));
+            if out.trim_start_matches('-') != "0" {
+                break;
+            }
+        }
+    }
+    out.replace('.', ",")
 }
 
 /// A voluntary lat/lon pair for section 2.2, WGS84 decimal degrees.
@@ -4214,12 +5538,38 @@ mod tests {
         );
     }
 
+    /// These vectors are MIRRORED by `formatNumber` in `src/i18n.js`, which
+    /// renders the same figures on screen under
+    /// `{ maximumFractionDigits: 4, useGrouping: false }` — the standard
+    /// `collate.js` holds against `collate.rs`, and for the same reason: a
+    /// farmer reads one figure here and the same figure there. Change a case
+    /// in either place and change it in both.
+    ///
+    /// The two four-digit values are the ones that would drift first: they are
+    /// where a thousands separator would appear if either side grew one.
     #[test]
     fn numbers_render_with_decimal_comma_and_no_trailing_zeros() {
         assert_eq!(format_number(1.5), "1,5");
         assert_eq!(format_number(2.0), "2");
         assert_eq!(format_number(0.0375), "0,0375");
         assert_eq!(format_number(12.25), "12,25");
+        assert_eq!(format_number(1234.5), "1234,5");
+        assert_eq!(format_number(12000.0), "12000");
+    }
+
+    /// A measurement smaller than the fourth decimal must still print as
+    /// itself. Rounding it to "0" would put a figure in the book that the
+    /// farmer never wrote — the same falsehood `amount` avoids by leaving a
+    /// blank when a value is unstated.
+    #[test]
+    fn a_nonzero_measurement_never_prints_as_zero() {
+        assert_eq!(format_number(0.00003), "0,00003");
+        assert_eq!(format_number(-0.00003), "-0,00003");
+        assert_eq!(format_number(0.0000001), "0,0000001");
+        // Zero itself is still zero.
+        assert_eq!(format_number(0.0), "0");
+        // And the ordinary path is untouched.
+        assert_eq!(format_number(1.23456), "1,2346");
     }
 
     #[test]

@@ -10,6 +10,10 @@
 //! nothing a later edit elsewhere could silently rewrite.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::last_change;
+
 use module_cue::models::*;
 use module_cue::open_in_memory;
 use module_cue::repository as repo;
@@ -73,7 +77,6 @@ fn fixture(conn: &mut Connection) -> Fixture {
             species_name: "trigo blando".into(),
             variety: Some("Nogal".into()),
             production_system_code: None,
-            sown_on: None,
             area_ha: None,
             irrigation_code: None,
             growing_environment_code: None,
@@ -118,25 +121,6 @@ fn sample(fx: &Fixture) -> NewAnalysisRecord {
         analysis_type_codes: vec!["pesticide_residues".into()],
         substance_codes: vec!["252".into()],
     }
-}
-
-fn last_change(
-    conn: &Connection,
-    table: &str,
-    id: &str,
-) -> (String, serde_json::Value, serde_json::Value) {
-    conn.query_row(
-        "SELECT operation, payload FROM record_change
-         WHERE entity_table = ?1 AND entity_id = ?2
-         ORDER BY changed_at DESC, id DESC LIMIT 1",
-        [table, id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    )
-    .map(|(op, payload)| {
-        let mut doc: serde_json::Value = serde_json::from_str(&payload).unwrap();
-        (op, doc["before"].take(), doc["after"].take())
-    })
-    .unwrap()
 }
 
 // ---------------------------------------------------------------------------
@@ -609,6 +593,8 @@ fn a_sowing_alone_also_pins_its_season() {
             seed_quantity_kg: None,
             seed_lot: None,
             treatment_kind_code: None,
+            acquired_on: None,
+            sowing_record_id: None,
             product_name: "Celest Trio".into(),
             product_registration_number: None,
             product_active_substance: None,

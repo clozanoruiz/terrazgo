@@ -1,0 +1,29 @@
+[package]
+name = "terrazgo-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Terrazgo shared test fixtures — dev-dependency only, and it depends on terrazgo-core alone"
+
+[lints]
+workspace = true
+
+# DEV-DEPENDENCY ONLY, and CORE-ONLY. The second half is the design, not an
+# accident of what the first extraction happened to need: a testkit that grew a
+# `module-cue` dependency would be a back door between modules, and the module
+# crates' own `the_module_runs_on_core_alone` tests would go on passing while it
+# was open. See the crate's `//!` docs.
+#
+# Versions live in [workspace.dependencies] at the repo root.
+[dependencies]
+terrazgo-core = { workspace = true }
+# `trace` is enabled HERE and nowhere else: `queries::count_statements` needs
+# SQLite's statement tracer to see an N+1 at all. This crate is a
+# dev-dependency everywhere and the workspace is on `resolver = "3"`, so the
+# feature is absent from every non-test build.
+rusqlite = { workspace = true, features = ["trace"] }
+# `last_change` parses the audit payload back into a `Value` so a test can index
+# into it; the record_change contract is "complete row images", so tests read
+# fields the helper cannot know about.
+serde_json = { workspace = true }

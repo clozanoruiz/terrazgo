@@ -18,6 +18,18 @@
 //! written with no number format at all — Excel renders them with the
 //! reader's own locale, which is how a Spanish user gets decimal commas
 //! without us hard-coding them.
+//!
+//! Dates follow the same rule, which takes one more step because a date with
+//! no format at all renders as its raw serial number. Writing a *custom*
+//! `dd/mm/yyyy` would mint a user-defined format id and bake the pattern into
+//! the file, pinning every reader in every locale to day-first; the built-in
+//! short date (index 14) is stored as a bare `numFmtId` reference instead, and
+//! spreadsheet applications render those from the reader's regional settings.
+//! The cell still holds a real date serial either way, so sorting and
+//! filtering are unaffected — only the rendering follows the reader.
+//!
+//! This is the working copy, which is what makes reader-locale rendering the
+//! right default here; the PDF is the compliance artifact and stays fixed.
 
 use crate::error::ReportError;
 use rust_xlsxwriter::{ExcelDateTime, Format, Workbook as XlsxWorkbook};
@@ -159,7 +171,10 @@ pub fn render_xlsx(workbook: &Workbook) -> Result<RenderedWorkbook, ReportError>
 
     let mut book = XlsxWorkbook::new();
     let header_format = Format::new().set_bold();
-    let date_format = Format::new().set_num_format("dd/mm/yyyy");
+    // Built-in format 14, the locale-dependent short date. NOT
+    // `set_num_format("dd/mm/yyyy")`, which would write a custom formatCode and
+    // pin every reader to day-first — see the module docs.
+    let date_format = Format::new().set_num_format_index(14);
     let mut used_names: Vec<String> = Vec::new();
 
     for sheet in &workbook.sheets {

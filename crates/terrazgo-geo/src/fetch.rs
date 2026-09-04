@@ -16,8 +16,8 @@
 use crate::error::{GeoError, Result};
 use crate::sources::{self, TileSource};
 use rusqlite::{Connection, OptionalExtension, params};
-use std::sync::{Mutex, MutexGuard};
 use terrazgo_core::date::now_utc_iso;
+use terrazgo_core::db::Database;
 
 /// A fetched (or cached) payload plus the content type to serve it with.
 ///
@@ -29,7 +29,7 @@ pub use terrazgo_net::Fetched;
 /// Serve one tile: cache first, upstream on miss. For TileJSON-resolved
 /// sources (OpenFreeMap publishes rotating dated snapshot paths) a 404 from a
 /// stale template triggers one re-resolve + retry.
-pub fn tile(cache: &Mutex<Connection>, source_id: &str, z: u8, x: u32, y: u32) -> Result<Fetched> {
+pub fn tile(cache: &Database, source_id: &str, z: u8, x: u32, y: u32) -> Result<Fetched> {
     let source = sources::tile_source(source_id).ok_or(GeoError::NotFound)?;
     if z < source.min_zoom || z > source.max_zoom {
         return Err(GeoError::NotFound);
@@ -39,8 +39,8 @@ pub fn tile(cache: &Mutex<Connection>, source_id: &str, z: u8, x: u32, y: u32) -
 
     // Scoped so the guard is dropped before any network I/O.
     let cached = {
-        let conn = lock(cache)?;
-        cached_tile(&conn, &cache_key, z, x, y)?
+        let guard = cache.lock()?;
+        cached_tile(guard.conn()?, &cache_key, z, x, y)?
     };
     if let Some(hit) = cached {
         return Ok(hit);
@@ -61,9 +61,9 @@ pub fn tile(cache: &Mutex<Connection>, source_id: &str, z: u8, x: u32, y: u32) -
         other => other,
     }?;
 
-    // `&*` dereferences the guard to the `Connection` it protects (the guard
-    // stays alive for the duration of the call, so the lock is held).
-    store_tile(&*lock(cache)?, source, &cache_key, z, x, y, &fetched)?;
+    // Re-taken only now that the network round trip is over.
+    let guard = cache.lock()?;
+    store_tile(guard.conn()?, source, &cache_key, z, x, y, &fetched)?;
     Ok(fetched)
 }
 
@@ -73,7 +73,7 @@ pub fn tile(cache: &Mutex<Connection>, source_id: &str, z: u8, x: u32, y: u32) -
 /// Resolution is cache-first (one fetch ever until something refreshes it,
 /// e.g. a plot verification), so it adds no per-tile network cost and works
 /// offline once seen.
-fn tile_cache_key(cache: &Mutex<Connection>, source: &TileSource) -> Result<String> {
+fn tile_cache_key(cache: &Database, source: &TileSource) -> Result<String> {
     if source.campaign_keyed {
         Ok(format!("{}@{}", source.id, current_campaign(cache, false)?))
     } else {
@@ -122,7 +122,7 @@ const CAMPAIGNS_URL: &str = "https://sigpac-hubcloud.es/geopackages/";
 /// up from the shared cache row). Lives here rather than in module-sigpac
 /// because campaign-keyed tile caching needs it and modules sit above this
 /// crate; module-sigpac re-exports it.
-pub fn current_campaign(cache: &Mutex<Connection>, refresh: bool) -> Result<i64> {
+pub fn current_campaign(cache: &Database, refresh: bool) -> Result<i64> {
     let fetched = cached_resource(
         cache,
         "sigpac/campaigns",
@@ -148,7 +148,7 @@ pub fn current_campaign(cache: &Mutex<Connection>, refresh: bool) -> Result<i64>
 /// sheet): cache first, upstream on miss. `rest` is the percent-encoded path
 /// remainder from the webview and is appended to the base URL — the allowlist
 /// means the webview can never steer the app to an arbitrary host.
-pub fn resource(cache: &Mutex<Connection>, prefix: &str, rest: &str) -> Result<Fetched> {
+pub fn resource(cache: &Database, prefix: &str, rest: &str) -> Result<Fetched> {
     let base = sources::resource_base(prefix).ok_or(GeoError::NotFound)?;
     if rest.contains("..") {
         return Err(GeoError::NotFound);
@@ -168,14 +168,19 @@ pub fn resource(cache: &Mutex<Connection>, prefix: &str, rest: &str) -> Result<F
 /// URL (also used by `style` for TileJSON documents). `refresh` bypasses the
 /// cache read (but still stores the new payload).
 pub fn cached_resource(
-    cache: &Mutex<Connection>,
+    cache: &Database,
     key: &str,
     url: &str,
     content_type: &str,
     refresh: bool,
 ) -> Result<Fetched> {
-    if !refresh
-        && let Some(hit) = lock(cache)?
+    // Scoped so the guard is dropped before the network round trip below.
+    let cached = if refresh {
+        None
+    } else {
+        let guard = cache.lock()?;
+        guard
+            .conn()?
             .query_row(
                 "SELECT data, content_type FROM resource WHERE key = ?1",
                 [key],
@@ -187,12 +192,14 @@ pub fn cached_resource(
                 },
             )
             .optional()?
-    {
+    };
+    if let Some(hit) = cached {
         return Ok(hit);
     }
 
     let fetched = http_get(url, content_type)?;
-    lock(cache)?.execute(
+    let guard = cache.lock()?;
+    guard.conn()?.execute(
         "INSERT OR REPLACE INTO resource (key, data, content_type, fetched_at)
          VALUES (?1, ?2, ?3, ?4)",
         params![key, fetched.data, fetched.content_type, now_utc_iso()],
@@ -221,8 +228,10 @@ pub struct CachedEntry {
 /// difference, and it needs the age too: an empty answer for a campaign still
 /// being loaded is re-asked once a day, while the same emptiness for a closed
 /// campaign is final.
-pub fn cached(cache: &Mutex<Connection>, key: &str) -> Result<Option<CachedEntry>> {
-    let hit = lock(cache)?
+pub fn cached(cache: &Database, key: &str) -> Result<Option<CachedEntry>> {
+    let guard = cache.lock()?;
+    let hit = guard
+        .conn()?
         .query_row(
             "SELECT data, content_type, fetched_at FROM resource WHERE key = ?1",
             [key],
@@ -241,14 +250,6 @@ pub fn cached(cache: &Mutex<Connection>, key: &str) -> Result<Option<CachedEntry
 // ---------------------------------------------------------------------------
 // Internals
 // ---------------------------------------------------------------------------
-
-fn lock(cache: &Mutex<Connection>) -> Result<MutexGuard<'_, Connection>> {
-    // A poisoned mutex means another thread panicked mid-write; treat the
-    // cache as unavailable rather than propagating the panic.
-    cache
-        .lock()
-        .map_err(|_| GeoError::Offline("geo cache lock poisoned".into()))
-}
 
 fn cached_tile(
     conn: &Connection,
@@ -293,7 +294,7 @@ fn cached_tile(
 /// The upstream URL for one tile: a static template, or one resolved from the
 /// source's TileJSON document (cached; `refresh` forces a re-resolve).
 fn upstream_tile_url(
-    cache: &Mutex<Connection>,
+    cache: &Database,
     source: &TileSource,
     z: u8,
     x: u32,
@@ -345,20 +346,28 @@ mod tests {
     use super::*;
     use crate::db::open_cache_in_memory;
 
-    fn cache() -> Mutex<Connection> {
-        Mutex::new(open_cache_in_memory().expect("in-memory cache"))
+    fn cache() -> Database {
+        open_cache_in_memory().expect("in-memory cache")
+    }
+
+    /// Seed one row through a lock that is released before this returns.
+    ///
+    /// The scoping is the whole point. Every fetch function here takes the
+    /// cache lock itself and `std::sync::Mutex` is not reentrant, so a seeding
+    /// guard still alive across a later `tile()` or `resource()` call does not
+    /// fail the test — it hangs it.
+    fn seed(cache: &Database, sql: &str, params: impl rusqlite::Params) {
+        let guard = cache.lock().unwrap();
+        guard.conn().unwrap().execute(sql, params).unwrap();
     }
 
     #[test]
     fn cached_tile_roundtrip_and_miss() {
         let cache = cache();
         {
-            let conn = cache.lock().unwrap();
-            assert!(
-                cached_tile(&conn, "pnoa", 13, 3990, 3105)
-                    .unwrap()
-                    .is_none()
-            );
+            let guard = cache.lock().unwrap();
+            let conn = guard.conn().unwrap();
+            assert!(cached_tile(conn, "pnoa", 13, 3990, 3105).unwrap().is_none());
             conn.execute(
                 "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
                  VALUES ('pnoa', 13, 3990, 3105, x'FFD8', 'image/jpeg',
@@ -403,15 +412,12 @@ mod tests {
     #[test]
     fn cached_resource_is_served_without_network() {
         let cache = cache();
-        cache
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO resource (key, data, content_type, fetched_at)
-                 VALUES ('res/ofm-style/', x'7B7D', 'application/json', '2026-07-07T00:00:00Z')",
-                [],
-            )
-            .unwrap();
+        seed(
+            &cache,
+            "INSERT INTO resource (key, data, content_type, fetched_at)
+             VALUES ('res/ofm-style/', x'7B7D', 'application/json', '2026-07-07T00:00:00Z')",
+            [],
+        );
         let hit = resource(&cache, "ofm-style", "").unwrap();
         assert_eq!(hit.data, b"{}");
     }
@@ -432,16 +438,13 @@ mod tests {
     const CAMPAIGN_LISTING: &[u8] =
         br#"<a href="/geopackages/2025/">2025/</a> <a href="/geopackages/2026/">2026/</a>"#;
 
-    fn seed_campaigns(cache: &Mutex<Connection>, listing: &[u8]) {
-        cache
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO resource (key, data, content_type, fetched_at)
-                 VALUES ('sigpac/campaigns', ?1, 'text/html', '2026-07-11T00:00:00Z')",
-                params![listing],
-            )
-            .unwrap();
+    fn seed_campaigns(cache: &Database, listing: &[u8]) {
+        seed(
+            cache,
+            "INSERT INTO resource (key, data, content_type, fetched_at)
+             VALUES ('sigpac/campaigns', ?1, 'text/html', '2026-07-11T00:00:00Z')",
+            params![listing],
+        );
     }
 
     #[test]
@@ -462,16 +465,13 @@ mod tests {
     fn sigpac_tiles_are_served_from_the_campaign_keyed_cache_without_network() {
         let cache = cache();
         seed_campaigns(&cache, CAMPAIGN_LISTING);
-        cache
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
-                 VALUES ('sigpac-recintos@2026', 15, 15887, 12108, x'1A00',
-                         'application/x-protobuf', '2026-07-11T00:00:00Z', '2026-07-11T00:00:00Z')",
-                [],
-            )
-            .unwrap();
+        seed(
+            &cache,
+            "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
+             VALUES ('sigpac-recintos@2026', 15, 15887, 12108, x'1A00',
+                     'application/x-protobuf', '2026-07-11T00:00:00Z', '2026-07-11T00:00:00Z')",
+            [],
+        );
         // This test has no network; the campaign-suffixed row must be enough.
         let hit = tile(&cache, "sigpac-recintos", 15, 15887, 12108).unwrap();
         assert_eq!(hit.data, vec![0x1A, 0x00]);
@@ -505,19 +505,17 @@ mod tests {
     #[test]
     fn serving_a_cached_tile_touches_last_used_at_across_days() {
         let cache = cache();
-        cache
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
-                 VALUES ('pnoa', 13, 3990, 3105, x'FFD8', 'image/jpeg',
-                         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-                [],
-            )
-            .unwrap();
+        seed(
+            &cache,
+            "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at)
+             VALUES ('pnoa', 13, 3990, 3105, x'FFD8', 'image/jpeg',
+                     '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+            [],
+        );
         tile(&cache, "pnoa", 13, 3990, 3105).unwrap();
-        let last_used: String = cache
-            .lock()
+        let guard = cache.lock().unwrap();
+        let last_used: String = guard
+            .conn()
             .unwrap()
             .query_row("SELECT last_used_at FROM tile", [], |r| r.get(0))
             .unwrap();
@@ -529,7 +527,8 @@ mod tests {
     #[test]
     fn storing_a_tile_evicts_earlier_campaigns_of_the_same_source() {
         let cache = cache();
-        let conn = cache.lock().unwrap();
+        let guard = cache.lock().unwrap();
+        let conn = guard.conn().unwrap();
         conn.execute(
             "INSERT INTO tile (source, z, x, y, data, content_type, fetched_at, last_used_at) VALUES
              ('sigpac-recintos@2025', 15, 1, 1, x'00', 'application/x-protobuf',
@@ -544,7 +543,7 @@ mod tests {
             data: vec![0x1A],
             content_type: "application/x-protobuf".into(),
         };
-        store_tile(&conn, source, "sigpac-recintos@2026", 15, 2, 2, &fetched).unwrap();
+        store_tile(conn, source, "sigpac-recintos@2026", 15, 2, 2, &fetched).unwrap();
 
         let count = |src: &str| -> i64 {
             conn.query_row("SELECT COUNT(*) FROM tile WHERE source = ?1", [src], |r| {
@@ -555,5 +554,24 @@ mod tests {
         assert_eq!(count("sigpac-recintos@2025"), 0, "old campaign evicted");
         assert_eq!(count("sigpac-recintos@2026"), 1);
         assert_eq!(count("pnoa"), 1, "other sources untouched");
+    }
+
+    #[test]
+    fn a_closed_cache_reads_as_offline_rather_than_failing_hard() {
+        let cache = cache();
+        cache.close().unwrap();
+
+        // The cache is exactly the thing that is unavailable, and every caller
+        // here already degrades when it cannot be read — the protocol layer
+        // answers empty and the map keeps working on what it has. Propagating
+        // a hard error instead would take the map down at shutdown.
+        assert!(matches!(
+            cached(&cache, "res/glyphs/anything"),
+            Err(GeoError::Offline(_))
+        ));
+        assert!(matches!(
+            tile(&cache, "pnoa", 13, 3990, 3105),
+            Err(GeoError::Offline(_))
+        ));
     }
 }

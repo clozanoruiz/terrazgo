@@ -95,6 +95,10 @@ pub fn validate_backup(
         path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
+    // A backup can arrive from anywhere — a USB stick, an email. The integrity
+    // check below catches a DAMAGED file; this catches a CRAFTED one, which
+    // would otherwise pass every check here and then become the live database.
+    crate::db::harden(&conn)?;
 
     let intact = conn
         .query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0))
@@ -169,6 +173,30 @@ const REQUIRED_SHAPE: &[TableShape] = &[
         ],
     ),
     ("operator", &["tax_id"]),
+    (
+        "premises",
+        &[
+            "kind_code",
+            "name",
+            "address",
+            "vehicle_model",
+            "plate",
+            "class_code",
+        ],
+    ),
+    (
+        "premises_es_extension",
+        &["cadastral_reference", "rea_installation_code"],
+    ),
+    // Moved here from module-cue on 2026-08-20 with the table itself. It was in
+    // neither fingerprint before: a stale backup whose export_alias was missing
+    // would have imported cleanly and then lost every frozen alias, which is
+    // the one thing about this table that must never happen — SIEX keys its
+    // edits and deletions on those integers.
+    (
+        "export_alias",
+        &["target", "entity_table", "entity_id", "split_key", "alias"],
+    ),
     ("machinery", &["acquired_on"]),
     ("season", &["deleted_at"]),
     ("advisor", &["id", "name", "registration_number"]),
@@ -176,6 +204,16 @@ const REQUIRED_SHAPE: &[TableShape] = &[
         "farm_advisor",
         &["farm_id", "advisor_id", "gip_system_code"],
     ),
+    (
+        "sowing_record",
+        &[
+            "sown_on",
+            "sowing_end_date",
+            "flooded_on",
+            "seed_quantity_kg",
+        ],
+    ),
+    ("sowing_plot", &["sowing_record_id", "plot_id", "crop_id"]),
     (
         "harvest_record",
         &[
@@ -201,11 +239,13 @@ const REQUIRED_SHAPE: &[TableShape] = &[
         ],
     ),
     ("plot_water_declaration", &["plot_id", "declared_on"]),
-    // Not user data, but the startup catalogue import writes this column on
-    // every launch: a backup taken before it existed would import cleanly and
-    // then fail with `no such column` at the next startup, which is exactly
-    // the delayed failure this probe exists to prevent.
-    ("catalogue", &["source_digest"]),
+    // Not user data, but the startup catalogue import writes these columns: a
+    // backup taken before one of them existed would import cleanly and then
+    // fail with `no such column` at the next startup, which is exactly the
+    // delayed failure this probe exists to prevent. `absent_since` is on the
+    // list because the import clears it on every row a file still carries.
+    ("catalogue", &["source_digest", "imported_by_version"]),
+    ("catalogue_code", &["absent_since"]),
 ];
 
 /// Column names of `table`, empty when the table itself is missing.

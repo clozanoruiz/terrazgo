@@ -8,79 +8,19 @@
 //! sección C (letters a, b and l), which art. 5.e redirects to.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::{CoreFixture, FarmWithPlots, farm_with_plots, last_change};
 use module_fertilisation::models::*;
 use module_fertilisation::open_in_memory;
 use module_fertilisation::repository as repo;
 use rusqlite::Connection;
-use terrazgo_core::models::{NewFarm, NewPlot, NewSeason};
-use terrazgo_core::repository as core_repo;
 
-struct Fixture {
-    season_id: String,
-    farm_id: String,
-    plot_a: String,
-    plot_b: String,
-    other_farm_plot: String,
+fn fixture(conn: &mut Connection) -> CoreFixture {
+    farm_with_plots(conn, FarmWithPlots::default())
 }
 
-fn fixture(conn: &mut Connection) -> Fixture {
-    let season = core_repo::insert_season(
-        conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
-    let farm = |conn: &mut Connection, name: &str| {
-        core_repo::insert_farm(
-            conn,
-            NewFarm {
-                name: name.into(),
-                owner_name: None,
-                owner_tax_id: None,
-                country_code: "es".into(),
-                es: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let farm_id = farm(conn, "Finca La Vega");
-    let other_farm = farm(conn, "Finca del Vecino");
-
-    let plot = |conn: &mut Connection, farm_id: &str, name: &str, area: f64| {
-        core_repo::insert_plot(
-            conn,
-            NewPlot {
-                farm_id: farm_id.to_string(),
-                name: name.into(),
-                area_ha: Some(area),
-                es: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let plot_a = plot(conn, &farm_id, "El Prado", 4.0);
-    let plot_b = plot(conn, &farm_id, "La Loma", 3.0);
-    let other_farm_plot = plot(conn, &other_farm, "Ajena", 2.0);
-
-    Fixture {
-        season_id: season.id,
-        farm_id,
-        plot_a,
-        plot_b,
-        other_farm_plot,
-    }
-}
-
-fn sample(fx: &Fixture) -> NewIrrigationRecord {
+fn sample(fx: &CoreFixture) -> NewIrrigationRecord {
     NewIrrigationRecord {
         season_id: fx.season_id.clone(),
         farm_id: fx.farm_id.clone(),
@@ -101,18 +41,6 @@ fn sample(fx: &Fixture) -> NewIrrigationRecord {
         }],
         water_origins: vec![],
     }
-}
-
-fn last_change(conn: &Connection, table: &str, id: &str) -> (String, serde_json::Value) {
-    conn.query_row(
-        "SELECT operation, payload FROM record_change
-         WHERE entity_table = ?1 AND entity_id = ?2
-         ORDER BY changed_at DESC, id DESC LIMIT 1",
-        [table, id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    )
-    .map(|(op, payload)| (op, serde_json::from_str(&payload).unwrap()))
-    .unwrap()
 }
 
 #[test]
@@ -139,17 +67,17 @@ fn logs_a_complete_row_image_for_the_record_and_each_plot() {
     let fx = fixture(&mut conn);
     let detail = repo::insert_irrigation_record(&mut conn, sample(&fx), Some("user-1")).unwrap();
 
-    let (op, payload) = last_change(&conn, "irrigation_record", &detail.record.id);
+    let (op, _, after) = last_change(&conn, "irrigation_record", &detail.record.id);
     assert_eq!(op, "insert");
     // Complete row image: Stage-2/3 sync must rebuild the row from `after`
     // alone, so a hand-picked subset would be a bug.
-    assert_eq!(payload["after"]["volume_unit_code"], "m3_ha");
-    assert_eq!(payload["after"]["irrigation_method_code"], "drip");
-    assert_eq!(payload["after"]["season_id"], detail.record.season_id);
+    assert_eq!(after["volume_unit_code"], "m3_ha");
+    assert_eq!(after["irrigation_method_code"], "drip");
+    assert_eq!(after["season_id"], detail.record.season_id);
 
-    let (op, payload) = last_change(&conn, "irrigation_plot", &detail.plots[0].id);
+    let (op, _, after) = last_change(&conn, "irrigation_plot", &detail.plots[0].id);
     assert_eq!(op, "insert");
-    assert_eq!(payload["after"]["plot_id"], fx.plot_a);
+    assert_eq!(after["plot_id"], fx.plot_a);
 
     let actor: Option<String> = conn
         .query_row(
@@ -410,13 +338,10 @@ fn corrects_a_record_in_place_and_reconciles_its_plots() {
     assert_eq!(still_there.id, kept_plot_row_id);
     assert_eq!(still_there.irrigated_area_ha, Some(4.0));
 
-    let (op, payload) = last_change(&conn, "irrigation_record", &created.record.id);
+    let (op, before, after) = last_change(&conn, "irrigation_record", &created.record.id);
     assert_eq!(op, "update");
-    assert_eq!(payload["before"]["irrigation_method_code"], "drip");
-    assert_eq!(
-        payload["after"]["irrigation_method_code"],
-        "sprinkler_fixed"
-    );
+    assert_eq!(before["irrigation_method_code"], "drip");
+    assert_eq!(after["irrigation_method_code"], "sprinkler_fixed");
 }
 
 #[test]
@@ -462,9 +387,9 @@ fn a_removed_water_origin_leaves_a_logged_deletion() {
     .unwrap();
 
     // The trail still says what the farmer once stated the water came from.
-    let (op, payload) = last_change(&conn, "irrigation_water_origin", &origin_row_id);
+    let (op, before, _) = last_change(&conn, "irrigation_water_origin", &origin_row_id);
     assert_eq!(op, "delete");
-    assert_eq!(payload["before"]["origin_code"], "surface");
+    assert_eq!(before["origin_code"], "surface");
 }
 
 #[test]
@@ -478,10 +403,10 @@ fn soft_delete_hides_the_record_but_keeps_its_history() {
     let listed = repo::list_irrigation_records(&conn, &fx.season_id, &fx.farm_id).unwrap();
     assert!(listed.is_empty());
 
-    let (op, payload) = last_change(&conn, "irrigation_record", &created.record.id);
+    let (op, before, after) = last_change(&conn, "irrigation_record", &created.record.id);
     assert_eq!(op, "delete");
-    assert!(payload["before"]["deleted_at"].is_null());
-    assert!(payload["after"]["deleted_at"].is_string());
+    assert!(before["deleted_at"].is_null());
+    assert!(after["deleted_at"].is_string());
 }
 
 #[test]

@@ -11,6 +11,10 @@
 // auto-allows #[test] fns, so file-level for the shared helpers too.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::db_with_catalogues;
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -20,7 +24,7 @@ use terrazgo_core::catalogue::{self, CatalogueCode};
 /// Every vendored SIEX catalogue (idTabla ids). Kept in sync by hand with
 /// `catalogue.rs`'s `VENDORED`; `imports_all_vendored_catalogues` fails if the
 /// two drift, in either direction.
-const VENDORED_IDS: [&str; 48] = [
+const VENDORED_IDS: [&str; 49] = [
     "AUTORIZACION_EXCP",
     "BUENAS_PRACTICAS_AMBITOS",
     "COMUNIDAD_AUTONOMA",
@@ -32,6 +36,7 @@ const VENDORED_IDS: [&str; 48] = [
     "EDIFICACIONES_INSTALACIONES",
     "EFICACIA_TRATAMIENTO",
     "ENFERMEDADES",
+    "ESPECIE_ANIMAL",
     "EST_FENOLOGICO",
     "JUSTIFICACION_ACTUACION",
     "MACRONUTRIENTES",
@@ -93,12 +98,6 @@ fn file_rows(catalogue_id: &str) -> Vec<Vec<String>> {
         .collect()
 }
 
-fn ensured_db() -> Connection {
-    let mut conn = terrazgo_core::open_in_memory().unwrap();
-    catalogue::ensure_catalogues(&mut conn).unwrap();
-    conn
-}
-
 fn one(conn: &Connection, catalogue_id: &str, code: &str) -> CatalogueCode {
     let mut found = catalogue::find_code(conn, catalogue_id, code).unwrap();
     assert_eq!(
@@ -120,7 +119,7 @@ fn code_count(conn: &Connection, catalogue_id: &str) -> i64 {
 
 #[test]
 fn imports_all_vendored_catalogues() {
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     for id in VENDORED_IDS {
         let source: String = conn
             .query_row("SELECT source FROM catalogue WHERE id = ?1", [id], |r| {
@@ -138,14 +137,17 @@ fn imports_all_vendored_catalogues() {
         VENDORED_IDS.len() as i64,
         "VENDORED_IDS and catalogue.rs's VENDORED have drifted"
     );
-    // The snapshot holds 17384 stored rows across the 48 files (17385 data
+    // The snapshot holds 17582 stored rows across the 49 files (17583 data
     // rows less COMUNIDAD_AUTONOMA's code-less placeholder). Codes are only
     // ever added or baja-dated upstream, so a refreshed snapshot may grow
     // this number but must never shrink it.
+    //
+    // 17384 across 48 files until 2026-08-18, when ESPECIE_ANIMAL's 198
+    // species arrived with the grazing register that reads them.
     let codes: i64 = conn
         .query_row("SELECT COUNT(*) FROM catalogue_code", [], |r| r.get(0))
         .unwrap();
-    assert!(codes >= 17384, "expected >= 17384 codes, got {codes}");
+    assert!(codes >= 17582, "expected >= 17582 codes, got {codes}");
 }
 
 #[test]
@@ -157,7 +159,7 @@ fn every_file_row_is_imported_exactly_once() {
     // onto one id. Row count and MAX(id) both stay put, so the idempotence
     // test passes while labels are thrashed on every run. Comparing against
     // the files is the only thing that notices.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     for id in VENDORED_IDS {
         // COMUNIDAD_AUTONOMA's "Comunidad Desconocida" row carries no INE
         // code and is deliberately skipped by the importer.
@@ -179,7 +181,7 @@ fn every_imported_row_has_a_label() {
     // cell in a picker or a report rather than failing loudly.
     // DETALLE_MATERIAL_FERT is why this exists: the provider's own
     // `descripcion` column is blank on its 83 "PERSONALIZADO" rows.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     for id in VENDORED_IDS {
         for row in catalogue::all_codes(&conn, id).unwrap() {
             assert!(
@@ -195,7 +197,7 @@ fn every_imported_row_has_a_label() {
 fn efficacy_codes_match_the_fega_file() {
     // EFICACIA_TRATAMIENTO is the smallest catalogue: 1 Buena / 2 Regular /
     // 3 Mala, all active — pinned in full against the vendored file.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let codes = catalogue::active_codes(&conn, "EFICACIA_TRATAMIENTO").unwrap();
     let pairs: Vec<(&str, &str)> = codes
         .iter()
@@ -210,7 +212,7 @@ fn legacy_encoded_labels_decode_to_utf8() {
     // Windows-1252: accented labels must arrive as real UTF-8, and the €
     // signs in UNIDADES_MEDIDA (0x80 — a control char in true ISO-8859-1,
     // '€' only in cp1252) must survive as €.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     assert_eq!(one(&conn, "TIPENERGIA", "1").label, "ELÉCTRICA");
     assert_eq!(
         one(&conn, "ENFERMEDADES", "1").label,
@@ -234,7 +236,7 @@ fn no_imported_text_carries_control_characters() {
             .chars()
             .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
     }
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     for id in VENDORED_IDS {
         for row in catalogue::all_codes(&conn, id).unwrap() {
             assert!(
@@ -262,7 +264,7 @@ fn problem_catalogues_use_category_as_label_and_keep_attrs() {
     // ENFERMEDADES row 7 in the vendored file: código SIEX 7, hierarchical
     // nº 8.5.1, categoría "Albugo spp.", EPPO 1ALBUG, empty observaciones.
     // The human-facing name is the categoría column; the rest rides in attrs.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let row = one(&conn, "ENFERMEDADES", "7");
     assert_eq!(row.label, "Albugo spp.");
     let attrs = row.attrs.expect("hierarchical catalogues carry attrs");
@@ -278,7 +280,7 @@ fn crop_catalogue_keeps_attribute_columns() {
     // PRODUCTOS code 1 = TRIGO BLANDO (Triticum aestivum, EPPO TRZAX); the
     // ~25 SI/NO classification columns stay verbatim in attrs for the future
     // prefill/validation queries.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let wheat = one(&conn, "PRODUCTOS", "1");
     assert_eq!(wheat.label, "TRIGO BLANDO");
     let attrs = wheat.attrs.unwrap();
@@ -310,7 +312,7 @@ fn crop_catalogue_keeps_attribute_columns() {
 /// row-count guard — re-measure, then update these figures and their date.
 #[test]
 fn eppo_coverage_of_the_crop_catalogue_is_incomplete() {
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let active = terrazgo_core::catalogue::active_codes(&conn, "PRODUCTOS").unwrap();
     assert_eq!(active.len(), 1023, "active PRODUCTOS rows");
 
@@ -350,7 +352,7 @@ fn eppo_coverage_of_the_crop_catalogue_is_incomplete() {
 fn lifecycle_dates_are_stored_iso() {
     // ENFERMEDADES code 1: alta and modificación 03/07/2024 in the file,
     // stored as ISO YYYY-MM-DD per the schema conventions; no baja.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let row = one(&conn, "ENFERMEDADES", "1");
     assert_eq!(row.added_on.as_deref(), Some("2024-07-03"));
     assert_eq!(row.modified_on.as_deref(), Some("2024-07-03"));
@@ -362,7 +364,7 @@ fn retired_codes_stay_resolvable_but_leave_the_picker() {
     // AUTORIZACION_EXCP code 1 is baja-dated 11/11/2025 in the vendored file:
     // a real retired code. Old records must still resolve it; pickers must not
     // offer it.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let row = one(&conn, "AUTORIZACION_EXCP", "1");
     assert_eq!(row.retired_on.as_deref(), Some("2025-11-11"));
     let active = catalogue::active_codes(&conn, "AUTORIZACION_EXCP").unwrap();
@@ -372,7 +374,7 @@ fn retired_codes_stay_resolvable_but_leave_the_picker() {
 
 #[test]
 fn composite_identity_catalogues_keep_every_row_per_code() {
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     // BUENAS_PRACTICAS_AMBITOS repeats code 0 ("No realiza buenas prácticas")
     // once per ámbito — Fertilización / Riego / Fitosanitario in the snapshot.
     let rows = catalogue::find_code(&conn, "BUENAS_PRACTICAS_AMBITOS", "0").unwrap();
@@ -401,7 +403,7 @@ fn plant_product_is_not_the_crop_catalogue() {
     // list from PRODUCTOS, which codes the crop. The file states the relation
     // itself: produce 1 "Aceitunas" comes from crops 101 OLIVO and 363
     // ACEBUCHE, so the produce code repeats once per crop.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let aceitunas = catalogue::find_code(&conn, "PROD_VEGETAL", "1").unwrap();
     assert_eq!(aceitunas.len(), 2);
     assert!(aceitunas.iter().all(|r| r.label == "Aceitunas"));
@@ -428,7 +430,7 @@ fn comunidad_autonoma_is_keyed_by_its_ine_code() {
     // INE ("según codificacion INE"), and the two disagree for 10 of the 17
     // communities. Keying on column 0 would resolve INE 07 to Castilla-La
     // Mancha — a wrong region, silently, on a regulatory export.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let cyl = one(&conn, "COMUNIDAD_AUTONOMA", "07");
     assert_eq!(cyl.label, "Comunidad Autónoma de Castilla y León");
     assert_eq!(cyl.attrs.unwrap()["Código catastro"], "08");
@@ -441,7 +443,7 @@ fn comunidad_autonoma_is_keyed_by_its_ine_code() {
 fn the_analysis_and_seed_catalogues_carry_what_slice_8_believed_missing() {
     // Seams 2-4 recorded these as "no catalogue in the vendored FEGA set".
     // They exist; the claim was about our snapshot, not about FEGA.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let materials: Vec<(String, String)> = catalogue::active_codes(&conn, "MATERIAL_ANALIZADO")
         .unwrap()
         .into_iter()
@@ -482,7 +484,7 @@ fn the_analysis_and_seed_catalogues_carry_what_slice_8_believed_missing() {
 fn buildings_are_keyed_by_their_siex_code_not_their_tipologia() {
     // EDIFICACIONES_INSTALACIONES leads with the tipología (9 values, each
     // repeating); the row's own code is `Código SIEX` in column 2.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let row = one(&conn, "EDIFICACIONES_INSTALACIONES", "1");
     assert_eq!(row.label, "Abrevadero y abastecimiento de agua");
     assert_eq!(
@@ -493,9 +495,32 @@ fn buildings_are_keyed_by_their_siex_code_not_their_tipologia() {
 }
 
 #[test]
+fn the_premises_class_picker_offers_every_active_building_class() {
+    // `premises.class_code` is core's first catalogue-backed field, and its
+    // picker is what narrows the list — the repository stores whatever it is
+    // given. Anexo V (REA bloque 8, field 1) marks the class obligatorio "en
+    // caso de … tratamiento … en las edificaciones e instalaciones que conlleve
+    // su identificación para la cumplimentación del CUE", which is models
+    // 3.4/3.5's own case.
+    let conn = db_with_catalogues();
+    let picks = terrazgo_core::catalogue::premises_classes(&conn, "es").unwrap();
+    assert_eq!(picks.len(), 109);
+    assert_eq!(picks[0].code, "1");
+    assert_eq!(picks[0].name, "Abrevadero y abastecimiento de agua");
+
+    // A country with no coded list gets an empty picker, not an error: the
+    // column is nullable and the class optional.
+    assert!(
+        terrazgo_core::catalogue::premises_classes(&conn, "fr")
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
 fn machinery_catalogue_has_string_codes_and_no_lifecycle() {
     // TIPO_MAQUINA_UNE is the odd one out: string codes, no date columns.
-    let conn = ensured_db();
+    let conn = db_with_catalogues();
     let row = one(&conn, "TIPO_MAQUINA_UNE", "0000000_88");
     assert_eq!(row.label, "Máquinas sin clasificar");
     assert_eq!(row.added_on, None);
@@ -552,15 +577,16 @@ fn upsert_never_deletes_and_repairs_drift() {
         [],
     )
     .unwrap();
-    // Drift: a tampered label, and a stale digest so the fast-path skip does
-    // not mask the reconcile (as it would on a real snapshot refresh).
+    // Drift: a tampered label, and a foreign version stamp so the fast-path
+    // skip does not mask the reconcile — what a real app update looks like to
+    // this code.
     conn.execute(
         "UPDATE catalogue_code SET label = 'Tampered' WHERE catalogue_id = 'EFICACIA_TRATAMIENTO' AND code = '1'",
         [],
     )
     .unwrap();
     conn.execute(
-        "UPDATE catalogue SET source_digest = 'stale' WHERE id = 'EFICACIA_TRATAMIENTO'",
+        "UPDATE catalogue SET imported_by_version = 'older' WHERE id = 'EFICACIA_TRATAMIENTO'",
         [],
     )
     .unwrap();
@@ -578,11 +604,11 @@ fn upsert_never_deletes_and_repairs_drift() {
 }
 
 #[test]
-fn skips_catalogues_whose_bytes_have_not_changed() {
-    // Fast path: the stored digest matches the vendored file, so nothing is
-    // parsed or written — imported_at proves it. This must hold for EVERY
-    // catalogue, including the ones with no lifecycle dates: under the old
-    // date-based fast path those reconciled on every single startup.
+fn skips_catalogues_this_version_already_imported() {
+    // Fast path: this app version already put its own snapshot here, so
+    // nothing is parsed, hashed or written — imported_at proves it. This must
+    // hold for EVERY catalogue, including the ones carrying no lifecycle dates
+    // at all, which earlier date-based schemes reconciled on every startup.
     let mut conn = terrazgo_core::open_in_memory().unwrap();
     catalogue::ensure_catalogues(&mut conn).unwrap();
     conn.execute("UPDATE catalogue SET imported_at = 'sentinel'", [])
@@ -602,29 +628,30 @@ fn skips_catalogues_whose_bytes_have_not_changed() {
 }
 
 #[test]
-fn a_changed_snapshot_is_detected_even_with_no_lifecycle_dates() {
-    // The reason the fast path hashes bytes instead of comparing dates. Two
-    // real refresh shapes the date comparison could not see: a provider that
-    // corrects a label without touching any date, and a catalogue that ships
-    // no dates at all (USO_SIGPAC, PROVINCIA, TIPO_MAQUINA_UNE, …).
+fn a_new_app_version_restores_the_snapshot_even_with_no_lifecycle_dates() {
+    // The upgrade path, and the reason it keys on the app version rather than
+    // on anything inside the files: it works the same for a catalogue that
+    // ships no lifecycle dates at all (USO_SIGPAC, PROVINCIA, TIPO_MAQUINA_UNE,
+    // …) as for one that does, so no file can be quietly exempt from being
+    // restored to the set the release was tested against.
     let mut conn = terrazgo_core::open_in_memory().unwrap();
     catalogue::ensure_catalogues(&mut conn).unwrap();
     for id in ["EFICACIA_TRATAMIENTO", "USO_SIGPAC"] {
-        let stored: Option<String> = conn
+        let stamp: Option<String> = conn
             .query_row(
-                "SELECT source_digest FROM catalogue WHERE id = ?1",
+                "SELECT imported_by_version FROM catalogue WHERE id = ?1",
                 [id],
                 |r| r.get(0),
             )
             .unwrap();
-        assert!(stored.is_some(), "{id} stored no digest");
+        assert!(stamp.is_some(), "{id} stored no version stamp");
         conn.execute(
             "UPDATE catalogue_code SET label = 'Tampered' WHERE catalogue_id = ?1",
             [id],
         )
         .unwrap();
         conn.execute(
-            "UPDATE catalogue SET source_digest = 'stale' WHERE id = ?1",
+            "UPDATE catalogue SET imported_by_version = 'older' WHERE id = ?1",
             [id],
         )
         .unwrap();

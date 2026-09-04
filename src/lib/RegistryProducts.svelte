@@ -7,14 +7,23 @@
   // never offered to the treatment form); substances and further
   // authorisations are managed on the product's card. Past treatment records
   // are immune to edits here — they snapshot name, number and substances.
-  import { t, tCode } from "../i18n.js";
+  import TzTooltip from "./TzTooltip.svelte";
+  import { formatNumber, t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { lookups, loadLookups } from "./lookups.svelte.js";
-  import { notify, run } from "./notifications.svelte.js";
+  import { run } from "./notifications.svelte.js";
+  import NumberInput from "./NumberInput.svelte";
+  import RegistryHint from "./RegistryHint.svelte";
   import Skeleton from "./Skeleton.svelte";
   import { sortedBy } from "./collate.js";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzTabs from "./TzTabs.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
 
   let loading = $state(true);
   let products = $state([]);
@@ -64,6 +73,28 @@
   let editFormulationCode = $state("");
   let editPhiDays = $state("");
 
+  // The inspector's own tabs: which child collection is showing, and which of
+  // its rows (or "new") the nested panel below is about.
+  let childTab = $state("substances");
+  let childOpen = $state(null);
+  const childTabs = $derived([
+    { value: "substances", label: t("product.substances") },
+    { value: "authorisations", label: t("product.authorisations") },
+  ]);
+  const selectedSubstance = $derived(
+    editing?.substances.find((link) => link.id === childOpen) ?? null,
+  );
+  const selectedAuthorisation = $derived(
+    editing?.authorisations.find((auth) => auth.id === childOpen) ?? null,
+  );
+  const childTitle = $derived(
+    childOpen === "new"
+      ? childTab === "substances"
+        ? t("product.add_substance")
+        : t("product.add_authorisation")
+      : (selectedSubstance?.name ?? selectedAuthorisation?.authorisation_number ?? ""),
+  );
+
   // Add-substance controls: pick an existing substance OR name a new one.
   let subSubstanceId = $state("");
   let subNewName = $state("");
@@ -112,8 +143,7 @@
     openId = null;
   }
 
-  function submitCreate(event) {
-    event.preventDefault();
+  async function submitCreate() {
     const product = {
       commercial_name: name.trim(),
       holder: holder.trim() || null,
@@ -129,12 +159,9 @@
       valid_from: null,
       valid_until: null,
     };
-    run(async () => {
-      await invoke("create_product", { product, authorisation });
-      notify(t("message.product_saved", { name: product.commercial_name }));
-      createOpen = false;
-      await reload();
-    });
+    await invoke("create_product", { product, authorisation });
+    createOpen = false;
+    await reload();
   }
 
   // --- manage one product ------------------------------------------------------
@@ -158,29 +185,40 @@
     addAuthNumber = "";
     addAuthKind = "registered";
     addAuthExcSubstance = "";
+    childOpen = null;
+    childTab = "substances";
   }
 
-  function submitEdit(event) {
-    event.preventDefault();
+  /// The concentration as the substance table's own cell shows it, reused by
+  /// the nested panel so the two never disagree.
+  function substanceAmount(link) {
+    if (link.concentration_value == null) return "—";
+    const unit = link.concentration_unit_code
+      ? ` ${tCode("unit", link.concentration_unit_code)}`
+      : "";
+    return `${formatNumber(link.concentration_value)}${unit}`;
+  }
+
+  async function submitEdit() {
     const update = {
       commercial_name: editName.trim(),
       holder: editHolder.trim() || null,
       formulation_type_code: editFormulationCode || null,
       default_phi_days: numberOrNull(editPhiDays),
     };
-    run(async () => {
-      await invoke("update_product", { productId: openId, update });
-      notify(t("message.product_saved", { name: update.commercial_name }));
-      await reload();
-    });
+    await invoke("update_product", { productId: openId, update });
+    await reload();
   }
+
+  /// The row the inspector is editing, so the delete button beside the form
+  /// knows which record it is about. Null while creating.
+  const editing = $derived(products.find((d) => d.product.id === openId) ?? null);
 
   function deleteProduct(detail) {
     run(async () => {
       const message = t("product.delete_confirm", { name: detail.product.commercial_name });
       if (!(await confirmDialog(message))) return;
       await invoke("delete_product", { productId: detail.product.id });
-      notify(t("message.product_deleted"));
       openId = null;
       await reload();
     });
@@ -203,12 +241,12 @@
         concentrationValue: numberOrNull(subConcentration),
         concentrationUnitCode: subUnitCode || null,
       });
-      notify(t("message.substance_added"));
       subSubstanceId = "";
       subNewName = "";
       subNewCas = "";
       subConcentration = "";
       subUnitCode = "";
+      childOpen = null;
       await reload();
     });
   }
@@ -216,7 +254,7 @@
   function removeSubstance(link) {
     run(async () => {
       await invoke("remove_product_substance", { linkId: link.id });
-      notify(t("message.substance_removed"));
+      childOpen = null;
       await reload();
     });
   }
@@ -236,8 +274,8 @@
           valid_until: null,
         },
       });
-      notify(t("message.authorisation_added"));
       addAuthNumber = "";
+      childOpen = null;
       await reload();
     });
   }
@@ -245,27 +283,17 @@
   function removeAuthorisation(auth) {
     run(async () => {
       await invoke("remove_product_authorisation", { authorisationId: auth.id });
-      notify(t("message.authorisation_removed"));
+      childOpen = null;
       await reload();
     });
   }
 
   // --- display helpers ---------------------------------------------------------
 
-  function productDetailLine(detail) {
-    return [
-      detail.product.holder,
-      detail.product.formulation_type_code
-        ? tCode("formulation_type", detail.product.formulation_type_code)
-        : null,
-      detail.product.default_phi_days != null
-        ? t("product.phi_detail", { days: detail.product.default_phi_days })
-        : null,
-    ]
-      .filter(Boolean)
-      .join(" · ");
-  }
-
+  // The product's own values are columns now, so the "·"-joined line they used
+  // to share is gone. These two remain because they summarise a COLLECTION into
+  // one cell — several authorisations, several substances — which a column can
+  // hold but cannot split.
   function authSummary(detail) {
     return detail.authorisations
       .map((a) => {
@@ -279,7 +307,7 @@
   function substanceLabel(link) {
     const concentration =
       link.concentration_value != null
-        ? ` — ${link.concentration_value} ${link.concentration_unit_code ? tCode("unit", link.concentration_unit_code) : ""}`.trimEnd()
+        ? ` — ${formatNumber(link.concentration_value)} ${link.concentration_unit_code ? tCode("unit", link.concentration_unit_code) : ""}`.trimEnd()
         : "";
     const cas = link.cas_number ? ` (${link.cas_number})` : "";
     return `${link.name}${cas}${concentration}`;
@@ -287,208 +315,349 @@
 </script>
 
 <div class="view-head">
-  <h3>{t("products.title")}</h3>
   <button type="button" onclick={startCreate}>{t("products.new")}</button>
 </div>
 
-{#if createOpen}
-  <form onsubmit={submitCreate}>
-    <div class="form-grid">
-      <label><span>{t("product.name")}</span><input required bind:value={name} /></label>
-      <label><span>{t("product.holder")}</span><input bind:value={holder} /></label>
-      <TzSelect
-        label={t("product.formulation")}
-        items={codeItems(formulationTypes, "formulation_type")}
-        nullable
-        bind:value={formulationCode}
-      />
-      <label>
-        <span>{t("product.phi_days")}</span>
-        <input type="number" min="0" step="1" bind:value={phiDays} />
-      </label>
-    </div>
-    <fieldset class="es-only">
-      <legend>{t("product.auth_section")}</legend>
-      <div class="form-grid">
-        <TzSelect
-          label={t("product.auth_country")}
-          items={codeItems(countries, "country")}
-          bind:value={authCountry}
-        />
-        <label>
-          <span>{t("product.auth_number")}</span>
-          <input required bind:value={authNumber} />
-        </label>
-        <TzSelect
-          label={t("product.auth_kind")}
-          items={codeItems(authorisationKinds, "authorisation_kind")}
-          bind:value={authKind}
-          onchange={() => authKind === "exceptional" && ensureExcSubstances(authCountry)}
-        />
-        {#if authKind === "exceptional"}
-          <TzSelect
-            label={t("product.exceptional_substance")}
-            items={(excSubstances[authCountry] ?? []).map((code) => ({
-              value: code.code,
-              label: code.label,
-            }))}
-            required
-            bind:value={authExcSubstance}
-          />
-        {/if}
+<TzWorkspace
+  open={createOpen || openId !== null}
+  title={openId ? editName : t("products.new")}
+  onclose={() => {
+    createOpen = false;
+    openId = null;
+  }}
+  ondelete={openId ? () => deleteProduct(editing) : null}
+>
+  {#snippet list()}
+    {#if loading}
+      <Skeleton />
+    {:else if products.length === 0}
+      <p class="table-empty">{t("products.empty")}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table" use:resizableColumns={"products"}>
+          <thead>
+            <tr>
+              <th>{t("column.name")}</th>
+              <th>{t("column.holder")}</th>
+              <th>{t("column.formulation")}</th>
+              <th class="col-num">{t("column.phi_days")}</th>
+              <th>{t("column.authorisations")}</th>
+              <th>{t("column.substances")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each sortedProducts as detail (detail.product.id)}
+              <tr
+                class:selected={openId === detail.product.id}
+                onclick={(e) => opensRow(e) && togglePanel(detail)}
+              >
+                <td class="col-name">
+                  <button type="button" class="row-open" onclick={() => togglePanel(detail)}>
+                    {detail.product.commercial_name}
+                  </button>
+                </td>
+                <td class="col-muted">{detail.product.holder ?? ""}</td>
+                <td class="col-muted">
+                  {detail.product.formulation_type_code
+                    ? tCode("formulation_type", detail.product.formulation_type_code)
+                    : ""}
+                </td>
+                <td class="col-muted col-num">{detail.product.default_phi_days ?? ""}</td>
+                <td class="col-muted">
+                  {detail.authorisations.length > 0
+                    ? authSummary(detail)
+                    : t("product.no_authorisations")}
+                </td>
+                <td class="col-muted">
+                  {substancesOf(detail).map(substanceLabel).join(" · ")}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
-    </fieldset>
-    <div class="form-actions">
-      <button type="submit">{t("form.save")}</button>
-      <button type="button" class="btn-cancel" onclick={() => (createOpen = false)}>
-        {t("form.cancel")}
-      </button>
-    </div>
-  </form>
-{/if}
+    {/if}
+  {/snippet}
 
-{#if loading}
-  <Skeleton />
-{:else}
-  <ul class="card-list">
-    {#each sortedProducts as detail (detail.product.id)}
-      <li class="card">
-        <div class="stack">
-          <strong>{detail.product.commercial_name}</strong>
-          <span class="detail">{productDetailLine(detail)}</span>
-          {#if detail.authorisations.length > 0}
-            <span class="detail">{authSummary(detail)}</span>
-          {:else}
-            <span class="detail">{t("product.no_authorisations")}</span>
-          {/if}
-          {#if detail.substances.length > 0}
-            <span class="detail">{substancesOf(detail).map(substanceLabel).join(" · ")}</span>
-          {/if}
+  {#snippet inspector()}
+    {#if createOpen}
+      <TzForm onsubmit={submitCreate}>
+        <div class="form-grid">
+          <TextInput label={t("product.name")} required bind:value={name} />
+          <TextInput label={t("product.holder")} bind:value={holder} />
+          <TzSelect
+            label={t("product.formulation")}
+            items={codeItems(formulationTypes, "formulation_type")}
+            nullable
+            bind:value={formulationCode}
+          />
+          <NumberInput label={t("product.phi_days")} min={0} integer bind:value={phiDays} />
         </div>
-        <button type="button" onclick={() => togglePanel(detail)}>
-          {openId === detail.product.id ? t("form.close") : t("form.edit")}
-        </button>
-        <button type="button" class="btn-danger" onclick={() => deleteProduct(detail)}>
-          {t("form.delete")}
-        </button>
-
-        {#if openId === detail.product.id}
-          <form onsubmit={submitEdit}>
-            <div class="form-grid">
-              <label><span>{t("product.name")}</span><input required bind:value={editName} /></label
-              >
-              <label><span>{t("product.holder")}</span><input bind:value={editHolder} /></label>
-              <TzSelect
-                label={t("product.formulation")}
-                items={codeItems(formulationTypes, "formulation_type")}
-                nullable
-                bind:value={editFormulationCode}
-              />
-              <label>
-                <span>{t("product.phi_days")}</span>
-                <input type="number" min="0" step="1" bind:value={editPhiDays} />
-              </label>
-            </div>
-            <div class="form-actions">
-              <button type="submit">{t("form.save")}</button>
-            </div>
-          </form>
-
-          <h4>{t("product.substances")}</h4>
-          <ul class="card-list">
-            {#each substancesOf(detail) as link (link.id)}
-              <li class="card">
-                <span class="detail">{substanceLabel(link)}</span>
-                <button type="button" class="btn-danger" onclick={() => removeSubstance(link)}>
-                  {t("form.remove")}
-                </button>
-              </li>
-            {/each}
-          </ul>
-          <div class="form-grid">
-            <TzSelect
-              label={t("substance.existing")}
-              items={nameItems(substances)}
-              nullable
-              bind:value={subSubstanceId}
-            />
-            {#if !subSubstanceId}
-              <label><span>{t("substance.new_name")}</span><input bind:value={subNewName} /></label>
-              <label><span>{t("substance.cas")}</span><input bind:value={subNewCas} /></label>
-            {/if}
-            <label>
-              <span>{t("substance.concentration")}</span>
-              <input type="number" step="any" min="0" bind:value={subConcentration} />
-            </label>
-            <TzSelect
-              label={t("substance.unit")}
-              items={codeItems(units, "unit")}
-              nullable
-              bind:value={subUnitCode}
-            />
-            <label class="selector-action">
-              <span>&nbsp;</span>
-              <button
-                type="button"
-                onclick={addSubstance}
-                disabled={!subSubstanceId && !subNewName.trim()}
-              >
-                {t("product.add_substance")}
-              </button>
-            </label>
-          </div>
-
-          <h4>{t("product.authorisations")}</h4>
-          <ul class="card-list">
-            {#each detail.authorisations as auth (auth.id)}
-              <li class="card">
-                <span class="detail">
-                  {tCode("country", auth.country_code)} — {auth.authorisation_number}
-                </span>
-                <button type="button" class="btn-danger" onclick={() => removeAuthorisation(auth)}>
-                  {t("form.remove")}
-                </button>
-              </li>
-            {/each}
-          </ul>
+        <fieldset class="es-only">
+          <legend>{t("product.auth_section")}</legend>
           <div class="form-grid">
             <TzSelect
               label={t("product.auth_country")}
               items={codeItems(countries, "country")}
-              bind:value={addAuthCountry}
+              bind:value={authCountry}
             />
-            <label>
-              <span>{t("product.auth_number")}</span>
-              <input bind:value={addAuthNumber} />
-            </label>
+            <TextInput label={t("product.auth_number")} required bind:value={authNumber}>
+              <!-- Follows the AUTHORISATION's country, not the farm's: the number
+                     is issued by whichever country authorised the product. -->
+              <RegistryHint country={authCountry} field="product.auth_number" />
+            </TextInput>
             <TzSelect
               label={t("product.auth_kind")}
               items={codeItems(authorisationKinds, "authorisation_kind")}
-              bind:value={addAuthKind}
-              onchange={() => addAuthKind === "exceptional" && ensureExcSubstances(addAuthCountry)}
+              bind:value={authKind}
+              onchange={() => authKind === "exceptional" && ensureExcSubstances(authCountry)}
             />
-            {#if addAuthKind === "exceptional"}
+            {#if authKind === "exceptional"}
               <TzSelect
                 label={t("product.exceptional_substance")}
-                items={(excSubstances[addAuthCountry] ?? []).map((code) => ({
+                items={(excSubstances[authCountry] ?? []).map((code) => ({
                   value: code.code,
                   label: code.label,
                 }))}
-                bind:value={addAuthExcSubstance}
+                required
+                bind:value={authExcSubstance}
               />
             {/if}
-            <label class="selector-action">
-              <span>&nbsp;</span>
-              <button type="button" onclick={addAuthorisation} disabled={!addAuthNumber.trim()}>
-                {t("product.add_authorisation")}
-              </button>
-            </label>
           </div>
-        {/if}
-      </li>
-    {/each}
-  </ul>
-  {#if products.length === 0}
-    <p>{t("products.empty")}</p>
-  {/if}
-{/if}
+        </fieldset>
+        <div class="form-actions">
+          <button type="submit">{t("form.save")}</button>
+          <button type="button" class="btn-cancel" onclick={() => (createOpen = false)}>
+            {t("form.cancel")}
+          </button>
+        </div>
+      </TzForm>
+    {:else if editing}
+      <!-- A product carries two child collections. They live in the inspector
+           with the product they belong to, which is what the pane is for. -->
+      <TzForm onsubmit={submitEdit}>
+        <div class="form-grid">
+          <TextInput label={t("product.name")} required bind:value={editName} />
+          <TextInput label={t("product.holder")} bind:value={editHolder} />
+          <TzSelect
+            label={t("product.formulation")}
+            items={codeItems(formulationTypes, "formulation_type")}
+            nullable
+            bind:value={editFormulationCode}
+          />
+          <NumberInput label={t("product.phi_days")} min={0} integer bind:value={editPhiDays} />
+        </div>
+        <div class="form-actions">
+          <button type="submit">{t("form.save")}</button>
+        </div>
+      </TzForm>
+
+      <!-- The product's two child collections, as tabs inside the pane. Same
+           system as the screen outside it — a strip picks the collection, a
+           table lists it, a row opens a panel — except the nested panel opens
+           BELOW rather than beside: the inspector is already the narrow column,
+           and splitting it again would leave two columns too thin to read. -->
+      <TzTabs items={childTabs} bind:value={childTab} onchange={() => (childOpen = null)}>
+        {#snippet panel(item)}
+          <div class="view-head">
+            <button type="button" onclick={() => (childOpen = "new")}>
+              {item.value === "substances"
+                ? t("product.add_substance")
+                : t("product.add_authorisation")}
+            </button>
+          </div>
+
+          {#if item.value === "substances"}
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>{t("column.name")}</th>
+                  <th>{t("substance.cas")}</th>
+                  <th class="col-num">{t("substance.concentration")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each substancesOf(editing) as link (link.id)}
+                  <tr
+                    class:selected={childOpen === link.id}
+                    onclick={(e) => opensRow(e) && (childOpen = link.id)}
+                  >
+                    <td class="col-name">
+                      <button type="button" class="row-open" onclick={() => (childOpen = link.id)}>
+                        {link.name}
+                      </button>
+                    </td>
+                    <td class="col-muted">{link.cas_number ?? ""}</td>
+                    <td class="col-muted col-num">
+                      {link.concentration_value == null
+                        ? ""
+                        : formatNumber(link.concentration_value)}
+                    </td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            {#if editing.substances.length === 0}
+              <p class="table-empty">{t("product.no_substances")}</p>
+            {/if}
+          {:else}
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>{t("column.country")}</th>
+                  <th>{t("product.auth_number")}</th>
+                  <th>{t("product.auth_kind")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each editing.authorisations as auth (auth.id)}
+                  <tr
+                    class:selected={childOpen === auth.id}
+                    onclick={(e) => opensRow(e) && (childOpen = auth.id)}
+                  >
+                    <td class="col-name">
+                      <button type="button" class="row-open" onclick={() => (childOpen = auth.id)}>
+                        {tCode("country", auth.country_code)}
+                      </button>
+                    </td>
+                    <td class="col-muted">{auth.authorisation_number}</td>
+                    <td class="col-muted">{tCode("authorisation_kind", auth.kind_code)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+            {#if editing.authorisations.length === 0}
+              <p class="table-empty">{t("product.no_authorisations")}</p>
+            {/if}
+          {/if}
+
+          <!-- The nested panel. Adding takes the form; selecting an existing
+               row shows what it holds and offers to remove it, because neither
+               collection has an update command — a link is added or taken away,
+               never edited. -->
+          {#if childOpen}
+            <div class="subpanel">
+              <div class="inspector-head">
+                <span>{childTitle}</span>
+                <TzTooltip label={t("form.close")}>
+                  {#snippet trigger(props)}
+                    <button
+                      {...props}
+                      type="button"
+                      class="inspector-close"
+                      onclick={(event) => {
+                        props.onclick?.(event);
+                        childOpen = null;
+                      }}
+                      aria-label={t("form.close")}>×</button
+                    >
+                  {/snippet}
+                </TzTooltip>
+              </div>
+
+              {#if childOpen === "new" && item.value === "substances"}
+                <div class="form-grid">
+                  <TzSelect
+                    label={t("substance.existing")}
+                    items={nameItems(substances)}
+                    nullable
+                    bind:value={subSubstanceId}
+                  />
+                  {#if !subSubstanceId}
+                    <TextInput label={t("substance.new_name")} bind:value={subNewName} />
+                    <TextInput label={t("substance.cas")} bind:value={subNewCas} />
+                  {/if}
+                  <NumberInput
+                    label={t("substance.concentration")}
+                    min={0}
+                    bind:value={subConcentration}
+                  />
+                  <TzSelect
+                    label={t("substance.unit")}
+                    items={codeItems(units, "unit")}
+                    nullable
+                    bind:value={subUnitCode}
+                  />
+                </div>
+                <div class="form-actions">
+                  <button
+                    type="button"
+                    onclick={addSubstance}
+                    disabled={!subSubstanceId && !subNewName.trim()}
+                  >
+                    {t("product.add_substance")}
+                  </button>
+                </div>
+              {:else if childOpen === "new"}
+                <div class="form-grid">
+                  <TzSelect
+                    label={t("product.auth_country")}
+                    items={codeItems(countries, "country")}
+                    bind:value={addAuthCountry}
+                  />
+                  <TextInput label={t("product.auth_number")} bind:value={addAuthNumber}>
+                    <RegistryHint country={addAuthCountry} field="product.auth_number" />
+                  </TextInput>
+                  <TzSelect
+                    label={t("product.auth_kind")}
+                    items={codeItems(authorisationKinds, "authorisation_kind")}
+                    bind:value={addAuthKind}
+                    onchange={() =>
+                      addAuthKind === "exceptional" && ensureExcSubstances(addAuthCountry)}
+                  />
+                  {#if addAuthKind === "exceptional"}
+                    <TzSelect
+                      label={t("product.exceptional_substance")}
+                      items={(excSubstances[addAuthCountry] ?? []).map((code) => ({
+                        value: code.code,
+                        label: code.label,
+                      }))}
+                      bind:value={addAuthExcSubstance}
+                    />
+                  {/if}
+                </div>
+                <div class="form-actions">
+                  <button type="button" onclick={addAuthorisation} disabled={!addAuthNumber.trim()}>
+                    {t("product.add_authorisation")}
+                  </button>
+                </div>
+              {:else if selectedSubstance}
+                <dl class="detail-list">
+                  <dt>{t("substance.cas")}</dt>
+                  <dd>{selectedSubstance.cas_number ?? "—"}</dd>
+                  <dt>{t("substance.concentration")}</dt>
+                  <dd>{substanceAmount(selectedSubstance)}</dd>
+                </dl>
+                <div class="inspector-actions">
+                  <button
+                    type="button"
+                    class="btn-danger"
+                    onclick={() => removeSubstance(selectedSubstance)}
+                  >
+                    {t("form.remove")}
+                  </button>
+                </div>
+              {:else if selectedAuthorisation}
+                <dl class="detail-list">
+                  <dt>{t("product.auth_number")}</dt>
+                  <dd>{selectedAuthorisation.authorisation_number}</dd>
+                  <dt>{t("product.auth_kind")}</dt>
+                  <dd>{tCode("authorisation_kind", selectedAuthorisation.kind_code)}</dd>
+                </dl>
+                <div class="inspector-actions">
+                  <button
+                    type="button"
+                    class="btn-danger"
+                    onclick={() => removeAuthorisation(selectedAuthorisation)}
+                  >
+                    {t("form.remove")}
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/if}
+        {/snippet}
+      </TzTabs>
+    {/if}
+  {/snippet}
+</TzWorkspace>

@@ -23,6 +23,23 @@
 /// cannot be converted. **Not zero, and not a guess** — an assumed density of 1
 /// would understate a slurry by whatever the real figure is, in the very number
 /// a farmer compares against the recommendation.
+///
+/// ```
+/// use module_fertilisation::agronomy::dose_as_kg_per_ha;
+///
+/// // A mass dose needs nothing else.
+/// assert_eq!(dose_as_kg_per_ha(250.0, "kg_ha", None), Some(250.0));
+/// assert_eq!(dose_as_kg_per_ha(1.5, "t_ha", None), Some(1500.0));
+///
+/// // Anexo III C.j allows dosing by volume, and 30 m³/ha of slurry at
+/// // 1.03 kg/l is 30 900 kg/ha.
+/// assert_eq!(dose_as_kg_per_ha(30.0, "m3_ha", Some(1.03)), Some(30_900.0));
+///
+/// // The same slurry with no density stated converts to nothing. Assuming
+/// // 1.0 kg/l would understate it, in the exact number the farmer compares
+/// // against the plan's recommendation.
+/// assert_eq!(dose_as_kg_per_ha(30.0, "m3_ha", None), None);
+/// ```
 pub fn dose_as_kg_per_ha(value: f64, unit_code: &str, density_kg_l: Option<f64>) -> Option<f64> {
     if !value.is_finite() || value < 0.0 {
         return None;
@@ -50,6 +67,22 @@ pub fn dose_as_kg_per_ha(value: f64, unit_code: &str, density_kg_l: Option<f64>)
 /// `None` propagates from an unconvertible dose or an unstated richness, and it
 /// means "not known" rather than "none" — the two are different claims, and the
 /// second would quietly lower a nitrogen total.
+///
+/// ```
+/// use module_fertilisation::agronomy::{dose_as_kg_per_ha, nutrient_units};
+///
+/// // 250 kg/ha of NAC 27 (27 % N total) supplies 67.5 UF of nitrogen —
+/// // a unidad fertilizante being kg/ha of N, of P₂O₅ or of K₂O
+/// // (the model's own footnote 2).
+/// let dose = dose_as_kg_per_ha(250.0, "kg_ha", None);
+/// assert_eq!(nutrient_units(dose, Some(27.0)), Some(67.5));
+///
+/// // A stated zero IS a figure: this material supplies no potassium.
+/// assert_eq!(nutrient_units(dose, Some(0.0)), Some(0.0));
+///
+/// // An unstated richness is not zero — it is unknown, and it stays unknown.
+/// assert_eq!(nutrient_units(dose, None), None);
+/// ```
 pub fn nutrient_units(dose_kg_ha: Option<f64>, richness_percent: Option<f64>) -> Option<f64> {
     let dose = dose_kg_ha?;
     let richness = richness_percent?;

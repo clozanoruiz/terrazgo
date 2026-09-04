@@ -23,6 +23,10 @@ module-cue = { workspace = true }
 # contribute sections, and the reason this crate exists rather than the book
 # living inside one of them.
 module-fertilisation = { workspace = true }
+# The eco-scheme domain: section 9. A third contributing module, and the reason
+# this crate's `db::migrations` composition is the shell's and not a borrowed
+# one — a section arriving with no table behind it fails as "no such table".
+module-ecoscheme = { workspace = true }
 # The rendering engine (Typst + xlsx mechanics, no domain of its own).
 terrazgo-report = { workspace = true }
 # Ordering the names the book prints, in the book's own language — see the
@@ -47,3 +51,5 @@ serde_json = { workspace = true }
 # already a dependency above, this only turns its additive `demo` feature on for
 # tests and examples, which never reach the shipped binary.
 module-cue = { workspace = true, features = ["demo"] }
+# Shared fixtures (tests/common re-exports them).
+terrazgo-testkit = { workspace = true }

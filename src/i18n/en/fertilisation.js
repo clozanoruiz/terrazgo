@@ -107,9 +107,9 @@ export default {
   "material.fill": "Fill from the catalogue",
   "material.fill_hint":
     "Takes the composition the catalogue publishes for the chosen product, leaving any line you already entered untouched. Check it against the label: heavy metals are never filled in, because the catalogue mixes percentages and mg/kg in the same columns.",
-  "material.filled": "{count} composition lines added.",
+  "material.filled.one": "One composition line added.",
+  "material.filled.other": "{count} composition lines added.",
   "material.filled_none": "The catalogue adds nothing that was not already recorded.",
-  "material.richness_detail": "N {n} · P₂O₅ {p} · K₂O {k}",
   "material.supplier_registry": "Registry",
   "material.supplier_number": "Identification no.",
   "material.empty": "No fertiliser materials registered yet.",
@@ -133,6 +133,11 @@ export default {
   "fertilisation.dose_unit": "Unit",
   "fertilisation.dose_detail": "{dose} {unit}",
   "fertilisation.sludge": "Sewage sludge applied",
+  "fertilisation.sustainable_inputs": "Sustainable input management",
+  "fertilisation.irrigation_link": "Irrigation it was fertigated with",
+  "fertilisation.irrigation_link_hint":
+    "Link it to the irrigation record on the Irrigation tab: it is one act, recorded in both registers the decree requires.",
+  "fertilisation.irrigation_link_none": "Not linked",
   "fertilisation.machinery": "Machinery",
   "fertilisation.machinery_hint": "Optional (Anexo III C.g).",
   "fertilisation.service_section": "Service company",
@@ -148,6 +153,9 @@ export default {
   "fertilisation.practices_section": "Good practices",
   "fertilisation.practices_hint":
     "The printed model has no column for them; they are recorded because the digital record book asks for them.",
+  "fertilisation.practices_none": "None selected",
+  "fertilisation.practices_selected.one": "1 selected",
+  "fertilisation.practices_selected.other": "{count} selected",
   "fertilisation.delete_confirm": "Delete this fertilisation from the register?",
   "plan.title": "7.1 Fertilisation plan",
   "plan.intro":

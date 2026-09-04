@@ -26,14 +26,19 @@ cobertura — pensada para el campo, no para la oficina. Hay versiones para escr
   modelo oficial y se exporta también como **hoja de cálculo**, en castellano y en
   catalán. Todo ello con la vista puesta en el registro electrónico obligatorio desde
   2027 (RD 34/2025, Reglamento UE 2023/564).
+- **Ecorregímenes** — los registros que el **RD 1048/2022** obliga a anotar en el cuaderno
+  a quien solicita un ecorrégimen: pastoreo extensivo (P1), siega sostenible e islas de
+  biodiversidad (P2), espacios de biodiversidad en cultivos bajo agua (P5), cubiertas
+  vegetales (P6) y cubiertas inertes de restos de poda (P7), más las labores de
+  mantenimiento de los pastos comunales del anexo IV. Se imprimen en el apartado 9 del
+  cuaderno, y el aviso de estado señala las anotaciones que aún faltan.
 - **Mapas y SIGPAC** — mapa de la explotación con dibujo de recintos, importación de
   ficheros (GeoJSON/GeoPackage), consulta SIGPAC (verificación de referencias, superficie
   oficial, zonas vulnerables a nitratos / Natura 2000 / restricciones fitosanitarias),
   capas del parcelario y de cultivos declarados, y localización por GPS en el móvil.
 - **Fertilización** — registro de materias fertilizantes con su composición, aplicaciones,
   plan de abonado y registro de riego.
-- **En camino** — planificación del riego, planificación de cultivos, costes y los
-  registros de ecorregímenes (RD 1048/2022).
+- **En camino** — planificación del riego, planificación de cultivos y costes.
 
 El cuaderno es el primer módulo, no el producto: Terrazgo es una aplicación de gestión
 de toda la explotación, para cualquier cultivo y cualquier comunidad autónoma.

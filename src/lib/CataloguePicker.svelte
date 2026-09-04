@@ -18,6 +18,7 @@
   // text IS a stored value — the name the book prints — and the code is
   // optional metadata derived from it. Same skin and same matcher, different
   // contract, so they stay two components rather than one with a mode flag.
+  import { ChevronDown } from "@lucide/svelte";
   import { Combobox } from "bits-ui";
   import { t } from "../i18n.js";
   import { fold, searchItems } from "./collate.js";
@@ -35,6 +36,19 @@
   } = $props();
 
   let open = $state(false);
+
+  // The input is a real <input>, so it carries its own validity — no off-screen
+  // proxy is needed here, unlike the controls whose visible part is a <div>.
+  // What it must NOT carry is the bare `required` attribute: that leaves
+  // validationMessage as the BROWSER's own string, which follows the OS
+  // language rather than the holding's (measured 2026-09-01, see DateInput).
+  // The caller's <label> supplies the name the summary shows.
+  let input = $state(null);
+  let showError = $state(false);
+
+  const error = $derived(required && !name.trim() ? t("form.required") : "");
+
+  $effect(() => input?.setCustomValidity(error));
 
   // How many matches to render at once: enough to scroll through, few enough
   // that a two-letter query does not paint a thousand rows.
@@ -119,23 +133,16 @@
          is how a farmer discovers what the catalogue calls a crop, so it must
          be reachable without typing a guess first. -->
     <Combobox.Input
-      {required}
+      bind:ref={input}
       {placeholder}
       autocomplete="off"
       oninput={onInput}
       onkeydown={onKeydown}
       onfocus={() => (open = true)}
+      oninvalid={() => (showError = true)}
     />
     <Combobox.Trigger class="tz-field-trigger" aria-label={t("form.open_list")}>
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        aria-hidden="true"
-      >
-        <path d="M6 9l6 6 6-6" />
-      </svg>
+      <ChevronDown />
     </Combobox.Trigger>
   </div>
 
@@ -179,3 +186,7 @@
     {t("crop.species_free_text")}
   {/if}
 </span>
+
+{#if showError && error}
+  <small class="tz-field-error">{error}</small>
+{/if}

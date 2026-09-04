@@ -22,6 +22,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
 use std::collections::HashSet;
 use terrazgo_core::date::now_utc_iso;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 pub fn insert_fertilisation_plan(
@@ -219,6 +220,26 @@ pub fn get_fertilisation_plan(conn: &Connection, id: &str) -> Result<Fertilisati
 }
 
 /// The season's plans, oldest first — the order the book reads in.
+/// Every plan of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_fertilisation_plans_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<FertilisationPlanDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM fertilisation_plan
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY drawn_up_on, id",
+    )?;
+    let plans = stmt
+        .query_map(params![season_id, farm_id], map_plan)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_with_crops(conn, plans)
+}
+
 pub fn list_fertilisation_plans(
     conn: &Connection,
     season_id: &str,
@@ -232,13 +253,7 @@ pub fn list_fertilisation_plans(
     let plans = stmt
         .query_map(params![season_id, farm_id], map_plan)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    plans
-        .into_iter()
-        .map(|plan| {
-            let crop_ids = crops_of(conn, &plan.id)?;
-            Ok(FertilisationPlanDetail { plan, crop_ids })
-        })
-        .collect()
+    all_with_crops(conn, plans)
 }
 
 /// Whether any plan hangs off this season — this register's arm of the guard
@@ -401,6 +416,41 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
 }
 
 // --- mapping ---------------------------------------------------------------
+
+/// Hydration for a whole list, one child statement rather than one per plan.
+/// The single-plan paths keep their point query.
+fn all_with_crops(
+    conn: &Connection,
+    plans: Vec<FertilisationPlan>,
+) -> Result<Vec<FertilisationPlanDetail>> {
+    let ids: Vec<String> = plans.iter().map(|p| p.id.clone()).collect();
+    let mut crops = children_by_parent(
+        conn,
+        "SELECT fertilisation_plan_id, crop_id FROM fertilisation_plan_crop
+         WHERE fertilisation_plan_id IN ({ids})
+         ORDER BY fertilisation_plan_id, id",
+        &ids,
+        |row| {
+            Ok((
+                row.get::<_, String>("fertilisation_plan_id")?,
+                row.get::<_, String>("crop_id")?,
+            ))
+        },
+        |(plan_id, _)| plan_id.clone(),
+    )?;
+    Ok(plans
+        .into_iter()
+        .map(|plan| FertilisationPlanDetail {
+            crop_ids: crops
+                .remove(&plan.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, crop_id)| crop_id)
+                .collect(),
+            plan,
+        })
+        .collect())
+}
 
 fn crops_of(conn: &Connection, plan_id: &str) -> Result<Vec<String>> {
     let mut stmt = conn.prepare(

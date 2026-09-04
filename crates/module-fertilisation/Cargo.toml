@@ -23,3 +23,7 @@ serde_json = { workspace = true }
 # dev-dependency for tests/ to inspect record_change payloads.
 [dev-dependencies]
 serde_json = { workspace = true }
+# Shared fixtures. It depends on terrazgo-core alone, so taking it here does
+# NOT put another module's schema in this crate's test graph —
+# `the_module_runs_on_core_alone` stays a real guard.
+terrazgo-testkit = { workspace = true }

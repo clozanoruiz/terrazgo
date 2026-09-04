@@ -28,6 +28,7 @@ use crate::models::{
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 pub fn insert_analysis_record(
@@ -262,6 +263,26 @@ pub fn get_analysis_record(conn: &Connection, id: &str) -> Result<AnalysisRecord
 }
 
 /// Oldest first, the order a record book reads in.
+/// Every record of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_analysis_records_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<AnalysisRecordDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM analysis_record
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY sampled_on, id",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_detail_of(conn, records)
+}
+
 pub fn list_analysis_records(
     conn: &Connection,
     season_id: &str,
@@ -275,10 +296,49 @@ pub fn list_analysis_records(
     let records = stmt
         .query_map(params![season_id, farm_id], map_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
+    all_detail_of(conn, records)
+}
+
+/// [`detail_of`] for a whole list, in three child statements rather than three
+/// per record. The single-record path keeps its point queries.
+fn all_detail_of(
+    conn: &Connection,
+    records: Vec<AnalysisRecord>,
+) -> Result<Vec<AnalysisRecordDetail>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut plots = children_by_parent(
+        conn,
+        "SELECT * FROM analysis_plot WHERE analysis_record_id IN ({ids})
+         ORDER BY analysis_record_id, id",
+        &ids,
+        map_plot,
+        |p| p.analysis_record_id.clone(),
+    )?;
+    let mut types = children_by_parent(
+        conn,
+        "SELECT * FROM analysis_record_type WHERE analysis_record_id IN ({ids})
+         ORDER BY analysis_record_id, id",
+        &ids,
+        map_type,
+        |t| t.analysis_record_id.clone(),
+    )?;
+    let mut substances = children_by_parent(
+        conn,
+        "SELECT * FROM analysis_substance WHERE analysis_record_id IN ({ids})
+         ORDER BY analysis_record_id, id",
+        &ids,
+        map_substance,
+        |s| s.analysis_record_id.clone(),
+    )?;
+    Ok(records
         .into_iter()
-        .map(|record| detail_of(conn, record))
-        .collect()
+        .map(|record| AnalysisRecordDetail {
+            plots: plots.remove(&record.id).unwrap_or_default(),
+            types: types.remove(&record.id).unwrap_or_default(),
+            substances: substances.remove(&record.id).unwrap_or_default(),
+            record,
+        })
+        .collect())
 }
 
 /// A record plus its three child lists — what the book, the form and the

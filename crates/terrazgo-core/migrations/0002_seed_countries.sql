@@ -70,6 +70,19 @@ INSERT INTO irrigation_system (code, i18n_key) VALUES
     ('drip',      'irrigation_system.drip'),
     ('gravity',   'irrigation_system.gravity');
 
+-- What a `premises` row is, in core-native words. The register's own vocabulary
+-- (storage_premises / transport) belongs to module-cue's
+-- `non_field_subject_kind`; these two say what the THING is, which is core's
+-- business, and the module pairs them.
+INSERT INTO premises_kind (code, i18n_key) VALUES
+    ('building', 'premises_kind.building'),
+    ('vehicle',  'premises_kind.vehicle');
+
+-- How a crop began. SIEX `SiembraPlantacion` codes the pair as 1 and 0.
+INSERT INTO sowing_kind (code, i18n_key) VALUES
+    ('sowing',   'sowing_kind.sowing'),
+    ('planting', 'sowing_kind.planting');
+
 -- Anexo III A.2.e; model siglas AL/M/BP/INV, likewise template-side.
 INSERT INTO growing_environment (code, i18n_key) VALUES
     ('open_air',      'growing_environment.open_air'),

@@ -15,16 +15,22 @@
   //
   // Materials are not farm-scoped, like products and operators: the same sack
   // is the same sack whichever holding it is spread on.
-  import { t } from "../i18n.js";
+  import { formatNumber, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { lookups, loadLookups } from "./lookups.svelte.js";
   import { notify, run } from "./notifications.svelte.js";
+  import NumberInput from "./NumberInput.svelte";
   import CataloguePicker from "./CataloguePicker.svelte";
   import Skeleton from "./Skeleton.svelte";
   import { sortedBy } from "./collate.js";
+  import { resizableColumns } from "./columnResize.js";
+  import { opensRow } from "./tableRow.js";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
+  import TextInput from "./TextInput.svelte";
+  import TzForm from "./TzForm.svelte";
+  import TzWorkspace from "./TzWorkspace.svelte";
 
   let { countryCode = "es" } = $props();
 
@@ -66,7 +72,17 @@
       invoke("list_fertiliser_material_kinds", { countryCode }),
       loadLookups(),
     ]);
+    // The composition column names each nutrient, so the catalogues behind the
+    // kinds actually stored have to be loaded before the table renders — not
+    // only when a form opens. One request per kind in use, not per material.
+    loadNutrientNames();
   }).finally(() => (loading = false));
+
+  function loadNutrientNames() {
+    for (const kind of new Set(materials.flatMap((d) => d.nutrients.map((n) => n.kind_code)))) {
+      ensureNutrients(kind);
+    }
+  }
 
   function ensureNutrients(kindCode) {
     if (!kindCode || nutrientOptions[kindCode]) return;
@@ -173,8 +189,7 @@
     loadDetails(materialCode);
   }
 
-  function submit(event) {
-    event.preventDefault();
+  async function submit() {
     const number = supplierNumber.trim() || null;
     const payload = {
       name: name.trim(),
@@ -196,185 +211,217 @@
         })),
     };
 
-    run(async () => {
-      if (editingId) {
-        await invoke("update_fertiliser_material", {
-          materialId: editingId,
-          update: { ...payload, id: editingId },
-        });
-      } else {
-        await invoke("create_fertiliser_material", { material: payload });
-      }
-      notify(t("message.material_saved"));
-      hideForm();
-      materials = await invoke("list_fertiliser_materials");
-    });
+    if (editingId) {
+      await invoke("update_fertiliser_material", {
+        materialId: editingId,
+        update: { ...payload, id: editingId },
+      });
+    } else {
+      await invoke("create_fertiliser_material", { material: payload });
+    }
+    hideForm();
+    materials = await invoke("list_fertiliser_materials");
+    loadNutrientNames();
   }
 
   function remove(material) {
     run(async () => {
       if (!(await confirmDialog(t("material.delete_confirm")))) return;
       await invoke("delete_fertiliser_material", { materialId: material.id });
-      notify(t("message.material_deleted"));
       materials = await invoke("list_fertiliser_materials");
     });
   }
+
+  /// The row the inspector is editing, so the delete button beside the form
+  /// knows which record it is about. Null while creating.
+  const editing = $derived(materials.find((d) => d.material.id === editingId)?.material ?? null);
 
   function kindName(code) {
     return materialKinds.find((k) => k.code === code)?.name ?? code;
   }
 
   /// The three figures the record book prints, if the label states them.
-  function richness(detail) {
-    const value = (code) =>
-      detail.nutrients.find((n) => n.kind_code === "macro" && n.nutrient_code === code)?.percentage;
-    const parts = [
-      ["N", value("1")],
-      ["P₂O₅", value("6")],
-      ["K₂O", value("9")],
-    ].filter(([, v]) => v !== undefined);
-    return parts.map(([symbol, v]) => `${symbol} ${v}`).join(" · ");
+  /// The material's composition, as it actually is.
+  ///
+  /// This column was three numeric ones — N, P₂O₅, K₂O, keyed on catalogue
+  /// codes 1, 6 and 9 — and that was wrong in a way that read as data loss:
+  /// change a material's "N total" to "N nítrico" (both nitrogen, codes 1 and
+  /// 3) and the N column went blank while the new nutrient appeared in no
+  /// column at all. The record was correct and the table simply could not show
+  /// it. A composition is a SET the farmer chooses from a catalogue of
+  /// hundreds, not three fixed slots, so the column lists what is there.
+  function composition(detail) {
+    return sortedBy(detail.nutrients, (n) => n.nutrient_code)
+      .map((n) => `${nutrientName(n)} ${formatNumber(n.percentage)}`)
+      .join(" · ");
+  }
+
+  /// A stored nutrient code resolved through whichever catalogue its kind
+  /// names. Falls back to the code itself while that catalogue is still
+  /// loading, so a row never renders blank.
+  function nutrientName(nutrient) {
+    const options = nutrientOptions[nutrient.kind_code] ?? [];
+    return options.find((o) => o.code === nutrient.nutrient_code)?.name ?? nutrient.nutrient_code;
   }
 </script>
 
 <div class="view-head">
-  <h3>{t("material.title")}</h3>
   <button type="button" onclick={() => showForm()}>{t("material.new")}</button>
 </div>
-<p class="detail">{t("material.intro")}</p>
-
-{#if formOpen}
-  <form onsubmit={submit}>
-    <div class="form-grid">
-      <label><span>{t("material.name")}</span><input required bind:value={name} /></label>
-      <!-- MAT_FERTI: a closed list the decree enumerates, in its own order. -->
-      <TzSelect
-        label={t("material.kind")}
-        items={materialKinds.map((kind) => ({ value: kind.code, label: kind.name }))}
-        required
-        bind:value={materialCode}
-        onchange={onKindChosen}
-      />
-      <label>
-        <span>{t("material.detail")}</span>
-        <CataloguePicker
-          bind:name={detailName}
-          bind:code={detailCode}
-          options={detailOptions}
-          placeholder={t("material.detail")}
-        />
-        <small>{t("material.detail_hint")}</small>
-      </label>
-      <TzSelect
-        label={t("material.manure_treatment")}
-        items={codeItems(manureTreatments, "manure_treatment")}
-        nullable
-        bind:value={manureTreatment}
-      />
-      <label>
-        <span>{t("material.density")}</span>
-        <input type="number" step="any" min="0.001" bind:value={density} />
-      </label>
-      <label><span>{t("treatment.notes")}</span><input bind:value={notes} /></label>
-    </div>
-
-    <fieldset class="subsection">
-      <legend>{t("material.supplier_section")}</legend>
-      <p class="detail">{t("material.supplier_hint")}</p>
-      <div class="form-grid">
-        <label>
-          <span>{t("material.supplier_name")}</span>
-          <input bind:value={supplierName} />
-        </label>
-        <!-- The three supplier registries are mutually exclusive by CHECK; the
-             order is the decree's, not alphabetical. -->
-        <TzSelect
-          label={t("material.supplier_registry")}
-          items={[
-            { value: "rega", label: t("material.supplier_rega") },
-            { value: "tax_id", label: t("material.supplier_tax_id") },
-            { value: "nima", label: t("material.supplier_nima") },
-          ]}
-          bind:value={supplierRegistry}
-        />
-        <label>
-          <span>{t("material.supplier_number")}</span>
-          <input bind:value={supplierNumber} />
-        </label>
+<TzWorkspace
+  open={formOpen}
+  title={editingId ? name : t("material.new")}
+  onclose={hideForm}
+  ondelete={editingId ? () => remove(editing) : null}
+>
+  {#snippet list()}
+    {#if loading}
+      <Skeleton />
+    {:else if materials.length === 0}
+      <p class="table-empty">{t("material.empty")}</p>
+    {:else}
+      <div class="table-wrap">
+        <table class="data-table" use:resizableColumns={"materials"}>
+          <thead>
+            <tr>
+              <th>{t("column.name")}</th>
+              <th>{t("column.kind")}</th>
+              <th>{t("column.composition")}</th>
+              <th class="col-num">{t("column.density")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each sortedMaterials as detail (detail.material.id)}
+              <tr
+                class:selected={editingId === detail.material.id}
+                onclick={(e) => opensRow(e) && showForm(detail)}
+              >
+                <td class="col-name">
+                  <button type="button" class="row-open" onclick={() => showForm(detail)}>
+                    {detail.material.name}
+                  </button>
+                </td>
+                <td class="col-muted">{kindName(detail.material.material_code)}</td>
+                <td class="col-muted">{composition(detail)}</td>
+                <td class="col-muted col-num">
+                  {detail.material.density_kg_l == null
+                    ? ""
+                    : formatNumber(detail.material.density_kg_l)}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
       </div>
-    </fieldset>
+    {/if}
+  {/snippet}
 
-    <fieldset class="subsection">
-      <legend>{t("material.composition_section")}</legend>
-      <p class="detail">{t("material.composition_hint")}</p>
-      {#if detailCode}
-        <div class="selector-buttons">
-          <button type="button" onclick={fillFromCatalogue}>{t("material.fill")}</button>
-        </div>
-        <p class="detail">{t("material.fill_hint")}</p>
-      {/if}
-      {#each nutrientRows as row, index (row)}
-        <div class="form-grid plot-row">
+  {#snippet inspector(formId)}
+    {#if !editingId}
+      <p class="detail">{t("material.intro")}</p>
+    {/if}
+    <TzForm id={formId} onsubmit={submit}>
+      <div class="form-grid">
+        <TextInput label={t("material.name")} required bind:value={name} />
+        <!-- MAT_FERTI: a closed list the decree enumerates, in its own order. -->
+        <TzSelect
+          label={t("material.kind")}
+          items={materialKinds.map((kind) => ({ value: kind.code, label: kind.name }))}
+          required
+          bind:value={materialCode}
+          onchange={onKindChosen}
+        />
+        <label>
+          <span>{t("material.detail")}</span>
+          <CataloguePicker
+            bind:name={detailName}
+            bind:code={detailCode}
+            options={detailOptions}
+            placeholder={t("material.detail")}
+          />
+          <small>{t("material.detail_hint")}</small>
+        </label>
+        <TzSelect
+          label={t("material.manure_treatment")}
+          items={codeItems(manureTreatments, "manure_treatment")}
+          nullable
+          bind:value={manureTreatment}
+        />
+        <NumberInput label={t("material.density")} min={0.001} bind:value={density} />
+        <TextInput label={t("treatment.notes")} bind:value={notes} />
+      </div>
+
+      <fieldset class="subsection">
+        <legend>{t("material.supplier_section")}</legend>
+        <p class="detail">{t("material.supplier_hint")}</p>
+        <div class="form-grid">
+          <TextInput label={t("material.supplier_name")} bind:value={supplierName} />
+          <!-- The three supplier registries are mutually exclusive by CHECK; the
+                 order is the decree's, not alphabetical. -->
           <TzSelect
-            label={t("material.nutrient_kind")}
-            items={codeItems(nutrientKinds, "nutrient_kind")}
-            bind:value={row.kindCode}
-            onchange={() => {
-              row.nutrientCode = "";
-              ensureNutrients(row.kindCode);
-            }}
+            label={t("material.supplier_registry")}
+            items={[
+              { value: "rega", label: t("material.supplier_rega") },
+              { value: "tax_id", label: t("material.supplier_tax_id") },
+              { value: "nima", label: t("material.supplier_nima") },
+            ]}
+            bind:value={supplierRegistry}
           />
-          <!-- MICRONUTRIENTES alone is 99 entries, past the listbox cap. -->
-          <TzCombobox
-            label={t("material.nutrient")}
-            items={(nutrientOptions[row.kindCode] ?? []).map((option) => ({
-              value: option.code,
-              label: option.name,
-            }))}
-            bind:value={row.nutrientCode}
-          />
-          <label>
-            <span>{t("material.percentage")}</span>
-            <input type="number" step="any" min="0" max="100" bind:value={row.percentage} />
-          </label>
-          <button type="button" class="btn-danger" onclick={() => nutrientRows.splice(index, 1)}>
-            {t("treatment.remove")}
-          </button>
+          <TextInput label={t("material.supplier_number")} bind:value={supplierNumber} />
         </div>
-      {/each}
-      <button type="button" onclick={() => nutrientRows.push(emptyNutrient())}>
-        {t("material.add_nutrient")}
-      </button>
-    </fieldset>
+      </fieldset>
 
+      <fieldset class="subsection">
+        <legend>{t("material.composition_section")}</legend>
+        <p class="detail">{t("material.composition_hint")}</p>
+        {#if detailCode}
+          <div class="selector-buttons">
+            <button type="button" onclick={fillFromCatalogue}>{t("material.fill")}</button>
+          </div>
+          <p class="detail">{t("material.fill_hint")}</p>
+        {/if}
+        {#each nutrientRows as row, index (row)}
+          <div class="form-grid plot-row">
+            <TzSelect
+              label={t("material.nutrient_kind")}
+              items={codeItems(nutrientKinds, "nutrient_kind")}
+              bind:value={row.kindCode}
+              onchange={() => {
+                row.nutrientCode = "";
+                ensureNutrients(row.kindCode);
+              }}
+            />
+            <!-- MICRONUTRIENTES alone is 99 entries, past the listbox cap. -->
+            <TzCombobox
+              label={t("material.nutrient")}
+              items={(nutrientOptions[row.kindCode] ?? []).map((option) => ({
+                value: option.code,
+                label: option.name,
+              }))}
+              bind:value={row.nutrientCode}
+            />
+            <NumberInput
+              label={t("material.percentage")}
+              min={0}
+              max={100}
+              bind:value={row.percentage}
+            />
+            <button type="button" class="btn-danger" onclick={() => nutrientRows.splice(index, 1)}>
+              {t("treatment.remove")}
+            </button>
+          </div>
+        {/each}
+        <button type="button" onclick={() => nutrientRows.push(emptyNutrient())}>
+          {t("material.add_nutrient")}
+        </button>
+      </fieldset>
+    </TzForm>
+  {/snippet}
+
+  {#snippet actions(formId)}
     <div class="form-actions">
-      <button type="submit">{t("form.save")}</button>
+      <button type="submit" form={formId}>{t("form.save")}</button>
       <button type="button" class="btn-cancel" onclick={hideForm}>{t("form.cancel")}</button>
     </div>
-  </form>
-{/if}
-
-{#if loading}
-  <Skeleton />
-{:else}
-  <ul class="card-list">
-    {#each sortedMaterials as detail (detail.material.id)}
-      <li class="card">
-        <div class="stack">
-          <strong>{detail.material.name}</strong>
-          <span class="detail">{kindName(detail.material.material_code)}</span>
-          {#if richness(detail)}
-            <span class="detail">{richness(detail)}</span>
-          {/if}
-        </div>
-        <button type="button" onclick={() => showForm(detail)}>{t("form.edit")}</button>
-        <button type="button" class="btn-danger" onclick={() => remove(detail.material)}>
-          {t("form.delete")}
-        </button>
-      </li>
-    {/each}
-  </ul>
-  {#if materials.length === 0}
-    <p>{t("material.empty")}</p>
-  {/if}
-{/if}
+  {/snippet}
+</TzWorkspace>

@@ -7,10 +7,9 @@
 //! Split out of `commands.rs` (2026-08-13); the boundary machinery and the
 //! re-exports stay in the parent file.
 
-use super::{CmdResult, active_actor, lock_conn};
+use super::{CmdResult, active_actor, alert_config};
 use crate::state;
 use crate::state::AppState;
-use module_cue::alerts::AlertConfig;
 use module_cue::repository;
 use serde::Deserialize;
 use serde::Serialize;
@@ -34,9 +33,10 @@ pub async fn sigpac_lookup_reference(
     parts: Vec<String>,
     refresh: bool,
 ) -> CmdResult<Option<module_sigpac::service::RecintoLookup>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_sigpac::service::lookup_reference(
-        &conn, &geo.conn, &parts, refresh,
+        conn, &geo.cache, &parts, refresh,
     )?)
 }
 
@@ -49,9 +49,10 @@ pub async fn sigpac_lookup_point(
     lon: f64,
     lat: f64,
 ) -> CmdResult<Option<module_sigpac::service::RecintoLookup>> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_sigpac::service::lookup_point(
-        &conn, &geo.conn, lon, lat,
+        conn, &geo.cache, lon, lat,
     )?)
 }
 
@@ -72,19 +73,16 @@ pub async fn sigpac_verify_plot(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Option<module_sigpac::service::PlotVerification>> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    let verification = module_sigpac::service::verify_plot(
-        &mut conn,
-        &geo.conn,
-        &plot_id,
-        refresh,
-        actor.as_deref(),
-    )?;
+    let config = alert_config(&settings_state)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    let verification =
+        module_sigpac::service::verify_plot(conn, &geo.cache, &plot_id, refresh, actor.as_deref())?;
     if verification
         .as_ref()
         .is_some_and(|v| v.zone_flags.is_some())
     {
-        repository::refresh_alerts(&mut conn, &today_utc(), &AlertConfig::default())?;
+        repository::refresh_alerts(conn, &today_utc(), &config)?;
     }
     Ok(verification)
 }
@@ -104,10 +102,11 @@ pub async fn sigpac_propose_crops(
     season_id: String,
     refresh: bool,
 ) -> CmdResult<module_sigpac::service::CropProposals> {
-    let conn = lock_conn(&state)?;
-    let treated = repository::crop_ids_with_treatments(&conn, &season_id, &farm_id)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    let treated = repository::crop_ids_with_treatments(conn, &season_id, &farm_id)?;
     Ok(module_sigpac::service::propose_crops(
-        &conn, &geo.conn, &farm_id, &season_id, &treated, refresh,
+        conn, &geo.cache, &farm_id, &season_id, &treated, refresh,
     )?)
 }
 
@@ -157,9 +156,10 @@ pub fn sigpac_accept_crop_proposals(
     updates: Vec<AcceptedCropUpdate>,
 ) -> CmdResult<CropImportSummary> {
     let actor = active_actor(&settings_state)?;
-    let mut conn = lock_conn(&state)?;
-    let treated = repository::crop_ids_with_treatments(&conn, &season_id, &farm_id)?;
-    let mut existing = core_repo::list_crops(&conn, &season_id, &farm_id)?;
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    let treated = repository::crop_ids_with_treatments(conn, &season_id, &farm_id)?;
+    let mut existing = core_repo::list_crops(conn, &season_id, &farm_id)?;
 
     let mut summary = CropImportSummary {
         inserted: 0,
@@ -180,7 +180,7 @@ pub fn sigpac_accept_crop_proposals(
             });
             continue;
         }
-        let crop = core_repo::insert_crop(&mut conn, accepted.crop, actor.as_deref())?;
+        let crop = core_repo::insert_crop(conn, accepted.crop, actor.as_deref())?;
         existing.push(crop);
         summary.inserted += 1;
     }
@@ -193,12 +193,7 @@ pub fn sigpac_accept_crop_proposals(
             });
             continue;
         }
-        core_repo::update_crop(
-            &mut conn,
-            &accepted.crop_id,
-            accepted.update,
-            actor.as_deref(),
-        )?;
+        core_repo::update_crop(conn, &accepted.crop_id, accepted.update, actor.as_deref())?;
         summary.updated += 1;
     }
 
@@ -214,9 +209,10 @@ pub fn list_crop_species(
     state: State<'_, AppState>,
     plot_id: Option<String>,
 ) -> CmdResult<module_sigpac::service::SpeciesCatalogue> {
-    let conn = lock_conn(&state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
     Ok(module_sigpac::service::crop_species(
-        &conn,
+        conn,
         plot_id.as_deref(),
     )?)
 }

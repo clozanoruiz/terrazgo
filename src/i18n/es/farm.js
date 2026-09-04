@@ -53,6 +53,7 @@ export default {
     "Puntos de captación de agua para consumo humano en la parcela o cerca de ella (apartado 2.2 del cuaderno). Marca «sin captaciones» en las parcelas donde lo hayas comprobado y no las haya: en blanco significa que aún no se ha comprobado.",
   "water_points.empty": "Aún no hay captaciones registradas.",
   "water_points.none_on": "Sin captaciones en «{plot}» (comprobado)",
+  "water_points.none_column": "Sin captaciones (comprobado)",
   "water_point.denomination": "Denominación",
   "water_point.inside_plot": "Incluida en la parcela",
   "water_point.distance": "Distancia (m)",
@@ -81,8 +82,6 @@ export default {
   "crop.species": "Especie",
   "crop.variety": "Variedad",
   "crop.production_system": "Sistema de producción",
-  "crop.sown_on": "Fecha de siembra",
-  "crop.sown_detail": "sembrado el {date}",
   "crop.delete_confirm":
     "¿Eliminar el cultivo «{species}»? Los tratamientos ya registrados conservan sus datos.",
   "operators.title": "Operadores",
@@ -110,6 +109,37 @@ export default {
   "machinery.itv_detail": "próxima ITV el {date}",
   "machinery.delete_confirm":
     "¿Eliminar la máquina «{name}»? Se oculta de la aplicación pero sus registros se conservan.",
+  "premises.title": "Locales y medios de transporte",
+  "premises.intro":
+    "Los locales y vehículos que se tratan en los apartados 3.4 y 3.5. Registrarlos una vez permite identificarlos en cada tratamiento, en lugar de volver a describirlos.",
+  "premises.new": "Nuevo local o vehículo",
+  "premises.empty": "Aún no hay locales ni vehículos en esta explotación.",
+  "premises.no_farms": "Cree primero una explotación:",
+  "premises.farm": "Explotación",
+  "premises.kind": "Tipo de registro",
+  "premises.name": "Nombre",
+  "premises.name_hint": "Cómo lo llama en la explotación; es lo que se imprime como «tipo».",
+  "premises.address": "Dirección",
+  "premises.vehicle_model": "Modelo",
+  "premises.plate": "Matrícula",
+  "premises.cadastral_reference": "Referencia catastral",
+  "premises.es_section": "Datos registrales (España)",
+  "premises.rea_installation_code": "Código de la edificación en el REA",
+  "premises.rea_hint":
+    "El identificador que el REA asigna a esta edificación; figura en su inscripción. Necesario para la exportación oficial.",
+  "premises.rea_detail": "REA {code}",
+  "premises.cadastral_hint":
+    "De la edificación o, si no la tiene, de la parcela donde se ubica. Necesaria para la exportación oficial.",
+  "premises.class": "Clase de edificación o instalación",
+  "premises.class_hint": "Catálogo oficial de edificaciones e instalaciones.",
+  "premises.volume": "Capacidad (m³)",
+  "premises.volume_hint": "Capacidad total; el volumen tratado se anota en cada tratamiento.",
+  "premises.volume_detail": "{volume} m³",
+  "premises.notes": "Observaciones",
+  "premises.delete_confirm":
+    "¿Eliminar «{name}»? Se oculta de la aplicación pero los tratamientos que lo nombran se conservan.",
+  "premises_kind.building": "Local o instalación",
+  "premises_kind.vehicle": "Medio de transporte",
   "production_system.conventional": "Convencional",
   "production_system.organic": "Ecológico",
   "production_system.integrated": "Producción integrada",
@@ -124,7 +154,6 @@ export default {
   "profiles.empty": "Aún no hay perfiles.",
   "profile.display_name": "Nombre",
   "profile.operator_link": "Operador vinculado (aplicador)",
-  "profile.operator_detail": "Aplicador: {name}",
   "profile.delete_confirm": "¿Eliminar el perfil «{name}»? Dejará de aparecer en las listas.",
 
   // Slice 5: the fields the official model asks for.
@@ -198,6 +227,8 @@ export default {
   "crops.proposals_title": "Cultivos declarados en SIGPAC",
   "crops.proposals_campaign": "Declaración PAC campaña {campaign} → temporada {season}",
   "crops.proposals_refresh": "Actualizar desde SIGPAC",
+  "crops.proposals_accept": "Aceptar",
+  "crops.proposals_effect": "Efecto",
   "crops.proposal_insert": "Añadir como cultivo nuevo",
   "crops.proposal_secondary": "Añadir como cultivo secundario",
   "crops.proposal_update": "Actualizar el cultivo «{name}» con lo declarado",
@@ -215,7 +246,9 @@ export default {
   "crops.proposal_declared_area": "Superficie declarada: {area} ha",
   "crops.proposal_none": "Sin cultivos declarados en las campañas {current} y {previous}: {plots}",
   "crops.proposal_no_ref": "Sin referencia SIGPAC completa: {plots}",
-  "crops.proposal_unreachable":
+  "crops.proposal_unreachable.one":
+    "No se pudo consultar SIGPAC para esta parcela ({reason}): {plots}",
+  "crops.proposal_unreachable.other":
     "No se pudo consultar SIGPAC para estas parcelas ({reason}): {plots}",
   "crops.proposal_confirm":
     "Guardar los cultivos seleccionados ({count}) — declaración campaña {campaigns}",

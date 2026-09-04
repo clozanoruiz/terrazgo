@@ -88,6 +88,17 @@ impl From<CoreError> for GeoError {
     }
 }
 
+/// No cache connection — poisoned by a panic mid-write, or closed at shutdown
+/// — is the offline case, not a hard failure: the cache is exactly the thing
+/// that is unavailable, and every caller here already degrades gracefully when
+/// it cannot be read. The alternative, propagating a panic or a `Cache` error
+/// out of a tile request, would take the map down over a cache miss.
+impl From<terrazgo_core::Unavailable> for GeoError {
+    fn from(err: terrazgo_core::Unavailable) -> Self {
+        GeoError::Offline(err.to_string())
+    }
+}
+
 /// The command boundary's view of this error (`terrazgo_core::Classify`).
 impl terrazgo_core::Classify for GeoError {
     fn classify(&self) -> (String, serde_json::Value) {

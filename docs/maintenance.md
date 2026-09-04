@@ -37,8 +37,9 @@
   The docx also embeds the field-semantics xlsx (`BdcSix-DS-DiseñoCUE`,
   sheet `EstructuraCuadernoWS`); where sheet and schema disagree, **the
   schema wins** (it is what validates).
-- **Pinned by:** `crates/module-cue/tests/export.rs` validates every export
-  against it (the `jsonschema` crate, dev-dependency only).
+- **Pinned by:** `crates/terrazgo-siex/tests/common/mod.rs` compiles it once
+  per test binary and every `export*.rs` file validates its output against it
+  (the `jsonschema` crate, dev-dependency only).
 - **Known quirks:** one malformed `$id` (`"##root/…"` under
   SiembraPlantacion → Maquinaria → items) fails draft-07 meta-validation;
   the test harness normalizes it in its in-memory copy only. `CodigoRea`
@@ -48,10 +49,27 @@
   field-by-field (the 3.3.0 → 3.11.4 re-diff in
   [siex-export.md](siex-export.md) is the template), update the export
   serializer/tests, and re-check whether the `##root` typo persists.
+- **Re-extract the descriptor sheets in the SAME pass, and never read an old
+  one.** The docx embeds them, so they move with it — but they are separate
+  files once extracted, and nothing makes a stale copy look stale. On
+  2026-08-19 every local descriptor was still 3.3 / 3.3.0 (24/05/2024) while
+  the schema had been 3.11.4 since July, and reading one produced two wrong
+  conclusions about `DatosCubierta` before the versions were checked. Two
+  rules fall out. **Keep the version banner**: two of the three extracted
+  sheets had had their first row dropped during conversion, which is why only
+  the third revealed its age. And when the sheet and the schema disagree,
+  reach for the schema rather than reasoning about which version changed
+  what — the disagreement is often live rather than historical
+  (`ActividadCubierta` is in every descriptor and in no schema).
+- **The refresh pays for itself.** That same 3.3.0 → 3.11.4 descriptor diff
+  showed `DatosCubierta`'s widths relaxed from required to optional, `Pastoreo`'s
+  `FechaFin` tightened the other way, and `AnimalesPropios`/`AnimalesTerceros`
+  arriving as **booleans** where two shipped columns had assumed head counts
+  ([siex-export.md](siex-export.md) records all three).
 
 ### FEGA SIEX catalogues (Anexo VII code lists)
 
-- **Our copy:** `crates/terrazgo-core/catalogues/` — 48 CSVs (≈1.4 MB),
+- **Our copy:** `crates/terrazgo-core/catalogues/` — 49 CSVs (≈1.4 MB),
   idTabla filenames, embedded in the binary via `include_bytes!` and imported
   at startup (`terrazgo_core::catalogue::ensure_catalogues`, upsert-only).
 - **Upstream, the registry:** `GET
@@ -84,21 +102,97 @@
   the app reads it" would quietly be false for nine of the 48, which is worse
   than saying so. The nine, all told 7.3 kB, split in two:
   - **Pre-positioned for the eco-scheme registers** (model section 9, duties in
-    `cuaderno-print.md`): `TIPO_LABOR` and `TIPO_COBERTURA_SUELO` — whose own
-    values are that vocabulary, "Nivelación en cultivos bajo agua",
-    "Caballones y tablas en cultivos bajo agua", "Cubierta inerte de restos de
-    poda" — plus `DEST_RES_VEG`, whose value 9 *is* the P7 practice.
+    `cuaderno-print.md`): **this sub-list is now empty** — the arc's four seams
+    gave every one of its catalogues a real consumer.
+    (**`TIPO_COBERTURA_SUELO` left it on 2026-08-19**: `soil_cover.cover_type_code`
+    reads it, offered by the covers form. It is read in a way none of the others
+    is — **narrowed per practice**, because RD 1048/2022 art. 42.1.a establishes
+    "la cubierta vegetal espontánea o sembrada" (codes 2 and 3) and art. 43.1.a
+    "la cubierta inerte de restos de poda" (code 4, and specifically not 5,
+    which is nutshells and stones). The narrowing is in the PICKER and never in
+    the repository, because this file grows between releases — it gained code 6
+    on 27/02/2024 — and a refresh on a user's machine could otherwise leave a
+    lawful cover unrecordable. `tests/siex_mapping.rs` accounts for every active
+    code, so an upstream addition fails there rather than quietly becoming
+    unreachable from the UI.)
+    (**`DEST_RES_VEG` left this list on 2026-08-19**: `cultural_operation.residue_destination_code`
+    reads it, offered by the operations form. Its value 9, "Trituración de
+    restos de poda y depositado sobre el terreno", is the one code in this app
+    with meaning beyond display — it *is* art. 43's P7 practice, so a pruning
+    recorded against it is what evidences an inert cover. Named once, as
+    `module_ecoscheme::siex::RESIDUE_LEFT_ON_GROUND`, rather than left as a
+    literal at each reader.)
+    (**`TIPO_LABOR` left this list on 2026-08-18**: `module-ecoscheme`'s owned
+    `cultural_operation_kind` maps onto it, and `tests/siex_mapping.rs` pins
+    the map in both directions — the second being a watchdog that fails when
+    FEGA adds a code no owned kind claims. It is the one catalogue this app
+    maps rather than reads, so its consumer is a contract test as much as a
+    picker.)
     (`EST_FENOLOGICO` was on this list until 2026-08-12 and has left it: it now
     has a real consumer, `treatment_plot.growth_stage_code`, read by the
     treatment form's picker and by both renderers of section 3.1. Note its code
     is NOT the BBCH stage — the monograph's 0-9 sits in its own
     `Estadio bibliografía` column, so readers go through
     `module_cue::catalogue::growth_stage`.)
-  - **Orphaned by the parked DGC path**: `MATERIAL_VEGETAL_REPRODUCCION`,
+  - **Orphaned by the parked DGC path**: `MATERIAL_VEGETAL_REPRODUCCION`
+    (**re-checked 2026-08-19 and again 2026-08-21 — still orphaned, and the
+    second check corrected the first one's reasoning**. The 2026-08-19 note said
+    the twin's required `SiembraPlantacion: integer` is Anexo V's calculated
+    "Cultivo", so the crop rather than the reproductive material. It is neither:
+    the WS descriptor types that member `number(1)`, *"1 Siembra 0 Plantación"*,
+    and it is filled from `sowing_record.kind_code` since seam 2. Anexo V's
+    "Cultivo" is `DGCs[].CodigoCultivo`, per-DGC. The conclusion is unchanged and
+    now firmer — no field anywhere reads this catalogue, and the candidate
+    consumer the eco-scheme arc named for it does not exist),
     `PROC_VEGETAL`, `REGIMEN_TENENCIA`, `DESTINO_CULTIVO` and `DEST_COSECHA`
     have no field anywhere in the cuaderno exchange schema — they are REA/DGC
     declaration vocabulary. Kept because the cost is negligible and the path is
     dormant rather than dead; drop them if it is ever abandoned outright.
+- **FEGA has TWO surfaces and only this one is machine-readable** (checked
+  2026-08-19, while planning the eco-scheme arc). The 287-catalogue registry
+  above is an API; FEGA's *"Fuentes Fitosanitarias"* page (`/bdcsixpor/ffii`)
+  is an index of links to six external MAPA registries — ASPAFITOS, MDF,
+  REGMAQ-ROMA, ROPO, REGANIP, REGITEAF — and **none of them has an interface**.
+  Its own `FuentesInformacion.zip` sits behind a reCAPTCHA; ASPAFITOS
+  (`servicio.mapa.gob.es/regfiweb`) is a server-rendered ASP.NET app with no
+  JSON surface and no advertised bulk export; REGMAQ-ROMA
+  (`servicio.mapa.gob.es/regmaq/buscar.wai`) answers a form POST with HTML;
+  ROPO offers a bulk file that has not been updated since 2024. So the barrier
+  is the interface, not the data — the same shape as the 2026-08-02 CUECYL
+  answer. **Scraping is not an acceptable interface for this project**, so
+  these stay unused *as data sources*; if a product- or machinery-registry feed
+  is ever wanted, the route is to *ask* (`sgmpagri@mapa.es` is published on the
+  registry itself, and writing to `cuecyl@jcyl.es` is what settled the export
+  design). **They are used as destinations, though** — this negative is what
+  produced the registry hints (2026-08-26): if the app cannot fetch a registry,
+  it can still say which one holds a number and open it. The URLs live in
+  `src-tauri/src/external_links.rs`; see
+  [architecture.md](architecture.md) → "Pages the app points at, and never
+  talks to".
+  Recorded so the question is not re-derived, and so the standing rule above is
+  read correctly: "check the registry" means the catalogue API, which is the
+  only surface that answers.
+- **`ESPECIE_ANIMAL` joined the set 2026-08-18** (198 rows, 10 kB), with the
+  grazing register that reads it: model 9.1's "Especie animal que pasta" and
+  `Pastoreo.Animales[].Especie`. It carries **no lifecycle columns at all** —
+  no alta, modificación or baja — so every row is permanently active, the
+  `TIPO_MAQUINA_UNE` precedent; a row count that *drops* on refresh therefore
+  means a truncated download, never an upstream retirement.
+  **`RAZAS` is deliberately NOT vendored**, recorded here so it is not
+  re-derived: neither model 9.1 nor `Pastoreo.Animales[]` asks for a breed, and
+  the selection rule needs a named consumer.
+- **`EDIFICACIONES_INSTALACIONES` got a real consumer on 2026-08-21**, and the
+  one it had been held against was a guess. It was vendored for
+  "`Edificaciones[].IdEdificacion` typing (3.4)" — but `IdEdificacion` turns out
+  to be REA's own key for a registered installation, not a class code
+  (`siex-export.md` settles it). The genuine consumer is `premises.class_code`:
+  Anexo V's REA bloque 8 field 1 makes the class obligatory *"en caso de …
+  tratamiento … en las edificaciones e instalaciones que conlleve su
+  identificación para la cumplimentación del CUE"*, which is models 3.4/3.5.
+  Worth recording as a caution about the selection rule's second limb: a
+  catalogue *held against a named future consumer* is only as good as the
+  reading behind the name, and this one survived four months on a wrong one.
+  All 109 rows are real estate, so the column is buildings-only.
 - **`MUNICIPIO_SIGPAC` joined the set 2026-08-11** (8 434 rows, ~340 kB — a
   third of the whole snapshot, and the largest single file we carry). Model
   section 2.1 asks for the término municipal as "código y nombre" while the
@@ -195,9 +289,45 @@
   | bidirectional `siex_mapping.rs` contract tests | a small closed catalogue gaining, retiring or renumbering a code |
   | sentinel `(code, label)` pins | renumbering in the open lists (EFICACIA pinned in full; "Aceitunas"; MACRONUTRIENTES 1/6/9) |
   | `UNMAPPED_COLUMNS` (module-fertilisation) | a **new** column in the one file read column-wise that nobody has decided about |
-  | `catalogue.source_digest` | change *detection* only — never validation |
+  | `catalogue.source_digest` | that a *fetched* file differs from the stored copy — detection only, never validation |
   | pre-write checks in `refresh_catalogue` | a fetched file that is empty, truncated, unlabelled or mis-encoded — before anything is written, since the upsert cannot be undone |
 
+- **A code that vanishes from the provider's file leaves the pickers, but is
+  never removed** (`catalogue_code.absent_since`, 2026-08-27). FEGA retires a
+  code with a baja date, so a row that simply disappears is unexplained: we
+  keep it, because a years-old record still cites it and must still resolve,
+  and we stop offering it. **Only a FETCHED file may set the mark** — it is the
+  provider's current list, so absence from it is evidence; a *vendored* file
+  proves nothing, since a code can be missing from it merely by being newer
+  than the release, and inferring there would hide every code a refresh had
+  added at the next app update. Both origins clear it: presence is presence.
+  `absent_since` is **ours** and deliberately separate from `retired_on`, which
+  is the authority's — so when a dropped row comes back baja-dated, our mark
+  clears and theirs takes over, and the code stays out of the picker for a
+  reason someone actually stated. `active_codes` filters both; `find_code`
+  filters neither. The count is reported per file as `withdrawn`.
+- **Known interaction with the shrink guard:** the guard compares a new file
+  against *every* stored row, marked absent or not, and stored rows only ever
+  accumulate. So once a device has withdrawn a code and adopted a replacement,
+  a file carrying only the older set is refused as a truncated download. The
+  release path is unaffected (a re-vendor is reviewed by hand); it costs a
+  user an in-app refresh they could otherwise have taken. Left as is —
+  counting only non-absent rows would fix it, and is a change to what the
+  guard *means*, not a tidy-up.
+- **Rejected: garbage-collecting the codes a refresh added that nothing uses.**
+  It would need a hand-maintained registry of catalogue → the subset of ~75
+  `*_code TEXT` columns storing its codes, because the schema deliberately
+  carries **no foreign keys from user data to `catalogue_code`**. Those columns
+  live in four modules core may never depend on, so the registry would have to
+  arrive through a new `Module` trait method — and its failure mode is silent
+  and destructive: a later column that stores codes and is not registered makes
+  them look unused, so an existing record stops resolving. Nothing in the
+  schema marks a column as catalogue-backed, so no scan can catch the omission.
+  The benefit also inverts: open-catalogue pickers are built straight from
+  `active_codes`, so an extra code in a picker *is* what the refresh was for,
+  while closed-list pickers read the lookup tables and never the catalogue, so
+  an extra row there never reaches the UI at all. And the row a collector would
+  remove is the same row that keeps a years-old treatment readable.
 - **What NO guard catches, so it is not mistakenly believed covered:** in-band
   semantic drift — same header, same code, different meaning. The
   `DETALLE_MATERIAL_FERT` heavy-metal columns are exactly this (one column
@@ -205,12 +335,35 @@
   in the provider's data, not in our reading of it. The mitigations are human
   review of a refresh diff (which the pin forces) and the registry
   cross-check below.
-- **Refresh detection:** `catalogue.source_digest`, an FNV-1a hash of the
-  vendored bytes, compared *before* parsing. It replaced a fast path that
-  compared the newest lifecycle date in the file, which was wrong in both
-  directions — it parsed all 48 files on every startup before deciding to
-  skip them, and it silently ignored a refreshed snapshot that corrected a
-  label without moving any date.
+- **What a refresh is worth over time, and why startup keys on the app
+  version.** `ensure_catalogues` imports the vendored snapshot on the **first
+  launch of each app version** (`catalogue.imported_by_version` vs
+  `CARGO_PKG_VERSION`, compared by equality so a downgrade also re-imports)
+  and does nothing on the launches after. So **a user's refresh survives every
+  restart, and does not survive an app update** — the next version's first run
+  restores its own copy over the top. That is deliberate: the vendored files
+  are curated *as a set*, and the mapping bijections and catalogue suites are
+  green against one exact snapshot, so a device must never run one refreshed
+  file mixed with the rest of an older release's set. What an update restores
+  is every label, attribute and lifecycle date; codes a refresh *added* stay,
+  because the import cannot delete without breaking the promise that a code
+  already written onto a record keeps resolving.
+  Before 2026-08-27 startup compared `source_digest` instead — which the
+  refresh also writes, so an adoption silently lasted exactly one session:
+  corrections reverted at the next launch while added codes stayed, leaving a
+  state neither file ever was.
+- **Dev-time consequence:** re-vendoring a CSV *without* bumping the version no
+  longer triggers a startup re-import. The release ritual re-vendors and bumps,
+  and the pinned-header tests parse the vendored bytes directly rather than the
+  database, so this only bites a running dev app — where the standing rule for
+  a `0001` edit is already "delete the dev database".
+- **Refresh detection:** `catalogue.source_digest`, an FNV-1a hash of the bytes
+  that produced the stored rows, compared *before* parsing, so re-offering a
+  copy already held costs nothing. Bytes rather than the file's newest
+  lifecycle date, which was wrong in both directions — it parsed every file
+  before it could decide to skip it, and it silently ignored a refresh that
+  corrected a label without moving any date (several catalogues ship no dates
+  at all).
 - **Known quirks:**
   - Documented as ISO-8859-1 but really **Windows-1252** (€ at 0x80 in
     UNIDADES_MEDIDA).
@@ -331,7 +484,7 @@ whether the document moved to a new version first.
 
 | Document | Where to (re-)fetch | What implements it |
 | --- | --- | --- |
-| FEGA SIEX technical docs — Anexo V (fields), VI (interface + schema), VII (catalogues), IX/X (authorizations) | <https://www.fega.gob.es/es/siex/documentacion-tecnica-agricola-siex> | the whole export (`module_cue::export`, `module_cue::siex`) |
+| FEGA SIEX technical docs — Anexo V (fields), VI (interface + schema), VII (catalogues), IX/X (authorizations) | <https://www.fega.gob.es/es/siex/documentacion-tecnica-agricola-siex> | the whole export (`terrazgo-siex`, `module_cue::siex` and each module's own) |
 | "BdcSixWsp — Guía de Servicios públicos de Siex" (v4.5.0 used) | asset of the sede portal SPA at `https://www3.sede.fega.gob.es/bdcsixpor/` | catalogue importer expectations (format, encoding, lifecycle columns) |
 | RD 1311/2012 (record content, Anexo III) | <https://www.boe.es/buscar/act.php?id=BOE-A-2012-11605> | treatment record fields, PHI capture |
 | RD 34/2025 (electronic-record mandate, 2027) + Reglamento (UE) 2023/564 (+ 2025/2203 postponement) | boe.es / eur-lex.europa.eu | the module's reason to exist; deadline facts |
@@ -407,6 +560,10 @@ repo. Added 2026-07-19.
    `tauri.conf.json` are generated at build time and untracked. The check is
    enforced, not remembered: `release.yml`'s first job fails the release if any
    of the three disagrees with the pushed tag, before anything is published.
+   One place *nothing* enforces it: the scripted frontend checks' fixture file
+   carries a harvested `get_status.app_version`, so it names the previous
+   version until someone updates it. It is a displayed value with no assertion
+   on it, so it fails nothing — which is exactly why it needs a line here.
 1. **Refresh the catalogue snapshot**: enumerate the registry
    (`GET https://www3.sede.fega.gob.es/bdcsixpor/tablas/configJson`), then for
    each idTabla in `catalogue.rs`'s `VENDORED`
@@ -427,7 +584,12 @@ repo. Added 2026-07-19.
    keystore secrets are missing — never work around it by shipping unsigned
    or debug-signed builds), and the AAB goes to the Play internal-testing
    track (§5).
-4. **Verifying the published attestations** (provenance + SBOM, one per
+4. **Run the storefront export guard** (`packaging/export-storefront.sh` into a
+   scratch directory) *before* tagging. It fails on any surviving reference to
+   the scrubbed dev tooling, and it is cheap; discovering the failure from a red
+   release instead costs a tag. It caught a stale doc line on `main` before
+   v0.1.6 that would have aborted the release after the tag was pushed.
+5. **Verifying the published attestations** (provenance + SBOM, one per
    installer digest): the GitHub attestations API no longer inlines the
    bundle — it returns `bundle: null` plus a `bundle_url` pointing at an Azure
    blob served as `application/x-snappy` (raw-snappy-compressed JSON), so the
@@ -436,4 +598,244 @@ repo. Added 2026-07-19.
    subjects are split per runner (the Linux job attests AppImage + deb + rpm,
    the Windows job the exe + portable zip) — expected, each runner attests what
    it built.
-5. Glance at this file: does every row still match reality?
+6. **Read the package metadata back, not just the build log.** A package is
+   metadata plus a payload and only the payload is compiler-checked, so the
+   parts a farmer actually reads can be wrong while everything builds green.
+   Parse the rpm header and the deb control file and check the summary,
+   description and `Categories=` in the generated `.desktop` entry. This is not
+   hypothetical: `bundle` declared no descriptions until 2026-08-15, so tauri
+   fell back to the *crate* description and every deb since the first release
+   shipped "module registry, migration runner, Tauri commands" as the comment
+   in the user's application menu, with no category to file it under.
+7. Glance at this file: does every row still match reality?
+
+### Linux packages — why one rpm is enough
+
+The Linux job builds an AppImage, a deb and an rpm; adding a format is one word
+in `bundle.targets`. The rpm needs **no `rpmbuild` and no new system dependency
+on the runner** — tauri-bundler writes the package with the pure-Rust `rpm`
+crate.
+
+Its `Requires` come out as **sonames** (`libwebkit2gtk-4.1.so.0()(64bit)`,
+`libgtk-3.so.0()(64bit)`) rather than package names. That is what lets a single
+artifact install on Fedora, openSUSE and RHEL alike: those distros disagree
+about what the packages are *called*, but not about what the libraries are
+named. So resist the urge to add per-distro builds until a real install failure
+asks for one.
+
+## 7. Dependency advisories and yanked crates
+
+The `audit` CI job runs `cargo-deny` over `Cargo.lock` (advisories only;
+`deny.toml` carries every `ignore` with a reason and a revisit condition).
+
+**RESOLVED 2026-08-24, by the cheapest exit in the table below.** From
+2026-08-20 this job was deliberately red: `arrayref 0.3.9` was yanked, reached
+as arrayref ← tiny-skia/tiny-skia-path ← krilla/resvg ← typst-pdf ←
+`terrazgo-report`. It was a *yank*, not a vulnerability — no RustSec advisory
+ever existed — and nothing in this repo could fix it, since `tiny-skia-path
+0.12.0` requires `arrayref = "0.3.9"` and every 0.3.x from 0.3.5 up was yanked,
+so `cargo update -p arrayref` failed outright. Leaving it red was chosen over an
+`ignore` entry so the guard stayed honest.
+
+**It went green on its own, and the lockfile proves which exit was taken**:
+`arrayref` is still pinned at the same `0.3.9`, so the version did not move —
+the yank was lifted upstream. Cost: nothing, not even a lockfile line. That is
+row one of the table below, and it is why leaving the job red rather than
+ignoring the advisory was the right call: the guard reported the fix by itself.
+
+**Two things worth keeping from the episode.** A permanently red badge hides the
+next real failure, so **check WHICH job failed before reading red as "same as
+yesterday"**. And detection is inverted for a yank: the job goes green by itself
+the day the crate leaves the tree or is un-yanked, but nothing in the repo
+announces it — `cargo deny check advisories` locally is how you find out, and
+`cargo tree -i arrayref` says whether the crate is still reached at all.
+
+The three exits, kept because the next yank will need them:
+
+| If upstream… | What we do | Cost |
+| --- | --- | --- |
+| `arrayref` publishes 0.3.10, or un-yanks | `cargo update -p arrayref` | one lockfile line |
+| `tiny-skia` drops it in a **0.12.x** patch | `cargo update -p tiny-skia -p tiny-skia-path` | lockfile only |
+| `tiny-skia` fixes it only in **0.13** | krilla/resvg and typst-pdf must bump first, then `typst = "0.15"` in `Cargo.toml` | a real dependency change |
+
+None of the three was ever needed: on 2026-08-24 the crate was simply
+un-yanked at the version already in the lockfile.
+
+## 8. Android build, on-device findings and the mobile backlog
+
+Moved here from the project instructions on 2026-08-22: build recipes and
+machine setup are procedures, which is what this notebook is for. The mobile arc
+itself is still an open candidate — see the project instructions' open-items
+table.
+
+Collected 2026-07-08, kept in one place rather than scattered across decision
+rows.
+
+**Android bootstrap DONE (2026-07-17)** — the app builds and packages for
+Android: identifier renamed to `org.terrazgo.app`, Gradle
+project generated at `src-tauri/gen/android/` (tracked in git; only
+`gen/schemas/` stays ignored), shell crate is `crate-type = ["staticlib",
+"cdylib", "rlib"]` with `#[cfg_attr(mobile, tauri::mobile_entry_point)]` on
+`run()`. Debug APK (163 MB, debug-keystore-signed, installable):
+
+```
+export JAVA_HOME=~/APPS/android-studio/jbr ANDROID_HOME=~/Android/Sdk \
+       NDK_HOME=~/Android/Sdk/ndk/28.2.13676358 CARGO_PROFILE_DEV_STRIP=debuginfo
+cargo tauri android build --debug --target aarch64 --apk
+# → src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
+# install: ~/Android/Sdk/platform-tools/adb install <apk>   (USB debugging on)
+```
+
+Machine setup that made it work (this dev machine): cmdline-tools +
+NDK 28.2.13676358 installed into `~/Android/Sdk`; Java = Android Studio's
+bundled JBR (`~/APPS/android-studio/jbr`); rustup Android targets added.
+Two gotchas: `CARGO_PROFILE_DEV_STRIP=debuginfo` keeps the debug `.so` at
+156 MB instead of ~600 MB (env-only — the repo profile is untouched), and
+Gradle's incremental packaging can leave a replaced `.so` as dead space in
+the APK (611 MB mystery) — `rm -rf src-tauri/gen/android/app/build` before
+judging APK size. Release-build signing is WIRED (2026-07-19, see the Android signing decision): a release build
+signs itself when `gen/android/keystore.properties` points at the
+developer's keystore, and the storefront `build.yml` has an `android` job
+gated on the keystore secrets.
+
+**On-device state** (field-tested on the published v0.1.5 release APK, and on
+locally built release APKs for everything landed since).
+Working: install, launch, real logo, bottom tab bar, IPC/views, **native
+date inputs**, base map over upstream HTTPS, SAF file saves, GPS locate +
+live tracking. The two 2026-07-17 field bugs — blank maps (uninitialized
+`rustls-platform-verifier` panicking on Android) and 0-byte SAF saves — were
+fixed 2026-07-18 and are field-verified; the durable design lives in the TLS trust policy and Android
+user-file access decisions. The **native date
+inputs** in that list are history — they are owned controls since 2026-08-14,
+accepted on a real phone.
+
+**The Android distribution path is proven end to end (2026-08-07)**: build →
+sign → Play → device. The Play Console internal-testing track is live, the first
+AAB was uploaded by hand (Play requires that), and the app installed *from Play*
+onto a phone and ran. Custody and recurring Play chores are in
+`docs/maintenance.md` §5; the consequence to remember is in the Android signing
+row — a Play install and a sideloaded APK carry different signatures and can
+never update over each other, so a test phone is on one channel or the other.
+
+- **gen/android is hand-edited**: `app/build.gradle.kts` (verifier
+  Maven repo + dependency + release cleartext + signingConfigs),
+  `app/proguard-rules.pro` (keep rule) and
+  `app/src/main/java/org/terrazgo/app/MainActivity.kt` (system-bar insets
+  padding, 2026-07-23 — keeps the app between the status bar and the
+  gesture area; strip color must match `--panel`) carry changes a
+  `cargo tauri android init` regeneration would WIPE — never regenerate
+  blindly; re-apply from git if the project is ever re-inited.
+  `tauri.settings.gradle` stays autogenerated (the CLI added
+  `:tauri-plugin-fs` and `:tauri-plugin-geolocation` itself).
+- Release-build unknowns RESOLVED by the 2026-07-21 field test of the
+  signed release APK: `http://*.localhost` serving works in release
+  (protocol interception precedes the cleartext block) and R8 was innocent.
+  The real release-only bug was CRL-over-cleartext — release now allows
+  cleartext like debug; full root cause in the TLS trust policy decision
+  row. Field-confirmed on the published v0.1.5 APK.
+- On-device debugging recipe that cracked it (debug builds have WebView
+  inspection enabled): `adb shell pidof org.terrazgo.app` → `adb forward
+  tcp:9222 localabstract:webview_devtools_remote_<pid>` → page list at
+  `http://127.0.0.1:9222/json`; drive the page over raw CDP with Node's
+  built-in WebSocket (`Runtime.evaluate` — puppeteer-core's `connect`
+  stalls against Android WebView, don't retry it); Rust panics appear in
+  `adb logcat` under `RustStdoutStderr`.
+
+- **P5 GPS point query + live tracking — SHIPPED 2026-07-23**:
+  `tauri-plugin-geolocation` 2.3
+  mobile-gated, platforms-gated `capabilities/mobile.json`, `is_mobile`-gated
+  locate button in the map's SIGPAC panel feeding the existing point-lookup
+  flow, plus a toolbar follow toggle streaming `watch_position` into a
+  dot+accuracy marker on the canvas. Field-tested outdoors: locate and follow
+  both work; the camera teleports instead of easing so intermediate frames
+  can't flood the tile pipeline. The `plugin:geolocation|*` commands are
+  session-stub territory for scripted checks (like `plugin:dialog|save`) —
+  never harvested into fixtures.js.
+- **Offline municipality packs** (sigpac-integration step 6) — bulk GPKG per
+  municipality (INSPIRE ATOM) consulted by the lookups before the network,
+  for never-seen-offline areas (the P5 field case). Gated: only if real field
+  usage shows the cache-through model isn't enough. Packs cover geometry +
+  attributes, NOT zone intersections (query-only services).
+- **Stage-1 sync transport** — phone as writing device; export via shared
+  storage + USB (Android MTP; iOS `UIFileSharingEnabled`); see Data storage →
+  Sync. **Start with a gap analysis, not with code**: the shipped backup
+  export/import may already cover most of the phone→desktop mirror, so what this
+  needs first is an assessment of what is genuinely missing.
+- **Already mobile-ready by design** (verify, don't rebuild): bottom tab bar
+  (nav-as-data), native dialog plugin (share sheet on mobile), no blocking JS
+  dialogs, `confirmDialog()` everywhere, Svelte bundle size, lazy map chunk.
+- **Pre-release/mobile chores**: demo `seed_demo_data` now WORKS in release
+  builds (guard removed 2026-07-23 for release-APK field testing; MUST be re-guarded or dropped before the
+  stable release); webview differences (verifiers
+  drive WebKitGTK/Blink, not WKWebView/Android WebView — re-verify date
+  inputs and the `geo://` protocol CORS behaviour per platform; Windows/
+  WebView2 field-verified 2026-07-09: `http://geo.localhost` + CORS render
+  fine, date inputs unchecked); proj4rs-style pure-Rust deps chosen
+  deliberately so mobile targets cross-compile clean — keep that bar for
+  new crates.
+
+---
+
+## 9. Re-running the query-scope audit
+
+`data-model.md` → "Indexes and query scope" is the finding; this is how to
+produce it again. **A recipe, not a gate**: whether a `SCAN` is a defect or a
+six-row lookup being read whole is a judgement, and an automated check would
+need an allowlist that drifts — which is a gate that cries wolf and gets waved
+through. Run it before tagging a release, and after adding a register.
+
+**The two rules a test already enforces** are the index house pattern
+(`src-tauri/tests/index_contract.rs`) and the per-record child query (the
+`query_scope.rs` file in each register-owning crate, built on
+`terrazgo_testkit::query_cost`). Those fail on their own. What follows is for
+the third rule — query *scope* — which needs someone to read the plans.
+
+**The plans.** Concatenate the schema and ask SQLite what it would do:
+
+```
+cat crates/terrazgo-core/migrations/0001_core_schema.sql \
+    crates/module-cue/migrations/0001_schema.sql \
+    crates/module-fertilisation/migrations/0001_schema.sql \
+    crates/module-ecoscheme/migrations/0001_schema.sql > /tmp/schema.sql
+rm -f /tmp/plan.db && sqlite3 /tmp/plan.db < /tmp/schema.sql
+sqlite3 /tmp/plan.db "EXPLAIN QUERY PLAN <the statement>"
+```
+
+For a sweep, pull every Rust string literal starting with `SELECT` out of
+`crates/*/src` and `src-tauri/src`, bind each `?n` with a dummy, and `EXPLAIN`
+it. **Read only the `SCAN` lines, and only for tables that GROW** — a scan of
+`unit` or `production_system` is correct, and `SCAN CONSTANT ROW` is an artefact
+of `EXISTS`. The 2026-08-24 sweep read 279 statements and produced 12 such
+lines, of which 3 were real.
+
+Then ask of each: *is the result set bounded by the question, or by the
+history?* That is the judgement no tool makes.
+
+**The timings.** The scaled-data builder is `crates/module-cue/tests/common/scale.rs`
+and the measurement rides on it:
+
+```
+cargo test -p module-cue --release --test query_scope -- --ignored --nocapture
+```
+
+Release, because a debug build measures the wrong thing. It prints the markdown
+table the doc records. **Compare slopes, not milliseconds** — the constant is
+one machine's, the slope is the finding, and the desktop is the fast tier.
+
+**What a corruption check costs.** The same shape, for the other measurement
+this repo keeps `#[ignore]`d — it writes up to ~513 MB and takes minutes, so it
+is a gate on nothing and an answer on demand:
+
+```
+cargo test -p terrazgo --test quick_check_cost -- --ignored --nocapture
+```
+
+It fills the real composed schema with `record_change` rows, because that is the
+table that grows without bound, and prints both pragmas side by side. Last run
+2026-08-26: `quick_check` 1.6 ms/MB, `integrity_check` 3.4 ms/MB, ratio rising
+from 1.5x at 29 MB to 2.1x from 114 MB on. It answers two live questions — what
+the weekly check costs a cooperative-scale book, and what the Settings button's
+thorough check costs — and it is the cost curve the `record_change` retention
+decision will need when it comes due.
+
+---

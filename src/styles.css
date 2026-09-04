@@ -1,12 +1,51 @@
+/* The UI typeface. ONE variable file covering every weight, cut from IBM's
+   release by scripts/subset-font.sh and checked by scripts/check-font.py —
+   see docs/frontend-conventions.md → "The UI typeface".
+
+   Self-hosted because it has to be: the production CSP is `default-src 'self'`
+   and the app must render identically with no network at all.
+
+   The property that chose this face is measured rather than assumed: its
+   digits are TABULAR BY CONSTRUCTION — there is no `tnum` feature in the font
+   because there is no proportional set to switch away from — so a column of
+   doses lines up with no CSS at all. The app switches NO OpenType feature on:
+   `liga` and `kern` are on by default, there is no `calt` in this face, and
+   the slashed zero is deliberately left off (see below).
+
+   `font-weight: 100 700` is the range, not a choice: stating it lets the
+   browser drive the wght axis through the ordinary font-weight cascade, so
+   every existing rule keeps working. font-variation-settings would bypass that
+   cascade and is reserved for wdth, which nothing uses yet. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  /* Plain `format("woff2")`, not the old `woff2-variations`: that spelling is
+     deprecated and an engine that does not know it skips the source entirely,
+     which fails as a silent fallback to system-ui rather than as an error. */
+  src: url("./fonts/IBMPlexSansVar-Roman-subset.woff2") format("woff2");
+  font-weight: 100 700;
+  font-stretch: 85% 100%;
+  font-style: normal;
+  /* swap, not block: an offline app's font is a local file that will load, and
+     blocking paints nothing at all if it ever does not. */
+  font-display: swap;
+}
+
 :root {
   /* Palette — drawn from the app logo (greens, water blue, wheat gold).
      Re-theming
-     the app means editing these variables, nothing else. */
+     the app means editing these variables, nothing else.
+
+     THE CANVAS IS WHITE. The content area and everything laid out inside it —
+     toolbar bands, tables, the inspector — are one uninterrupted #fff surface,
+     separated by hairlines and nothing else. The faint leaf wash (--panel) is
+     confined to the NAVIGATION CHROME that sits outside the canvas: sidebar,
+     topbar, tab bar. A tinted band inside the content area is part of the
+     canvas and must not be filled. */
   --text: #1c261a; /* green-tinted near-black */
-  --muted: #5a6855; /* green-tinted gray — secondary text */
-  --bg: #f7faf6;
-  --panel: #edf3ea;
-  --border: #d8e2d3;
+  --muted: #67755f; /* green-tinted gray — secondary text */
+  --bg: #fff; /* the canvas */
+  --panel: #f4f8f1; /* navigation chrome only — never inside the canvas */
+  --border: #e4ebe0;
   --primary: #007830; /* logo deep green — interactive elements, brand */
   --accent: #0078c0; /* logo water blue — hyperlinks */
   --warning: #c09030; /* logo wheat gold — alert accent */
@@ -16,9 +55,21 @@
      they are different statements: --surface is a raised sheet (cards, inputs,
      popovers) that a dark theme repaints, while --on-primary is the text ON a
      filled --primary or --danger, which stays light in any theme. Re-theming is
-     only ever a :root edit if no rule names a colour of its own. */
+     only ever a :root edit if no rule names a colour of its own.
+
+     --surface now EQUALS --bg, and that is the point: on a white canvas a
+     raised sheet cannot read by its fill, so it reads by its rule. Anything
+     that relied on a white box standing out from a tinted page has to draw a
+     border or a separator instead. */
   --surface: #fff;
   --on-primary: #fff;
+
+  /* Row surfaces for the data tables and row lists. Tinted rather than the
+     neutral --surface-hover overlays: a row is picked out by the app's one
+     accent, which is what makes a selected row read as selected and not as
+     merely shaded. */
+  --row-hover: rgb(0 120 48 / 6%);
+  --row-selected: rgb(0 120 48 / 12%);
 
   /* Interaction surfaces. --surface-hover existed as a fallback inside
      CataloguePicker before it existed here, so the fallback won silently.
@@ -35,16 +86,26 @@
   --focus-ring: 2px solid var(--primary);
   --focus-ring-offset: 1px;
 
-  /* Spacing — a 4-point scale. Values already on it flow through these; the
-     handful that sit between steps (0.4rem, 0.6rem, 0.9rem…) are left as they
-     are on purpose: snapping them moves every button and card in the app, which
-     is a design pass with screenshots, not a side effect of naming tokens. */
+  /* Spacing — a 4-point scale. The off-scale values that used to sit between
+     steps (0.4rem, 0.6rem, 0.9rem…) were deferred here as "a design pass with
+     screenshots, not a side effect of naming tokens"; this is that pass, and
+     the ones in the shell, the rows and the controls are now on the scale. */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
   --space-4: 1rem;
   --space-5: 1.5rem;
   --space-6: 2rem;
+
+  /* The frame's bands, and they are two different things rather than one
+     height used twice: --head-h is the SHELL's top band, which names the screen
+     and is the tallest thing in the chrome, while --band-h is a section's own
+     toolbar inside the canvas, which should not compete with it.
+     --control-h is the one height every form control shares (see the .form-grid
+     rule), stated here because the row lists match it. */
+  --head-h: 3rem;
+  --band-h: 2.5rem;
+  --control-h: 1.9rem;
 
   /* Radius. --radius is the app's one corner (9 of 15 uses before this scale);
      the other three exist because a popover, a chip and a pill are different
@@ -60,15 +121,51 @@
   --shadow-panel: 0 4px 16px rgb(0 0 0 / 12%);
 
   /* Stacking order, so a new floating element is placed against a list rather
-     than against whatever number the last one happened to use. Sticky chrome
-     sits above popovers because the popovers open below it. */
-  --z-popover: 20;
-  --z-sticky: 30;
+     than against whatever number the last one happened to use.
 
-  font-family: system-ui, sans-serif;
+     --z-shell is the SHELL's own bands, above the view's: the notification
+     panel hangs from the bell in the top band and has to cover the content
+     under it, and a view's sticky toolbar at --z-sticky was painting over the
+     panel instead. Raising the panel alone would not have fixed it — it is the
+     band it lives in that has to win.
+
+     A POPOVER OUTRANKS THE VIEW'S STICKY BANDS (raised from 20 on 2026-09-03).
+     This used to read "sticky chrome sits above popovers because the popovers
+     open below it", which stopped being true the moment a popover hung off the
+     tab row: bits-ui portals a floating layer to <body> precisely so nothing
+     clips it, and the tab row's overflow menu opens straight down over the
+     register's own `.view-head`. Measured — the menu's rows were painted over
+     by the "Load declared crops" button, sheet, shadow and all, and a menu you
+     cannot read is a menu that does not work. Still under --z-shell, so the
+     app's own top band is not something a dropdown covers. */
+  --z-popover: 32;
+  --z-sticky: 30;
+  --z-shell: 35;
+  /* A TOOLTIP outranks even the shell's own bands, which a popover does not.
+     The two are not the same kind of thing: a dropdown is a surface you reach
+     into, and one covering the app's top band would be wrong, while a tip is a
+     200ms annotation that has to be readable wherever it lands. Measured — the
+     collapsed rail puts its first link level with `.main-head`, and at
+     --z-popover the band painted straight over the tip. */
+  --z-tooltip: 38;
+  /* A modal covers the sticky chrome (the tab bar it would otherwise sit
+     under), so it needs a step of its own rather than borrowing --z-sticky. */
+  --z-modal: 40;
+
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
 }
+
+/* NO `zero` FEATURE, DELIBERATELY (2026-09-04). The face carries a slashed
+   zero and it was switched on across tables and fields for a while, on the
+   argument that a farmer transcribing a registration number wants 0 and O
+   told apart. Preference went the other way: a plain zero reads better, and
+   Plex separates 0 from O on shape alone — its zero is a narrow oval against
+   a round O — so the slash was buying little.
+
+   Left here as a note rather than as nothing, because "the font has a
+   slashed zero" is a true and tempting fact, and this says it was tried. */
 
 a {
   color: var(--accent);
@@ -76,6 +173,29 @@ a {
 
 body {
   margin: 0;
+  /* An application's text, not a document's. The rem scale stays anchored to
+     the root's 16px so --space-* does not move with it — type and spacing are
+     tuned separately, which is the whole reason the sizes are stated here
+     rather than by shrinking :root. */
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+/* Headings carry the browser's document proportions otherwise (h1 at 2em, h2 at
+   1.5em), which is most of what made the app read as a web page: a register
+   title was 24px of black above a 16px row. */
+h1 {
+  font-size: 1.25rem;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+h3 {
+  font-size: 0.875rem;
+  margin: var(--space-3) 0 var(--space-2);
 }
 
 /* --- native-app feel ---------------------------------------------------------
@@ -159,18 +279,18 @@ h1 {
 .sidebar {
   box-sizing: border-box;
   flex-shrink: 0;
-  width: 14rem;
+  width: 13rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  padding: 1.25rem var(--space-3) var(--space-4);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-2);
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
 
 .sidebar .brand {
-  padding: 0 0.65rem;
+  padding: 0 var(--space-2);
 }
 
 .sidebar nav {
@@ -189,8 +309,8 @@ h1 {
 .sidebar nav a {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: var(--space-2) 0.65rem;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius);
   color: var(--primary);
   text-decoration: none;
@@ -201,17 +321,15 @@ h1 {
   color: var(--on-primary);
 }
 
-/* Nav and toggle icons: Feather-style strokes, colored by the link. */
+/* Nav and toggle icons, sized by the chrome and coloured by the link.
+   Only the SIZE is stated: `@lucide/svelte` renders fill, stroke, stroke-width
+   and the round caps as attributes on every icon, and the width/height it also
+   sets are attributes, which any CSS length overrides. */
 .sidebar svg,
 .tabbar svg {
   width: 1.25rem;
   height: 1.25rem;
   flex-shrink: 0;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .sidebar-foot {
@@ -240,35 +358,69 @@ h1 {
 
 /* No max-width cap: a maximized desktop window fills with content (the form
    grids add columns) instead of centering a fixed column in blank space.
-   The app's single scroller; overscroll-behavior suppresses the platform
-   bounce/stretch affordances on it. */
+
+   <main> carries no padding of its own: the bands inside a view run edge to
+   edge and each content region states its own inset, which is what makes a
+   toolbar look attached to the window rather than floated on a page.
+
+   On narrow screens this is the app's single scroller, and overscroll-behavior
+   suppresses the platform bounce there. On wide screens the scrolling moves
+   INTO the view (see .view) so the toolbar and the inspector can stay put while
+   a list scrolls under them — a sticky band inside a document scroller looks
+   like a pane until you scroll, and then the whole page moves. */
 main {
   box-sizing: border-box;
   flex: 1;
   min-width: 0;
   min-height: 0;
-  padding: var(--space-5);
+  padding: 0;
   overflow-y: auto;
   overscroll-behavior: none;
+}
+
+@media (min-width: 701px) {
+  main {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 }
 
 /* --- notification bell -------------------------------------------------------
    One instance per layout: .main-head (wide screens) and .topbar-tools
    (narrow). State and behavior live in lib/notifications.svelte.js. */
 
-/* Sticky utility strip at the top of the content: keeps the bell (and any
-   future occupant — a view title, sync status…) in sight while scrolling.
-   New items go on the left; the bell keeps the right edge via margin-left. */
+/* The frame's first band: a fixed utility strip at the top of the content,
+   holding the bell (and any future occupant — sync status, a breadcrumb).
+   New items go on the left; the bell keeps the right edge via margin-left.
+
+   It no longer needs position:sticky. The strip is rendered on wide screens
+   only, and there <main> is a flex column that does not scroll — the band is
+   simply the first row and the view scrolls beneath it. Untinted, because it
+   sits inside the canvas; the hairline is what separates it. */
 .main-head {
-  position: sticky;
-  top: 0;
-  z-index: var(--z-sticky);
+  flex: none;
+  box-sizing: border-box;
+  /* Positioned so it establishes a stacking context: everything it holds — the
+     notification panel above all — then paints above the view's bands. */
+  position: relative;
+  z-index: var(--z-shell);
+  height: var(--head-h);
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  margin-bottom: var(--space-2);
-  padding: var(--space-2) 0;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
   background: var(--bg);
+}
+
+/* The screen's name, in the band rather than repeated as an <h2> at the top of
+   every view's canvas. Sized as chrome, not as a document heading — it labels
+   the window, it does not open a section. */
+.view-title {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
 }
 
 .main-head .bell-wrap {
@@ -350,11 +502,14 @@ main {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
-  padding: 0.45rem var(--space-2);
+  padding: var(--space-1) var(--space-2);
   border-radius: var(--radius);
-  background: var(--bg);
+  /* The panel itself is --surface, so a notification cannot be filled with the
+     canvas colour any more — both are white. --panel is the one wash the app
+     has, and a floating layer is not the canvas. */
+  background: var(--panel);
   color: var(--primary);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 .notif-panel li.error {
@@ -376,6 +531,12 @@ main {
 .notif-dismiss:hover:enabled {
   background: none;
   color: var(--text);
+}
+
+.notif-dismiss svg {
+  width: 0.9rem;
+  height: 0.9rem;
+  display: block;
 }
 
 .notif-empty {
@@ -409,9 +570,10 @@ main {
     background: var(--panel);
     border-bottom: 1px solid var(--border);
     /* A fixed flex child of the shell (only <main> scrolls); positioned so
-       the notification panel keeps anchoring to the full-width bar. */
+       the notification panel keeps anchoring to the full-width bar, and above
+       the view's own bands so the panel is not painted over — see --z-shell. */
     position: relative;
-    z-index: var(--z-sticky);
+    z-index: var(--z-shell);
   }
 
   /* Anchor the panel to the full-width topbar, not the bell: a 22rem panel
@@ -444,6 +606,13 @@ main {
     padding-bottom: env(safe-area-inset-bottom);
   }
 
+  /* `nowrap` because a label WIDER than its share must widen its own entry, not
+     wrap inside it — which is what a long single word already does here, since
+     `flex: 1` grows from a content-based basis. Measured at 390px: "Cuaderno"
+     and "Quadern" sit on one line, but English's "Record book" has a space to
+     break at, so it wrapped to two, grew the whole bar from 56px to 73 and left
+     its icon sitting higher than the other five. A destination's name is not
+     something to choose around a layout, so the layout takes it. */
   .tabbar a {
     flex: 1;
     display: flex;
@@ -452,6 +621,7 @@ main {
     gap: 0.15rem;
     padding: var(--space-2) 0 0.4rem;
     font-size: 0.7rem;
+    white-space: nowrap;
     color: var(--muted);
     text-decoration: none;
   }
@@ -467,13 +637,15 @@ main {
   }
 }
 
+/* Inside the canvas, so it is not filled: a summary strip reads as a strip
+   because of the rule under it, the way the toolbar bands do. */
 #status-strip dl {
   display: flex;
-  gap: var(--space-6);
+  gap: var(--space-5);
   flex-wrap: wrap;
-  padding: var(--space-3) var(--space-4);
-  background: var(--panel);
-  border-radius: var(--radius-lg);
+  margin: 0;
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
 }
 
 #status-strip dt {
@@ -491,7 +663,15 @@ main {
   overflow-wrap: anywhere;
 }
 
-#actions {
+/* Action rows: the Status view's, and Settings' three (clear stored maps,
+   check the database, backups). The Settings ones were bare <div>s with no
+   margin of their own and got away with it while an <h3> always followed and
+   carried its own — until a control landed directly beneath one and sat on
+   top of the button. */
+#actions,
+#cache-actions,
+#maintenance-actions,
+#backup-actions {
   margin: var(--space-4) 0;
   display: flex;
   align-items: center;
@@ -499,11 +679,12 @@ main {
 }
 
 button {
-  padding: 0.4rem 0.9rem;
+  padding: var(--space-1) var(--space-3);
   border: 1px solid var(--primary);
   border-radius: var(--radius);
   background: var(--surface);
   color: var(--primary);
+  font: inherit;
   cursor: pointer;
 }
 
@@ -527,52 +708,1081 @@ button.btn-danger:hover:enabled {
   color: var(--on-primary);
 }
 
+/* .btn-cancel was on 24 buttons and had NO rule at all, so a cancel button was
+   drawn exactly like the save button beside it. It is the secondary action:
+   muted, bordered, and it does not claim the accent. */
+button.btn-cancel {
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+button.btn-cancel:hover:enabled {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+/* …and its counterpart: a form's submit is the default action, so it is the one
+   filled button on screen. Stated on .form-actions rather than on [type=submit]
+   generally, because a few submits live in toolbars where a filled button would
+   compete with the view's own actions. */
+.form-actions button[type="submit"] {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.form-actions button[type="submit"]:hover:enabled {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+/* --- the view frame ----------------------------------------------------------
+   Every routed view is a <section class="view">. On wide screens the view is
+   its own scroller rather than a slab of a scrolling page: <main> is a flex
+   column that does not scroll, the utility strip is a fixed band above, and the
+   view fills what is left. That is what lets .view-head stay put while rows
+   move under it — a band that merely sticks inside a page scroller travels with
+   the page as soon as anything else moves.
+
+   On narrow screens none of this applies: <main> is the document scroller, as
+   it has always been, and nested scrollers in a mobile webview buy nothing when
+   there is only one pane. */
+
+.view {
+  min-width: 0;
+  padding: 0 var(--space-3) var(--space-4);
+}
+
+@media (min-width: 701px) {
+  .view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: none;
+    /* No bottom gutter once this is the SCROLLER — a panel's pinned bar cannot
+       cover one. See the note at .inspector-actions for the measurement. The
+       phone keeps its gutter, because there <main> scrolls and this padding is
+       ordinary content rather than a scrollport's own inset. */
+    padding-bottom: 0;
+  }
+
+  /* …and the gutter comes back on the last BLOCK instead, so a view with no
+     panel in it still ends with breathing room rather than a button against
+     the window edge. Padding on a child is scrolled content; padding on the
+     scrollport is the strip the rule above is about.
+
+     `:not(.workspace)` because that is the one child holding a scroller of its
+     own: a gutter there would land back inside the pane the bar has to reach
+     the foot of. */
+  .view > :last-child:not(.workspace) {
+    padding-bottom: var(--space-4);
+  }
+}
+
+/* A view's toolbar band: the section title as a small uppercase label with its
+   actions pushed right — a pane header rather than a document heading. It goes
+   full-bleed by cancelling the view's own inset, so the hairline reaches both
+   window edges. Views hold several of these (FarmView has five); each takes
+   over the top as its section scrolls up, which is what a section header in a
+   pane is meant to do. */
 .view-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: var(--space-4);
+  min-height: var(--band-h);
+  margin: 0 calc(-1 * var(--space-3));
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
 }
 
-/* --- tab strip (the record book's registers) -------------------------------- */
+/* A section's own controls live in the band with its actions rather than in a
+   strip of their own below it. A reserved strip kept every section the same
+   height, which was the point, but four of the six had nothing to put in it and
+   paid 46px of blank canvas for the symmetry. The band was already there and
+   already the right height.
 
-/* The strip is the one element allowed to scroll sideways: <main> is the app's
-   only scroller, so a register list too wide for a phone must contain its own
-   overflow instead of pushing the page. */
+   The label sits BESIDE its control here, not above: a stacked label would make
+   the band taller than --band-h and only on the two sections that have one. */
+/* A row, not a grid: the grid's auto-fill columns are what stack two controls
+   in a band the moment it holds more than one, which is how the record book's
+   holding and campaign pickers came out one above the other. Every band that
+   has one of these wants its controls side by side. */
+.view-head .form-grid {
+  flex: 0 1 auto;
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/* `.view-head .form-grid .tz-field`, not `.view-head .tz-field`: the stacking
+   rule is `.form-grid .tz-field`, the same 0,2,0 specificity, and it is written
+   further down the sheet — so the shorter selector lost the tie and the band
+   came out 54px against the other sections' 41px. Measured. */
+.view-head .form-grid .tz-field {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+.view-head h2,
+.view-head h3,
+.view-head h4 {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+/* A band with no heading is a band whose section is already named — the
+   catalogue's tab strip names it, so repeating it underneath is the same
+   duplication the view titles had. Its actions keep the trailing edge rather
+   than sliding to where the heading used to be.
+
+   `:not(h2, h3, h4)` because the opposite band exists too: a section with a
+   name and no actions. Without it the heading was pushed to the trailing edge
+   as if it were a button — measured on the Status view's alerts. */
+.view-head > :first-child:last-child:not(h2, h3, h4) {
+  margin-left: auto;
+}
+
+/* --- the settings screen: a contents list beside one scrolling document ------
+   The settings stay ONE document that scrolls as a whole — .view is the
+   scroller here as in any ordinary view — and the tree beside them is a sticky
+   column inside it rather than a pane of its own.
+
+   That is deliberately NOT the framed-view path below. A second scroller would
+   put `.view.framed .pane-list` in reach of the profiles workspace nested in
+   this screen, turning its list and inspector into scrollers inside a screen
+   that already scrolls — the same trap `.register-stack` opts out of.
+
+   Below 700px the tree is gone: <main> is the document scroller there, a second
+   column has nowhere to go, and what is left is the single stacked column this
+   screen has always been. The node styling lives in SettingsToc.svelte; what is
+   here is only where the column sits, which is the parent's business. */
+
+.settings-pane {
+  min-width: 0;
+}
+
+/* Every band here spans the settings and not the contents list beside them, so
+   they cancel .view-head's full-bleed inset: that margin is measured against
+   .view's own padding, and in two columns it reaches across the gutter toward
+   the tree on one side and past the pane on the other. */
+.settings-pane > .view-head {
+  margin: 0;
+}
+
+.view-head.settings-search {
+  /* Over any band a section brings with it: this one never leaves the top. */
+  z-index: calc(var(--z-sticky) + 1);
+}
+
+/* …and it is the ONLY band here that sticks. A group's own heading stays where
+   it is written, for two reasons measured together (2026-09-04):
+
+   A sticky element reports its STUCK position from getBoundingClientRect, so a
+   scroll spy that measures one is reading 88px for every heading on the screen
+   at once — which is how the contents list stayed on the first entry however
+   far the reader scrolled. And what a stuck band would have said, the contents
+   list beside it already says: it highlights the group being read. Two rows of
+   permanent chrome to repeat it is a cost with nothing bought.
+
+   `>` because these bands are direct children of the pane — a Svelte component
+   renders no wrapper of its own, so the profiles and catalogues headings are
+   siblings of the rest despite living in their own files. */
+.settings-pane > .view-head {
+  position: static;
+}
+
+.settings-pane > .view-head.settings-search {
+  position: sticky;
+  top: 0;
+}
+
+/* The field fills the band. `.view-head .form-grid` is `flex: 0 1 auto` because
+   a band's controls are normally as wide as their content; a search field is
+   the one case that wants the opposite. */
+.view-head.settings-search .form-grid,
+.view-head.settings-search .form-grid .tz-field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The box holds the input plus the hit count and the clear button, so the input
+   fills what is left and carries no border of its own — the `.tz-combobox`
+   arrangement, whose rule cannot simply be reused because it is keyed on that
+   component's class. */
+.settings-search-box {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-search-box input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
+.settings-search-box input:focus {
+  outline: none;
+}
+
+.settings-count {
+  flex: none;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.settings-empty {
+  color: var(--muted);
+}
+
+@media (min-width: 701px) {
+  .settings-layout {
+    display: grid;
+    grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
+    gap: var(--space-4);
+    align-items: start;
+  }
+
+  /* A DELIBERATE EXCEPTION to the app-wide "no max-width cap" on <main>. That
+     rule is right where a view is tables and form grids, which use the width
+     by adding columns; settings is the one view that reads as a document, and
+     prose does not add columns — it just gets longer lines. Measured on a
+     description paragraph: uncapped it ran as a SINGLE 193-character line at
+     1920px, and the same at 2560px.
+
+     48rem lands a touch under the 808px a 1280px laptop already gave, so the
+     common case barely moves while a wide monitor stops setting a paragraph
+     across the whole screen. The band above scrolls with the pane and is
+     inside it, so it caps too and the two stay aligned. */
+  .settings-pane {
+    max-width: 48rem;
+  }
+
+  /* Sticky rather than a pane with a scrollport of its own: it gets one only if
+     it outgrows the window, which nine entries do not. */
+  .settings-toc {
+    position: sticky;
+    top: 0;
+    max-height: 100vh;
+    overflow-y: auto;
+    padding: var(--space-3) 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .settings-toc {
+    display: none;
+  }
+}
+
+/* A FRAMED view splits its body into panes instead of scrolling as one column:
+   its bands are fixed rows and the workspace fills what is left. Opt-in,
+   because it requires a view that shows ONE subject — an ordinary .view holds
+   any number of sections stacked and scrolls as a whole.
+
+   A flex column rather than a two-row grid, so the number of bands above the
+   workspace is not fixed: the catalogue puts a tab strip above its toolbar,
+   the farms list has only the toolbar, and both work without the frame knowing
+   how many rows to declare. */
+@media (min-width: 701px) {
+  .view.framed {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .view.framed .view-head,
+  .view.framed .tabrow {
+    flex: none;
+    margin: 0;
+  }
+
+  .view.framed .workspace {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
+/* Bits UI's Tabs.Root is a box we do not want: inside a framed view the tab bar
+   and the panel must be laid out by the frame itself, and a wrapper between
+   them breaks that chain. `display: contents` removes the box and keeps the
+   children where the layout expects them. */
+.tabs-root {
+  display: contents;
+}
+
+/* --- the workspace: a list pane and an inspector (TzWorkspace.svelte) --------
+   Wide screens put the form beside the list rather than above or below it. That
+   is not only a density choice: the inline form was rendered ABOVE the list in
+   9 components and BELOW it in 10, split cleanly along the registry/record-book
+   line, and a pane has no such choice to get wrong.
+
+   Narrow screens keep the inline form — there is no room for a second pane, and
+   the fallback is the layout every component already had. */
+
+.workspace {
+  min-width: 0;
+}
+
+.pane-list {
+  min-width: 0;
+  padding-bottom: var(--space-4);
+}
+
+@media (min-width: 701px) {
+  .workspace {
+    display: grid;
+    /* list | splitter | inspector. The splitter column collapses to nothing
+       when the inspector is closed, because neither element renders then. */
+    grid-template-columns: 1fr auto auto;
+    min-height: 0;
+  }
+
+  /* --inspector-w is written on the workspace by TzWorkspace when the reader
+     drags the splitter; until then the pane takes its default. Both halves of
+     the clamp live in JS rather than here, because the ceiling is a share of
+     the workspace's own width and min() cannot see it. */
+  .inspector {
+    width: var(--inspector-w, min(26rem, 40vw));
+    box-sizing: border-box;
+    padding-left: var(--space-3);
+    border-left: 1px solid var(--border);
+  }
+
+  /* A grab area straddling the border rather than sitting beside it: a 1px
+     target is not a target. The negative margins are what let it overlap the
+     rule without taking layout width from either pane. */
+  .pane-resizer {
+    width: 7px;
+    margin-inline: -3px;
+    padding: 0;
+    /* It is a <button>, so the app's button skin has to be undone: the splitter
+       is a grab area, not a control anybody should see as one. */
+    border: 0;
+    border-radius: 0;
+    background: none;
+    z-index: 1;
+    cursor: col-resize;
+    touch-action: none;
+  }
+
+  .pane-resizer:hover,
+  .pane-resizer:focus-visible {
+    background: var(--primary);
+    opacity: 0.3;
+    outline: none;
+  }
+
+  /* Only a FRAMED view gives the panes a height to scroll inside. Embedded in
+     an ordinary scrolling view — six registers stacked on the catalogue screen,
+     five sections on a farm — a workspace is just two columns that grow, and
+     `overflow-y: auto` there would be a scrollbar on a box with no height to
+     constrain it. The inset comes from the frame for the same reason: inside
+     an ordinary view, .view already supplies it. */
+  .view.framed .pane-list,
+  .view.framed .inspector {
+    overflow-y: auto;
+    overscroll-behavior: none;
+    padding-inline: var(--space-3);
+    padding-bottom: var(--space-4);
+  }
+
+  /* A tab holding SEVERAL registers scrolls as ONE column rather than dividing
+     the pane between them: two registers sharing a 600px frame get 300px each,
+     which is a list too short to read. The chrome above still stays put, which
+     is most of what the frame was wanted for.
+
+     Inside the stack the panes are ordinary blocks again, and it is this rule
+     that has to say so: `.view.framed .pane-list` above is 0,3,0 and would win
+     a tie, so the opt-out states the frame too rather than relying on order. */
+  .view.framed .register-stack {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: none;
+    /* No bottom gutter, for the reason at .inspector-actions: this is a
+       scroller, and a register opened inside it pins its action bar against
+       this box's content edge. */
+    padding: 0 var(--space-3);
+  }
+
+  .view.framed .register-stack .workspace {
+    flex: none;
+  }
+
+  .view.framed .register-stack .pane-list,
+  .view.framed .register-stack .inspector {
+    overflow: visible;
+    padding-inline: 0;
+    padding-bottom: 0;
+  }
+
+  /* No bottom gutter here either — the same rule as .view and .register-stack
+     above, and the reason for all three is at .inspector-actions. */
+  .view.framed .inspector {
+    padding-bottom: 0;
+  }
+}
+
+/* The nested panel: what the inspector shows about one row of one of its own
+   child collections. It opens BELOW the child table rather than beside it,
+   because the inspector is already the narrow column and splitting it again
+   would leave two columns too thin to read. Set off by a rule and a tint rather
+   than a box, like everything else on this canvas. */
+.subpanel {
+  margin-top: var(--space-3);
+  padding: 0 var(--space-2) var(--space-2);
+  border-top: 1px solid var(--border);
+  background: var(--row-hover);
+}
+
+/* Secondary text: a register's intro sentence, a note under a band, the
+   explanation beside a control.
+
+   It had a rule only INSIDE a card and inside an alert, so the sixty uses that
+   were neither rendered as ordinary body text — exactly what the class exists
+   to say they are not. With the cards gone it styles nothing at all anywhere,
+   so it is stated once here, for all of them. */
+.detail {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+
+/* A label/value list for a row that cannot be edited — a product's substance
+   link and its authorisations are added or removed, never changed, so the
+   panel states them rather than offering fields that would not save. */
+.detail-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 0;
+  font-size: 0.8125rem;
+}
+
+.detail-list dt {
+  color: var(--muted);
+}
+
+.detail-list dd {
+  margin: 0;
+}
+
+/* Deleting a record belongs beside the record: the inspector is showing it and
+   its name is in the header above. This is what replaced an "Eliminar" button
+   on every row of every table — 2N buttons that were only there because a row
+   itself could not be opened.
+
+   Pinned to the foot of whatever is scrolling it, for the same reason the
+   header is pinned to the top: a correction form is taller than its pane, so
+   the record's name and the two things you can do with it were both reachable
+   only by scrolling to an end.
+
+   THE SCROLLER THAT HOSTS THIS BAR MUST HAVE NO `padding-bottom`, and that is
+   the whole of what makes it reach the foot. **A sticky `bottom: 0` element
+   rests against its scroller's CONTENT box**, so any bottom padding there is a
+   strip the bar cannot cover — and what shows in it is the form scrolling past
+   underneath a button that looks like it is covering it. A negative margin does
+   not buy it back either: the clamp is on the border box.
+
+   Measured 2026-09-03 across all four scrollers a panel can live in, after the
+   first fix caught only one of them:
+
+   | scroller                   | padding-bottom | gap under the bar |
+   |----------------------------|----------------|-------------------|
+   | `.view.framed .inspector`  | dropped        | 0                 |
+   | `.view.framed .register-stack` | dropped    | was 16, 5 intruders |
+   | `.view` (wide, unframed)   | dropped        | was 16, 5 intruders |
+   | `<main>` (phone)           | never had one  | 0                 |
+
+   The phone one is why the rule is about the SCROLLER and not about `.view`:
+   there `<main>` scrolls and `.view`'s padding is ordinary content, so it keeps
+   its gutter and nothing shows through. The bar carries the inset itself, where
+   it is inside the background that hides those rows. */
+.inspector-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-5);
+  padding: var(--space-3) 0 var(--space-4);
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+
+/* The caller hands its action row over WHOLE — the same `.form-actions` markup
+   it had at the foot of the form — so the filled submit keeps the skin stated
+   there and the diff at each of the twenty call sites is a move plus a
+   `form=`. All it loses is the top margin it had as a block of the form: in
+   the bar it is a group in a row. */
+.inspector-actions .form-actions {
+  margin-top: 0;
+}
+
+/* Destructive action at the trailing edge, as far from Save as the bar is
+   wide. The two are one row now, so the distance is the only thing keeping a
+   mis-click from being a deletion. */
+.inspector-delete {
+  margin-left: auto;
+}
+
+/* Below 700px the inspector is simply the next block, so it needs a rule of its
+   own to read as a separate thing — the border-left that divides the panes on a
+   wide screen is not there to do it. */
+@media (max-width: 700px) {
+  .inspector {
+    margin-top: var(--space-3);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
+  }
+
+  /* Nothing to divide: the inspector is the next block, not a second pane. */
+  .pane-resizer {
+    display: none;
+  }
+}
+
+/* Pinned to the head of whatever scrolls the panel — the framed pane on a wide
+   screen, the register stack inside a multi-register tab, `main` on a phone.
+   `position: sticky` rather than a flex column with a scrolling body, because
+   ONE mechanism then covers all three: sticky resolves against the nearest
+   scrolling ancestor, whichever of them that turns out to be, and no wrapper
+   element has to be introduced between the panel and the caller's content.
+
+   Two things are load-bearing. The background must be OPAQUE — the panel sits
+   on the white canvas, and without it the form scrolls visibly through the
+   record's own name. And it takes `--z-sticky`, the same step `.view-head`
+   does, rather than a local 1: on a phone `main` is the one scroller, so the
+   view's own toolbar band is pinned at `top: 0` too — measured, it painted
+   straight over the record's name, which is the one thing this rule exists to
+   keep on screen. Sharing the step means the panel's header TAKES OVER the top
+   as it reaches it, which is exactly what one `.view-head` already does to the
+   band above it. */
+.inspector-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--band-h);
+  /* A rule under the title, like the toolbar bands have. It is what makes the
+     pinning READ as pinning: without it a field slides up under the record's
+     name and simply stops mid-glyph, which looks like a rendering fault rather
+     than a header holding its place. */
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.inspector-close {
+  border-color: transparent;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 var(--space-2);
+}
+
+/* --- data tables -------------------------------------------------------------
+   The app had no table at all: every list of records was a row of cards holding
+   a "·"-joined string, which cannot be aligned, scanned down a column or sorted.
+   Columns are the point — the density is a consequence. */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+/* `table-layout: fixed` is what makes a cell ellipsise: with auto layout a
+   column widens to fit its longest value, so there is never any overflow to
+   ellipsise and one long cell sets the height of the whole row. Fixed layout
+   takes the column widths from the header row and clips the rest. */
+.data-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.data-table th {
+  /* Anchors the resize handle to the header cell's trailing edge. */
+  position: relative;
+  padding: var(--space-2);
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+/* A hairline between the headers, and only between them. The body rows stay
+   ruled horizontally and nothing else: a full grid turns a list of records into
+   a spreadsheet, while a header row with no divisions leaves the eye guessing
+   where one column's title ends and the next begins — which is most of what
+   goes wrong when six abbreviated headings sit side by side.
+
+   `th + th` rather than a border on every header: the first column's line would
+   sit at the pane's own edge, against nothing. It lands where `.col-resizer`
+   puts its grab area, which is the boundary a reader would drag anyway. */
+.data-table th + th {
+  border-left: 1px solid var(--border);
+}
+
+/* No width is stated for the name column on purpose. Fixed layout divides the
+   table equally between the columns that declare nothing, which is the right
+   default across tables of three columns and of nine; giving the first column a
+   percentage made it 68px in the narrow three-column tables inside an
+   inspector, where an equal share is 142px. */
+
+/* Every row is one line tall, whatever it holds. A cell that does not fit is
+   ellipsised rather than wrapped, because a row that grows with its longest
+   value makes a list of records unscannable — the eye loses the column. The
+   vertical padding is generous on purpose: one line plus --space-2 top and
+   bottom reads as a row, not as a spreadsheet. */
+.data-table th,
+.data-table td {
+  /* There is no global border-box reset in this sheet (see the note at the
+     bottom), so a cell states its own. It is what makes a resized column come
+     out the width it was given: with content-box, `width: 151px` plus the
+     8px insets rendered as 167, and every column sat 16px wider than the
+     number stored for it. */
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: var(--space-2);
+  border-top: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+/* The outer cells lose their inset so the first column lines up with the
+   toolbar band's label above it and the actions reach the pane's edge — a
+   column that starts half a space in from the heading reads as misaligned. */
+.data-table th:first-child,
+.data-table td:first-child {
+  padding-left: 0;
+}
+
+.data-table th:last-child,
+.data-table td:last-child {
+  padding-right: 0;
+}
+
+/* Numbers get a column wide enough for the figures and no wider. */
+.data-table .col-num {
+  width: 6rem;
+}
+
+/* A column holding one checkbox and nothing else. Sized to the control rather
+   than to its header, which is why the header there is a short word. */
+.data-table .col-tick {
+  width: 4rem;
+}
+
+/* A column boundary the reader can drag (lib/columnResize.js). It sits INSIDE
+   the header cell rather than straddling the boundary, because .data-table th
+   is `overflow: hidden` for the ellipsis and would clip anything sticking out.
+   The last 8px of a header is the grab area, which is where a grid usually puts
+   it anyway. A <button>, so it is focusable and takes arrow keys without
+   borrowing either — the same reasoning as the inspector's splitter. */
+.col-resizer {
+  box-sizing: border-box;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.col-resizer:hover,
+.col-resizer:focus-visible {
+  background: var(--primary);
+  opacity: 0.3;
+  outline: none;
+}
+
+/* Once any column has been dragged, every column carries a stated width and the
+   TABLE carries their sum, written inline by lib/columnResize.js. The sum is
+   not a nicety: `table-layout: fixed` only applies while the table's width is
+   definite, so `width: auto` here silently dropped the whole table back to
+   automatic layout and the stated widths rendered as something else entirely
+   (measured — inline `218px, 151px, …` came out `98, 139, 220, …`).
+
+   Only the floor belongs here, and it has to go, or it would fight the widths
+   just stated. */
+.data-table.sized {
+  min-width: 0;
+}
+
+/* A floor, so a table scrolls rather than squeezing itself into nonsense. With
+   the inspector open the list pane is about 26rem, and six columns dividing
+   that equally come out at 69px each — every heading ellipsised to "TITU…".
+   Below this width .table-wrap scrolls sideways instead. Scoped to the list
+   pane: the small tables inside an inspector have few columns and fit. */
+.pane-list .data-table {
+  min-width: 34rem;
+}
+
+/* A link in a table is the row's name, not a hyperlink in prose: it takes the
+   text colour and shows its affordance on hover. */
+.data-table a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.data-table a:hover {
+  text-decoration: underline;
+}
+
+/* The whole row opens the record, so the whole row is the target. The name
+   inside is still a real <button> — it is what a keyboard reaches — but it no
+   longer needs to look like the only way in, so it takes no underline on hover;
+   the row tint is the affordance. */
+.data-table tbody tr {
+  cursor: pointer;
+}
+
+.data-table tbody tr:hover {
+  background: var(--row-hover);
+}
+
+/* A table whose rows open nothing — a list of STATEMENTS rather than records,
+   like the per-plot "no abstraction points on this plot" declarations, where
+   the row's own control is the whole of it. The pointer and the hover tint are
+   what say a row can be opened, so a table that cannot must not show them. */
+.data-table.rows-static tbody tr {
+  cursor: default;
+}
+
+.data-table.rows-static tbody tr:hover {
+  background: none;
+}
+
+/* The row being edited in the inspector. A tint rather than an outline: the
+   selection has to survive next to a hover on another row. */
+.data-table tbody tr.selected,
+.data-table tbody tr.selected:hover {
+  background: var(--row-selected);
+}
+
+.data-table .col-name {
+  font-weight: 600;
+}
+
+/* Numbers line up under each other or the column is decoration. */
+.data-table .col-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Row actions, at the trailing edge. A STATED width, not the `width: 1%`
+   shrink-to-fit trick this started as: under `table-layout: fixed` a
+   percentage resolves against the table, so 1% was taken literally and the
+   column came out 12px with its buttons clipped away entirely (measured on the
+   Status view's alerts, the first table to use the class). Wide enough for two
+   quiet buttons; a table that needs more says so with its own rule. */
+.data-table .col-actions {
+  width: 11rem;
+  max-width: none;
+  white-space: nowrap;
+  text-align: right;
+}
+
+/* The row's name IS the way into the record — clicking it opens the row in the
+   inspector, which is what let every per-row "Editar" button go. It has to be a
+   real <button> rather than a click handler on the <tr>: a table row carries
+   the `row` role and is not operable from the keyboard, so a handler there
+   would leave the whole table reachable by mouse only. Styled as the text it
+   sits in, so the column still reads as data. */
+.data-table .row-open {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.data-table .row-open:hover:enabled {
+  background: none;
+  color: inherit;
+}
+
+/* Focus still has to be visible: it is the keyboard's only sign of where it is
+   in the table, and unlike hover it has no row tint behind it. */
+.data-table .row-open:focus-visible {
+  background: none;
+  color: var(--primary);
+}
+
+.data-table td.col-muted {
+  color: var(--muted);
+}
+
+.data-table .col-actions button + button {
+  margin-left: var(--space-1);
+}
+
+.table-empty {
+  padding: var(--space-3) var(--space-2);
+  color: var(--muted);
+}
+
+/* --- tab row (the record book's registers) -----------------------------------
+
+   The ROW is the strip plus, once the strip runs out of room, a menu holding
+   the tabs that did not fit — the shape GitHub's repo nav uses, and the reason
+   this is a row and not only a strip. TzTabs.svelte decides the split; what the
+   sheet has to get right is that the strip clips and the menu group does not
+   shrink.
+
+   `.tabrow` and not `.tabbar`, which is TAKEN: the shell's phone navigation is
+   `<nav class="tabbar">` (see the chrome rules near the top of this sheet).
+   Naming this one that made the two swap rules in both directions — the
+   register strip came out 602px inside a 1000px frame, and the phone nav
+   inherited a negative margin that pushed the whole document 12px sideways at
+   1280, which is the width nobody thinks to check a phone bar at. Measured
+   2026-09-03; the page-overflow assertion caught it.
+
+   The strip used to be `overflow-x: auto` and the tabs that did not fit were
+   simply off the edge. That is the worst of both on the two screens that
+   matter: a sideways scroller shows nothing that says more tabs exist, and on a
+   phone it competes with the page's own scrolling. */
+.tabrow {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+  /* Full-bleed inside the view's inset, like the toolbar bands: the rule under
+     the tabs is a division of the frame, not of a paragraph. */
+  margin: 0 calc(-1 * var(--space-3));
+  padding: 0 var(--space-3);
+}
+
+/* `flex: 0 1 auto`, not `1 1 auto`: the menu button follows the last visible
+   tab rather than being pushed to the far edge, which is what makes the divider
+   read as one strip divided instead of two unrelated controls. Shrinking is the
+   safe failure — if a split ever keeps one tab too many it is clipped, not
+   pushed through the side of the frame.
+
+   `overflow-x: clip`, and that spelling is the load-bearing one. `hidden` on
+   one axis computes the OTHER to `auto`, which would clip the focus ring off
+   the top and bottom of every tab — the ring is drawn globally at
+   `outline-offset: 1px` and the strip is exactly one tab tall. `clip` is the
+   exception the spec allows to leave the other axis visible, and its
+   clip-margin then lets the ring of the LAST visible tab finish too: 3px is the
+   ring's reach (2px wide, 1px offset), well under the 4px gap that separates it
+   from the first tab in the menu. */
 .tabstrip {
   display: flex;
   gap: var(--space-1);
-  overflow-x: auto;
-  border-bottom: 1px solid var(--border);
-  margin: var(--space-4) 0 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: clip;
+  overflow-clip-margin: 3px;
 }
 
-.tabstrip .tab {
+.tabrow .tab {
   flex: 0 0 auto;
   background: none;
   border: none;
-  border-bottom: 3px solid transparent;
+  border-bottom: 2px solid transparent;
   border-radius: 0;
-  padding: var(--space-2) 0.9rem;
+  padding: var(--space-2) var(--space-3);
   color: var(--muted);
   font-weight: 600;
   white-space: nowrap;
 }
 
-.tabstrip .tab:hover:enabled {
+.tabrow .tab:hover:enabled {
   color: var(--text);
   background: none;
 }
 
-.tabstrip .tab.active {
+/* Keyed on the ARIA state rather than a class: Bits UI's Tabs.Trigger sets
+   aria-selected itself and knows nothing about our `active` class, and the
+   state is the true thing to style on either way.
+
+   `.is-current` is the menu button's half of the same statement. It is not a
+   tab and has no aria-selected to carry, but when the tab the reader is on sits
+   inside its menu, the bar still has to say where they are. */
+.tabrow .tab[aria-selected="true"],
+.tabrow .tab.is-current {
   color: var(--primary);
   border-bottom-color: var(--primary);
 }
 
-.tabpanel {
+/* The overflow group: a hairline, then the button. It never shrinks — it is
+   exactly what the split reserved room for — and it carries its own leading
+   space rather than leaning on a gap, so TzTabs measures one box and reads one
+   gap instead of two. */
+.tab-overflow {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: var(--space-1);
+  padding-left: var(--space-2);
+}
+
+/* Bits UI's Separator renders a bare <div>; the size and the colour are ours.
+   Decorative, so it draws a line without announcing one — a screen reader
+   already hears the tab list end and a menu button begin. */
+.tab-divider {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 1.25rem;
+  background: var(--border);
+}
+
+/* A button dressed as a tab, plus the caret that says it opens something. */
+.tab-more {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.tab-more svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+/* Plot pickers and the like: a wrapping row of checkbox + label pairs. The gap
+   is what keeps "La Vega" from running into the next box — without it the list
+   reads as one string of names. */
+.checkbox-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+/* The same list where the rows are SENTENCES rather than names: wrapping them
+   side by side gives ragged columns nobody can scan, so they stack. Section
+   6's good practices are the case — up to ~250 characters each, straight out
+   of the catalogue. */
+.checkbox-list.stacked {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+}
+
+/* A tab row nested inside a tab panel — section 9's registers inside the
+   record book's eco-schemes tab. Lighter than the row above it, so the two
+   levels are not mistaken for one — and lighter now means SHORTER, not smaller:
+   it keeps the parent's type and loses the rule underneath and half its
+   vertical padding.
+
+   It used to set `font-size: 0.9rem` and claim to be "smaller type", which it
+   was not: 0.9rem is 14.4px against a parent computing to 14, so the nested
+   strip rendered fractionally LARGER than the one above it. A size that differs
+   by half a pixel reads as a rendering accident rather than a level. */
+.tabrow.subtabs {
+  margin-top: 0;
+  border-bottom: none;
+}
+
+/* The horizontal inset matches the parent's, so the first sub-tab lines up
+   under the first tab; only the height changes. */
+.tabrow.subtabs .tab {
+  padding: var(--space-1) var(--space-3);
+}
+
+/* `:not([hidden])` for the reason spelled out at the framed-view panel rule:
+   Bits UI keeps every inactive panel in the DOM and hides it with the `hidden`
+   attribute, and a bare `display:` here would revive all of them at once. It
+   did not matter while the strips were hand-rolled and rendered one panel; it
+   does now, and stating it once here is cheaper than finding out again. */
+.tabpanel:not([hidden]) {
   display: grid;
+  /* `minmax(0, 1fr)`, never the implicit `auto`: an auto column is sized by
+     its widest item, and `.pane-list .data-table`'s 34rem floor then made the
+     whole column 544px inside a 366px panel on a 390px phone. The tables were
+     fine — they scroll inside .table-wrap — but every paragraph beside them
+     stretched to 544 too, and <main> scrolled sideways instead. Measured.
+
+     `main` is why it went unnoticed: its `overflow-y: auto` computes
+     `overflow-x` to `auto` as well, so it absorbed the overflow as a
+     horizontal scroll of its own and `documentElement.scrollWidth` stayed
+     390 — the assertion the phone check makes. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-4);
   padding-top: var(--space-4);
+}
+
+/* A tabbed frame: TzTabs' panel is the growing BODY of a pane rather than a
+   block of a page, so the bands above it can stay put while what is inside it
+   scrolls. Keyed on the class the strip declares (TzTabs' `framed`), not on
+   where the panel sits: the record book's nested strips are panes and the
+   product inspector's is not, and no structural selector separates those two.
+
+   It sits here, immediately after the rule it overrides, because the two are
+   the SAME specificity (0,2,0) and order is the only thing that separates
+   them. Written earlier in the sheet it lost the tie silently, and the panel
+   came out a stretched grid — the register's band, its SÍ/NO line and its
+   table pushed apart by 200px of nothing, because `align-content: stretch` is
+   a grid's default and the rows had a pane's height to divide.
+
+   `:not([hidden])` is load-bearing too. Bits UI keeps the inactive panels in
+   the DOM and hides them with the `hidden` attribute, whose whole effect is a
+   UA `display: none` — so stating any display here without it silently revives
+   all of them. Measured: the visible panel came out 109px instead of ~650,
+   because six flex siblings were splitting the frame and five were empty. */
+@media (min-width: 701px) {
+  .tabpanel-framed:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    gap: 0;
+  }
+
+  /* A register's intro line — the sentence naming the decree, the model's
+     SÍ/NO answer — sits directly in the panel, between two rows that state
+     their own inset. The panel states none (each pane does), so a paragraph
+     there has to. Scoped to the panel's OWN children: the ones inside a pane
+     or a stack are inset already, and a second would double it. */
+  .tabpanel-framed > p {
+    flex: none;
+    margin: var(--space-2) 0;
+    padding-inline: var(--space-3);
+  }
 }
 
 /* An action offered inside a hint line (the treatment form's suggested total):
@@ -592,101 +1802,89 @@ button.link-button:hover:enabled {
   color: var(--primary);
 }
 
+/* A note under an identifier field naming the official registry that holds it
+   (RegistryHint.svelte). Inside a .form-grid label the <small> already inherits
+   the muted colour and size; these say so outright so the block variant, which
+   sits above a fieldset instead, matches it. */
+.registry-hint {
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.registry-hint.block {
+  margin: 0 0 var(--space-3);
+}
+
+/* The external-link glyph rides inside the sentence, so it is sized in em and
+   nudged onto the text baseline rather than sitting on it. */
+.registry-hint .link-button svg {
+  width: 0.85em;
+  height: 0.85em;
+  vertical-align: -0.1em;
+}
+
 /* --- alerts ---------------------------------------------------------------- */
 
-#alerts {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: var(--space-2);
-}
-
-.alert {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  padding: 0.6rem 0.9rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-left: 4px solid var(--warning);
-  border-radius: var(--radius);
-}
-
-.alert .detail {
-  flex: 1;
-  color: var(--muted);
-  font-size: 0.875rem;
+/* Domain alerts are a data table like every other list; what makes them alerts
+   is the accent bar on the leading edge, which is the one border they keep.
+   It sits on the leading CELL rather than on the row: a border declared on a
+   <tr> is resolved by the collapsing model against the cells' own borders, and
+   the cell is the element that is certain to draw it. The inset .data-table
+   zeroes on the first column comes back with it, or the text would sit against
+   the bar. */
+#alerts td:first-child {
+  border-left: 3px solid var(--warning);
+  padding-left: var(--space-2);
 }
 
 /* Acknowledged alerts stay listed by design — just subdued. */
-.alert.acknowledged {
+#alerts tr.acknowledged {
   opacity: 0.55;
+}
+
+#alerts tr.acknowledged td:first-child {
   border-left-color: #9a9a9a;
 }
 
-/* --- cards (farms, plots) --------------------------------------------------- */
-
-.card-list {
-  list-style: none;
-  padding: 0;
-  display: grid;
-  gap: var(--space-2);
+/* The header has no bar, so its first cell keeps the column's own alignment. */
+#alerts th:first-child {
+  padding-left: var(--space-2);
 }
 
-.card {
-  display: flex;
-  /* Cards hold a name, a detail line and several action buttons; on narrow
-     screens the actions wrap to a second row instead of overflowing. */
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-3);
-  padding: 0.6rem 0.9rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.card a {
-  flex: 1;
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-3);
-  color: inherit;
-  text-decoration: none;
-}
-
-.card .detail {
-  flex: 1;
+/* Row actions are not the point of the row. Two accented outline buttons on
+   every line pulled the eye down a column of "Editar/Eliminar" instead of along
+   the data, so in a row they are quiet — a hairline border and muted text —
+   and take their colour on hover. They stay visible rather than appearing on
+   hover, because a touch screen has no hover to reveal them with. */
+.data-table button {
+  height: 1.6rem;
+  padding: 0 var(--space-2);
+  border-color: var(--border);
   color: var(--muted);
-  font-size: 0.875rem;
-}
-
-/* A labelled control inside a card row: the farm's advisory framework belongs
-   to the relationship, so it is edited where the relationship is listed. */
-.card-field {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
   font-size: 0.8125rem;
-  color: var(--muted);
 }
 
-/* The "link an advisor" row: a grid outside a form, so the button lines up
-   with the selects instead of floating above them. */
-.advisor-add {
-  align-items: end;
-  margin-bottom: var(--space-4);
+.data-table button:hover:enabled {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.data-table button.btn-danger:hover:enabled {
+  border-color: var(--danger);
+  background: var(--danger);
 }
 
 /* --- forms ------------------------------------------------------------------ */
 
+/* A form is part of the view, not a sheet floating on it. The border, fill and
+   radius are gone for the same reason the cards' are: on a white canvas they
+   separate nothing, and 26 of these stacked down a page is what made the app
+   read as a document of panels. What marks a form now is the space around it
+   and the rule under its actions. */
 form {
-  margin: var(--space-4) 0;
-  padding: var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  margin: var(--space-3) 0;
+  padding: 0;
 }
 
 .form-grid {
@@ -695,15 +1893,72 @@ form {
   gap: var(--space-3);
 }
 
-/* .tz-field is an owned control's outer wrapper. It stands where a <label>
-   stands, because an owned field's root is a <div> — not a labelable element —
-   so the association is made by the control's own Label part instead. */
-.form-grid label,
-.form-grid .tz-field {
-  display: flex;
-  flex-direction: column;
+/* What a form says when it cannot be saved (TzForm.svelte): every problem at
+   once, at the top, in the holding's language. Global rather than scoped
+   because 26 forms render it — shared vocabulary by the same test that keeps
+   .form-grid here.
+
+   Deliberately NOT the #alerts block: that one is the Status view's domain
+   alerts (PHI, licence, ITV), which are a farmer's standing obligations and not
+   this form's refusal. Two things that look alike and mean nothing alike should
+   not share a class, or moving one moves the other. */
+.validation-summary {
+  margin-bottom: var(--space-4);
+  padding: var(--space-3);
+  border: 1px solid var(--danger);
+  border-left: 4px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.validation-summary-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--danger);
+}
+
+.validation-summary-refusal {
+  margin: var(--space-2) 0 0;
+  color: var(--text);
+}
+
+.validation-summary ul {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  display: grid;
   gap: var(--space-1);
   font-size: 0.875rem;
+}
+
+/* The entry is a button so it can move focus to the field it names — on a
+   register several screens tall, naming the problem without offering to go
+   there is half an answer. It reads as text, not as a control. */
+.validation-summary li button {
+  padding: 0;
+  text-align: left;
+  color: var(--text);
+}
+
+/* .tz-field is an owned control's outer wrapper. It stands where a <label>
+   stands, because an owned field's root is a <div> — not a labelable element —
+   so the association is made by the control's own Label part instead.
+   .static-field stands there too, for a cell whose value is composed elsewhere
+   and has nothing to type into: a <label> wrapping no control names nothing,
+   so a screen reader is told a field exists that cannot be reached. */
+/* `:not(.tz-check)` because a checkbox row is the one field whose control and
+   text belong side by side: stacking a tick above its own sentence separates
+   the box from what it claims. .tz-check says both axes itself, below. */
+.form-grid label:not(.tz-check),
+.form-grid .tz-field,
+.form-grid .static-field {
+  display: flex;
+  flex-direction: column;
+  /* A hairline of space: the label names the control directly under it, so
+     anything more reads as two separate things. */
+  gap: 0.125rem;
+  /* Smaller than the body text now that the body text is 14px — a field label
+     that matches its own value competes with it. */
+  font-size: 0.8125rem;
   color: var(--muted);
 }
 
@@ -715,21 +1970,24 @@ form {
    field of its own — the control box around it already carries the border, the
    background and the padding. Without the exclusion the combobox's input won a
    second border of its own and a second 0.6rem inset, so its text sat visibly
-   further right than every other control in the row. */
-.form-grid input:not(.tz-validity, .tz-control *),
+   further right than every other control in the row.
+   `.tz-check *` for the same reason and a louder symptom: a checkbox that took
+   this rule came out 2.25rem tall with a text field's border and inset around
+   it, which is what the native rows in section 6 had been rendering. */
+.form-grid input:not(.tz-validity, .tz-control *, .tz-check *),
 .form-grid select,
 .form-grid .tz-control,
 .form-grid button:not(.tz-field-trigger),
 .form-actions button,
 .plot-row button {
   box-sizing: border-box;
-  height: 2.25rem;
+  height: var(--control-h);
 }
 
-.form-grid input:not(.tz-validity, .tz-control *),
+.form-grid input:not(.tz-validity, .tz-control *, .tz-check *),
 .form-grid select,
 .form-grid .tz-control {
-  padding: 0 0.6rem;
+  padding: 0 var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   font: inherit;
@@ -772,8 +2030,9 @@ fieldset.es-only legend {
   }
 }
 
-/* Checkbox groups (treatment justifications): row layout inside the label,
-   unlike .form-grid's stacked labels. */
+/* Checkbox groups (treatment justifications, analysis types): short labels, so
+   they read in columns rather than stacked. The row layout inside each label
+   used to be stated here too; .tz-check carries it now. */
 .checkbox-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
@@ -781,31 +2040,15 @@ fieldset.es-only legend {
   padding: var(--space-2) 0;
 }
 
-.checkbox-grid label.checkbox {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.875rem;
-  color: var(--text);
-}
-
-/* Small labelled control inside a card (e.g. the record's efficacy select). */
+/* A small labelled control in a toolbar band — the map's farm picker, the
+   export's language picker — where the label sits BESIDE its control rather
+   than above it, so the band stays one row tall. */
 .inline-field {
   display: flex;
   align-items: center;
   gap: 0.4rem;
   font-size: 0.875rem;
   color: var(--muted);
-}
-
-.inline-field select {
-  padding: 0.1rem 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font: inherit;
-  color: var(--text);
-  background: var(--surface);
 }
 
 /* --- owned controls ----------------------------------------------------------
@@ -930,8 +2173,117 @@ button.tz-field-trigger:hover:enabled {
   color: var(--danger);
 }
 
-/* An owned control standing in a card's inline field rather than a form row:
-   a row, and smaller. `.inline-field` already supplies the flex, but a
+/* --- the owned checkbox (TzCheckbox) ---
+   Unlike the controls above, the element under this skin is a real
+   <input type="checkbox">: nothing about a checkbox is locale-dependent or
+   platform-drawn in a way that could record the wrong thing, so only the
+   painting is ours. `appearance: none` is what hands the box over; without it
+   the platform draws its own and every property below is ignored.
+
+   The row is a two-column grid rather than a flex line so that a label running
+   to several lines stays aligned under itself instead of wrapping beneath the
+   tick — which is the shape section 6's practices need, their labels being
+   sentences straight out of the FEGA catalogue. The box and its tick share the
+   first cell; only the text is in the second. */
+.tz-check {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0 var(--space-2);
+  font-size: 0.875rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tz-check-input {
+  appearance: none;
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  cursor: inherit;
+}
+
+.tz-check-input:checked {
+  border-color: var(--primary);
+  background: var(--primary);
+}
+
+.tz-check-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+/* The tick is painted over the box, not inside it: an <input> takes no
+   children, so the glyph has to be a sibling placed in the same grid cell. */
+.tz-check-mark {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--on-primary);
+  pointer-events: none;
+  opacity: 0;
+}
+
+.tz-check-input:checked + .tz-check-mark {
+  opacity: 1;
+}
+
+.tz-check-mark svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.tz-check-text {
+  grid-area: 1 / 2;
+  /* The box is 1.1rem against a 0.875rem line, so the text needs the
+     difference to sit on the box's centre line rather than its top edge. */
+  padding-top: 0.05rem;
+}
+
+.tz-check-text small {
+  display: block;
+  color: var(--muted);
+}
+
+.tz-check-disabled {
+  opacity: var(--disabled-opacity);
+  cursor: default;
+}
+
+/* A checkbox named by the column it sits in (TzCheckbox's `labelHidden`). The
+   text stays in the DOM — it is the control's only accessible name, and a bare
+   box in a cell would announce as "checkbox" and nothing else — so what is
+   removed is its BOX, not the element. */
+.tz-check-bare .tz-check-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Thumb-sized rows on touch, the floor .tz-option states for the same reason:
+   padding grows a row with long text, it cannot lift a short one, and "Lodos
+   de depuradora" is one line on any screen. */
+@media (pointer: coarse) {
+  .tz-check {
+    align-content: center;
+    min-height: 2.75rem;
+  }
+}
+
+/* An owned control standing in an inline field rather than a form row: a row,
+   and smaller. `.inline-field` already supplies the flex, but a
    .tz-field that lands inside a .form-grid would otherwise inherit the taller
    column layout, so both axes are said here. */
 .inline-field.tz-field {
@@ -943,8 +2295,8 @@ button.tz-field-trigger:hover:enabled {
 .inline-field .tz-control {
   height: auto;
   padding: 0.1rem 0.4rem;
-  /* A control in a card sits beside its label, not in a form column, so
-     `button.tz-trigger`'s `width: 100%` made it span the whole card — a picker
+  /* A control in a band sits beside its label, not in a form column, so
+     `button.tz-trigger`'s `width: 100%` made it span the whole band — a picker
      of four short words rendered a hand's width of empty box. It takes its
      content's width instead, floored so a one-word value still reads as a
      control, and capped so a single long option cannot stretch the row (past
@@ -993,12 +2345,49 @@ button.tz-trigger svg {
   color: var(--muted);
 }
 
+/* The external-link icon in the About panel's link rows. GLOBAL, though every
+   other rule for that panel is scoped inside AboutPanel.svelte: the icon is a
+   Lucide component, and Svelte's scoping hash is added to the markup it
+   COMPILES, never to markup a library renders. Left scoped it matched nothing —
+   which is what the "unused CSS selector" warning was really saying. */
+.about-links svg {
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+}
+
 /* --- floating layers (portalled to <body>) --- */
+
+/* The owned tooltip (TzTooltip.svelte). The app's own surface, its own hairline
+   and the grey its tables set their secondary columns in — a tip is an
+   annotation on this canvas rather than a dark chip laid over it, and reusing
+   the table's own text colour is what makes it read as belonging here.
+
+   The rule is what separates it from the canvas, exactly as it does for every
+   other raised surface in this sheet: --surface equals --bg, so a floating box
+   reads by its border and its shadow, never by its fill.
+
+   It is inert to the pointer, but that is NOT stated here: bits-ui writes
+   `pointer-events` inline from its own `disableHoverableContent` flag, and an
+   inline style beats a stylesheet rule — a `none` in this block computed to
+   `auto`. TzTooltip passes the flag instead. */
+.tz-tooltip {
+  z-index: var(--z-tooltip);
+  max-width: 20rem;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  box-shadow: var(--shadow-popover);
+}
 
 .tz-popover {
   z-index: var(--z-popover);
   padding: var(--space-2);
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow-popover);
@@ -1033,6 +2422,21 @@ button.tz-trigger svg {
   overflow-y: auto;
 }
 
+/* The tab bar's overflow menu (TzMenu.svelte). Unlike .tz-listbox it has no
+   trigger whose width to match — a menu is as wide as its longest row and no
+   wider — so it states only a floor, a cap and its own scrolling.
+
+   The fallback in `min()` is the trap .tz-listbox documents, met again: the
+   variable is named PER COMPONENT (`--bits-dropdown-menu-*` here), and a
+   declaration referencing an undefined variable is invalid at computed-value
+   time and dropped SILENTLY, cap and all. */
+.tz-menu {
+  padding: var(--space-1);
+  min-width: 10rem;
+  max-height: min(20rem, var(--bits-dropdown-menu-content-available-height, 20rem));
+  overflow-y: auto;
+}
+
 .tz-option {
   display: flex;
   align-items: center;
@@ -1053,7 +2457,10 @@ button.tz-trigger svg {
   background: var(--surface-hover);
 }
 
-.tz-option[data-selected] {
+/* Two spellings of one state, because two families write it: a Select row
+   carries `data-selected`, a menu radio row carries `data-state="checked"`. */
+.tz-option[data-selected],
+.tz-option[data-state="checked"] {
   color: var(--primary);
   font-weight: 600;
 }
@@ -1192,45 +2599,154 @@ button.tz-calendar-nav:hover:enabled {
   }
 }
 
-/* --- loading skeletons -------------------------------------------------------
-   Shown by Skeleton.svelte while a view's first fetch is in flight. */
-
-.card.skeleton {
-  pointer-events: none;
+/* --- the owned modal (TzDialog, portalled to <body>) ---
+   Centred panel on a wide screen, full-screen sheet on a phone — the same
+   split the app shell makes, and made the same way: one component, one media
+   query, no JS breakpoint. Note there is no global box-sizing reset, so every
+   rule below that states a width or height says which box it means. */
+.tz-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  background: rgb(0 0 0 / 45%);
 }
 
-.skel-bar {
-  height: 0.9rem;
-  border-radius: var(--radius-sm);
-  background: linear-gradient(90deg, var(--border) 30%, var(--panel) 50%, var(--border) 70%);
-  background-size: 300% 100%;
-  animation: skel-shimmer 1.1s linear infinite;
+.tz-dialog {
+  position: fixed;
+  z-index: var(--z-modal);
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: min(32rem, calc(100vw - var(--space-6)));
+  max-height: min(40rem, calc(100dvh - var(--space-6)));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  transform: translate(-50%, -50%);
 }
 
-/* Widths are classes rather than style="width: …" attributes: the production
-   CSP is `default-src 'self'` with no `style-src`, so a style attribute is
-   blocked (`style-src-attr`) and the bar would silently render full width.
-   Found on Android, where the block is reported to the console. */
-.skel-bar.skel-short {
-  width: 22%;
+/* Chrome, not content: the bar names the dialog and offers the way out, and
+   every pixel it takes is one the dialog's own content does not get. It was
+   67px tall — a 1.05rem title against 0.875rem body text, in 16px of padding —
+   which is most of what pushed the About panel's first tab into scrolling. */
+.tz-dialog-head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
 }
 
-.skel-bar.skel-long {
-  width: 46%;
+.tz-dialog-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
-@keyframes skel-shimmer {
-  from {
-    background-position: 100% 0;
+.tz-dialog-close {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  /* Sized to the title beside it rather than to a touch target. The 44px floor
+     below is keyed on `pointer: coarse`, not on width, so this shrinks for a
+     mouse at any window size and never for a finger (measured: 28px fine,
+     44px coarse). */
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  color: var(--muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+}
+
+.tz-dialog-close:hover {
+  background: var(--surface-hover);
+}
+
+.tz-dialog-close svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+/* The inset is named because something else has to match it: a sticky strip
+   inside this scrollport resolves `top` against the CONTENT box, so it has to
+   cancel exactly this padding to sit flush (AboutPanel's tab row). Hard-coding
+   the same `--space-4` in both places is how that silently breaks the moment
+   one of them is tuned. */
+.tz-dialog-body {
+  --dialog-inset-y: var(--space-4);
+  --dialog-inset-x: var(--space-4);
+  padding: var(--dialog-inset-y) var(--dialog-inset-x);
+  overflow-y: auto;
+}
+
+/* A dialog whose content switches (the About panel's tabs) takes the height it
+   is allowed rather than the height each tab happens to need — otherwise the
+   box resizes under the pointer as the reader moves along the strip, which
+   reads as the window jumping rather than as the content changing.
+   Wide screens only: the phone sheet below is already full-height. */
+@media (min-width: 701px) {
+  .tz-dialog.fill {
+    height: min(40rem, calc(100dvh - var(--space-6)));
+    /* Wider than a plain dialog, because WIDTH is what makes this one fit.
+       Measured 2026-09-04 on the About panel's first tab, which overflowed by
+       106px: tightening the head, the insets and every margin recovered 56px
+       of that, and the rest is wrapping — the AGPL notice alone is three
+       paragraphs and 207px at 32rem, 151px at 38rem.
+
+       Taller was the other candidate and it loses: at 40rem the dialog already
+       nearly fills a 720px-tall laptop screen, so raising the cap buys nothing
+       there and the tab scrolls again. Making the content shorter works at
+       every height. */
+    width: min(38rem, calc(100vw - var(--space-6)));
   }
-  to {
-    background-position: 0% 0;
+
+  .tz-dialog.fill .tz-dialog-body {
+    --dialog-inset-y: var(--space-3);
+  }
+
+  /* The body has to CLAIM the leftover height now that there is some — with a
+     max-height it simply never grew past it. */
+  .tz-dialog.fill .tz-dialog-body {
+    flex: 1;
+    min-height: 0;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .skel-bar {
-    animation: none;
+/* The sheet takes the whole screen on a phone: a centred card with margins
+   wastes the smallest viewport, and the close button has to clear the safe
+   area rather than sit under the system gesture bar. */
+@media (max-width: 700px) {
+  .tz-dialog {
+    top: 0;
+    left: 0;
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    transform: none;
+  }
+
+  .tz-dialog-body {
+    padding-bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+  }
+}
+
+/* Same 44px floor the option rows carry: padding alone leaves a 32px target. */
+@media (pointer: coarse) {
+  .tz-dialog-close {
+    width: 44px;
+    height: 44px;
   }
 }
 
@@ -1256,18 +2772,6 @@ fieldset.subsection legend {
 
 .plot-row button {
   align-self: end;
-}
-
-/* Multi-line card body (treatment records). */
-.card .stack {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.card .stack .detail {
-  flex: none;
 }
 
 /* Boot indicator ---------------------------------------------------------- */

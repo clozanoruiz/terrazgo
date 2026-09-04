@@ -38,13 +38,19 @@ pub const BACKUP_SHAPE: &[terrazgo_core::backup::TableShape] = &[
         "treatment_record",
         &[
             "application_end_date",
+            "drying_date",
             "total_quantity_value",
             "total_quantity_unit_code",
         ],
     ),
     (
         "non_field_treatment",
-        &["subject_kind_code", "subject_description", "treated_on"],
+        &[
+            "subject_kind_code",
+            "subject_description",
+            "treated_on",
+            "premises_id",
+        ],
     ),
     (
         "register_declaration",
@@ -97,6 +103,7 @@ pub fn migrations() -> Migrations<'static> {
 pub fn open_in_memory() -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     conn.pragma_update(None, "foreign_keys", true)?;
+    terrazgo_core::db::harden(&conn)?;
     migrations().to_latest(&mut conn)?;
     Ok(conn)
 }
@@ -108,6 +115,7 @@ pub fn open(path: impl AsRef<std::path::Path>) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "foreign_keys", true)?;
+    terrazgo_core::db::harden(&conn)?;
     migrations().to_latest(&mut conn)?;
     Ok(conn)
 }

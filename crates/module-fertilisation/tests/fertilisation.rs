@@ -8,13 +8,18 @@
 //! redirects to.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+mod common;
+
+use common::{FarmWithPlots, farm_with_plots, last_change};
 use module_fertilisation::models::*;
 use module_fertilisation::open_in_memory;
 use module_fertilisation::repository as repo;
 use rusqlite::Connection;
-use terrazgo_core::models::{NewFarm, NewMachinery, NewPlot, NewSeason};
+use terrazgo_core::models::{NewMachinery, NewSeason};
 use terrazgo_core::repository as core_repo;
 
+/// The shared land plus the two spreaders this register needs — one on the
+/// farm, one on the neighbour's.
 struct Fixture {
     season_id: String,
     farm_id: String,
@@ -26,52 +31,7 @@ struct Fixture {
 }
 
 fn fixture(conn: &mut Connection) -> Fixture {
-    let season = core_repo::insert_season(
-        conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
-    let farm = |conn: &mut Connection, name: &str| {
-        core_repo::insert_farm(
-            conn,
-            NewFarm {
-                name: name.into(),
-                owner_name: None,
-                owner_tax_id: None,
-                country_code: "es".into(),
-                es: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let farm_id = farm(conn, "Finca La Vega");
-    let other_farm = farm(conn, "Finca del Vecino");
-
-    let plot = |conn: &mut Connection, farm_id: &str, name: &str, area: f64| {
-        core_repo::insert_plot(
-            conn,
-            NewPlot {
-                farm_id: farm_id.to_string(),
-                name: name.into(),
-                area_ha: Some(area),
-                es: None,
-            },
-            None,
-        )
-        .unwrap()
-        .id
-    };
-    let plot_a = plot(conn, &farm_id, "El Prado", 4.0);
-    let plot_b = plot(conn, &farm_id, "La Loma", 3.0);
-    let other_farm_plot = plot(conn, &other_farm, "Ajena", 2.0);
+    let core = farm_with_plots(conn, FarmWithPlots::default());
 
     let machine = |conn: &mut Connection, farm_id: &str, name: &str| {
         core_repo::insert_machinery(
@@ -91,15 +51,15 @@ fn fixture(conn: &mut Connection) -> Fixture {
         .unwrap()
         .id
     };
-    let machinery_id = machine(conn, &farm_id, "Abonadora centrífuga");
-    let other_farm_machinery = machine(conn, &other_farm, "Cuba del vecino");
+    let machinery_id = machine(conn, &core.farm_id, "Abonadora centrífuga");
+    let other_farm_machinery = machine(conn, &core.other_farm_id, "Cuba del vecino");
 
     Fixture {
-        season_id: season.id,
-        farm_id,
-        plot_a,
-        plot_b,
-        other_farm_plot,
+        season_id: core.season_id,
+        farm_id: core.farm_id,
+        plot_a: core.plot_a,
+        plot_b: core.plot_b,
+        other_farm_plot: core.other_farm_plot,
         other_farm_machinery,
         machinery_id,
     }
@@ -151,6 +111,8 @@ fn sample(fx: &Fixture, material_id: &str) -> NewFertilisationRecord {
         dose_unit_code: "kg_ha".into(),
         fertiliser_material_id: material_id.to_string(),
         sludge_application: false,
+        sustainable_input_management: false,
+        irrigation_record_id: None,
         machinery_id: None,
         service_company: None,
         service_regfer_number: None,
@@ -172,18 +134,6 @@ fn material(conn: &mut Connection) -> String {
         .unwrap()
         .material
         .id
-}
-
-fn last_change(conn: &Connection, table: &str, id: &str) -> (String, serde_json::Value) {
-    conn.query_row(
-        "SELECT operation, payload FROM record_change
-         WHERE entity_table = ?1 AND entity_id = ?2
-         ORDER BY changed_at DESC, id DESC LIMIT 1",
-        [table, id],
-        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
-    )
-    .map(|(op, payload)| (op, serde_json::from_str(&payload).unwrap()))
-    .unwrap()
 }
 
 // --- the material registry -------------------------------------------------
@@ -336,16 +286,13 @@ fn correcting_a_material_reconciles_its_composition() {
     // "this was wrong" rather than "withdrawn and re-stated".
     assert_eq!(n_total.id, kept_row.id);
 
-    let (op, payload) = last_change(&conn, "fertiliser_material_nutrient", &kept_row.id);
+    let (op, before, after) = last_change(&conn, "fertiliser_material_nutrient", &kept_row.id);
     assert_eq!(op, "update");
-    assert_eq!(payload["before"]["percentage"], 27.0);
-    assert_eq!(payload["after"]["percentage"], 27.5);
+    assert_eq!(before["percentage"], 27.0);
+    assert_eq!(after["percentage"], 27.5);
     // The junction has no parent id in its model struct; the log image must put
     // it back, because a receiving device rebuilds the row from `after` alone.
-    assert_eq!(
-        payload["after"]["fertiliser_material_id"],
-        created.material.id
-    );
+    assert_eq!(after["fertiliser_material_id"], created.material.id);
 }
 
 #[test]
@@ -461,15 +408,15 @@ fn logs_a_complete_row_image_for_the_record_and_each_plot() {
         repo::insert_fertilisation_record(&mut conn, sample(&fx, &material_id), Some("user-1"))
             .unwrap();
 
-    let (op, payload) = last_change(&conn, "fertilisation_record", &detail.record.id);
+    let (op, _, after) = last_change(&conn, "fertilisation_record", &detail.record.id);
     assert_eq!(op, "insert");
-    assert_eq!(payload["after"]["dose_unit_code"], "kg_ha");
-    assert_eq!(payload["after"]["material_name_snapshot"], "NAC 27");
-    assert_eq!(payload["after"]["season_id"], detail.record.season_id);
+    assert_eq!(after["dose_unit_code"], "kg_ha");
+    assert_eq!(after["material_name_snapshot"], "NAC 27");
+    assert_eq!(after["season_id"], detail.record.season_id);
 
-    let (op, payload) = last_change(&conn, "fertilisation_plot", &detail.plots[0].id);
+    let (op, _, after) = last_change(&conn, "fertilisation_plot", &detail.plots[0].id);
     assert_eq!(op, "insert");
-    assert_eq!(payload["after"]["plot_id"], fx.plot_a);
+    assert_eq!(after["plot_id"], fx.plot_a);
 }
 
 #[test]
@@ -661,6 +608,79 @@ fn records_the_good_practices_the_twin_requires_and_the_model_never_asks() {
 }
 
 #[test]
+fn refuses_no_practices_claimed_beside_a_practice() {
+    // Source of truth is the catalogue's own wording: BUENAS_PRACTICAS_AMBITOS
+    // row ("0";"No realiza buenas prácticas";"Fertilización"). Holding it beside
+    // another code says both that nothing was done and what was done, and the
+    // SIEX twin would carry the contradiction out as two BuenaPracticaFertilizante
+    // entries.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let material_id = material(&mut conn);
+
+    let mut both = sample(&fx, &material_id);
+    both.practices = vec!["0".into(), "7".into()];
+    let err = repo::insert_fertilisation_record(&mut conn, both, None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_fertilisation::FertilisationError::Invalid("practices_contradict_none")
+    ));
+
+    // Either half alone is a legal answer: "0" is a real claim, and the section
+    // is optional, so an empty set stays legal too.
+    let mut alone = sample(&fx, &material_id);
+    alone.practices = vec!["0".into()];
+    let detail = repo::insert_fertilisation_record(&mut conn, alone, None).unwrap();
+    assert_eq!(detail.practices, vec!["0".to_string()]);
+
+    // A duplicate of "0" folds before the check, so it is not a contradiction
+    // with itself.
+    let mut twice = sample(&fx, &material_id);
+    twice.practices = vec!["0".into(), "0".into()];
+    let folded = repo::insert_fertilisation_record(&mut conn, twice, None).unwrap();
+    assert_eq!(folded.practices, vec!["0".to_string()]);
+
+    // And a correction cannot introduce it either — the register is correctable,
+    // so the update path needs the same guard as the insert path.
+    let update = UpdateFertilisationRecord {
+        id: detail.record.id.clone(),
+        applied_on: detail.record.applied_on.clone(),
+        application_end_date: None,
+        fertilisation_type_code: detail.record.fertilisation_type_code.clone(),
+        application_method_code: detail.record.application_method_code.clone(),
+        dose_value: detail.record.dose_value,
+        dose_unit_code: detail.record.dose_unit_code.clone(),
+        fertiliser_material_id: material_id.clone(),
+        sludge_application: false,
+        sustainable_input_management: false,
+        irrigation_record_id: None,
+        machinery_id: None,
+        service_company: None,
+        service_regfer_number: None,
+        delivery_note_ref: None,
+        yield_estimated_kg_ha: None,
+        yield_final_kg_ha: None,
+        notes: None,
+        plots: detail
+            .plots
+            .iter()
+            .map(|p| NewFertilisationPlot {
+                plot_id: p.plot_id.clone(),
+                crop_id: p.crop_id.clone(),
+                fertilised_area_ha: p.fertilised_area_ha,
+            })
+            .collect(),
+        practices: vec!["0".into(), "7".into()],
+    };
+    let err =
+        repo::update_fertilisation_record(&mut conn, &detail.record.id, update, None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_fertilisation::FertilisationError::Invalid("practices_contradict_none")
+    ));
+}
+
+#[test]
 fn correcting_a_record_reconciles_plots_and_practices() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
@@ -683,6 +703,8 @@ fn correcting_a_record_reconciles_plots_and_practices() {
             dose_unit_code: "kg_ha".into(),
             fertiliser_material_id: material_id.clone(),
             sludge_application: false,
+            sustainable_input_management: false,
+            irrigation_record_id: None,
             machinery_id: None,
             service_company: None,
             service_regfer_number: None,
@@ -726,10 +748,10 @@ fn correcting_a_record_reconciles_plots_and_practices() {
     assert_eq!(corrected.id, kept_plot.id);
     assert_eq!(corrected.fertilised_area_ha, Some(4.0));
 
-    let (op, payload) = last_change(&conn, "fertilisation_record", &created.record.id);
+    let (op, before, after) = last_change(&conn, "fertilisation_record", &created.record.id);
     assert_eq!(op, "update");
-    assert_eq!(payload["before"]["dose_value"], 250.0);
-    assert_eq!(payload["after"]["dose_value"], 300.0);
+    assert_eq!(before["dose_value"], 250.0);
+    assert_eq!(after["dose_value"], 300.0);
 }
 
 #[test]
@@ -761,6 +783,8 @@ fn changing_the_material_retakes_the_snapshot() {
             dose_unit_code: "kg_ha".into(),
             fertiliser_material_id: second.clone(),
             sludge_application: false,
+            sustainable_input_management: false,
+            irrigation_record_id: None,
             machinery_id: None,
             service_company: None,
             service_regfer_number: None,
@@ -821,6 +845,8 @@ fn a_correction_keeps_the_snapshot_when_the_material_is_unchanged() {
             dose_unit_code: "kg_ha".into(),
             fertiliser_material_id: material_id.clone(),
             sludge_application: false,
+            sustainable_input_management: false,
+            irrigation_record_id: None,
             machinery_id: None,
             service_company: None,
             service_regfer_number: None,
@@ -899,11 +925,11 @@ fn a_deleted_record_leaves_the_register_and_keeps_its_history() {
             .unwrap()
             .is_empty()
     );
-    let (op, payload) = last_change(&conn, "fertilisation_record", &created.record.id);
+    let (op, before, after) = last_change(&conn, "fertilisation_record", &created.record.id);
     assert_eq!(op, "delete");
     // Both images, as the audit contract requires for a soft delete.
-    assert_eq!(payload["before"]["deleted_at"], serde_json::Value::Null);
-    assert!(payload["after"]["deleted_at"].is_string());
+    assert_eq!(before["deleted_at"], serde_json::Value::Null);
+    assert!(after["deleted_at"].is_string());
 }
 
 #[test]
@@ -952,4 +978,232 @@ fn deleting_a_record_takes_its_children_with_it() {
         .unwrap();
     assert_eq!(orphan_plots, 0);
     assert_eq!(orphan_practices, 0);
+}
+
+// ---------------------------------------------------------------------------
+// The fertigation link (`Fertilizacion.Fertirrigacion`)
+// ---------------------------------------------------------------------------
+//
+// One act the decree records twice: art. 5.d puts the fertiliser in this
+// register and art. 5.e puts the water in `irrigation_record`. The exchange
+// format re-joins them, and that block is the only reader anywhere of Anexo III
+// C.l's two water-quality figures — so the farmer states the join rather than a
+// serializer guessing it.
+
+fn irrigation(conn: &mut Connection, fx: &Fixture) -> String {
+    repo::insert_irrigation_record(
+        conn,
+        module_fertilisation::models::NewIrrigationRecord {
+            season_id: fx.season_id.clone(),
+            farm_id: fx.farm_id.clone(),
+            irrigated_on: "2026-03-12".into(),
+            irrigation_end_date: None,
+            irrigation_method_code: "drip".into(),
+            volume_value: 320.0,
+            volume_unit_code: "m3_ha".into(),
+            water_nitric_n_mg_l: Some(12.5),
+            water_soluble_p2o5_mg_l: Some(1.8),
+            energy_type_code: None,
+            meter_number: None,
+            notes: None,
+            plots: vec![module_fertilisation::models::NewIrrigationPlot {
+                plot_id: fx.plot_a.clone(),
+                crop_id: None,
+                irrigated_area_ha: Some(3.5),
+            }],
+            water_origins: vec![],
+        },
+        None,
+    )
+    .unwrap()
+    .record
+    .id
+}
+
+#[test]
+fn a_fertigation_may_name_the_watering_that_carried_it() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let material_id = material(&mut conn);
+    let watering = irrigation(&mut conn, &fx);
+
+    let record = repo::insert_fertilisation_record(
+        &mut conn,
+        NewFertilisationRecord {
+            application_method_code: "fertigation_localised".into(),
+            irrigation_record_id: Some(watering.clone()),
+            ..sample(&fx, &material_id)
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(record.record.irrigation_record_id, Some(watering));
+}
+
+#[test]
+fn only_a_fertigation_may_name_a_watering() {
+    // On any other method the link would assert a fertigation that did not
+    // happen. `is_fertigation` is read from the lookup, not matched on the code.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let material_id = material(&mut conn);
+    let watering = irrigation(&mut conn, &fx);
+
+    assert!(matches!(
+        repo::insert_fertilisation_record(
+            &mut conn,
+            NewFertilisationRecord {
+                application_method_code: "broadcast".into(),
+                irrigation_record_id: Some(watering),
+                ..sample(&fx, &material_id)
+            },
+            None,
+        )
+        .unwrap_err(),
+        module_fertilisation::error::FertilisationError::Invalid("link_needs_fertigation")
+    ));
+}
+
+#[test]
+fn the_link_may_not_reach_another_holding_another_campaign_or_a_withdrawn_watering() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let material_id = material(&mut conn);
+
+    let fertigation = |irrigation_record_id: Option<String>| NewFertilisationRecord {
+        application_method_code: "fertigation_sprinkler".into(),
+        irrigation_record_id,
+        ..sample(&fx, &material_id)
+    };
+
+    // Another campaign.
+    let next_season = core_repo::insert_season(
+        &mut conn,
+        NewSeason {
+            campaign_year: 2027,
+            label: "2026/2027".into(),
+            starts_on: None,
+            ends_on: None,
+        },
+        None,
+    )
+    .unwrap();
+    let next_year = repo::insert_irrigation_record(
+        &mut conn,
+        module_fertilisation::models::NewIrrigationRecord {
+            season_id: next_season.id.clone(),
+            ..irrigation_payload(&fx)
+        },
+        None,
+    )
+    .unwrap()
+    .record
+    .id;
+    assert!(matches!(
+        repo::insert_fertilisation_record(&mut conn, fertigation(Some(next_year)), None)
+            .unwrap_err(),
+        module_fertilisation::error::FertilisationError::Invalid("irrigation_not_on_farm")
+    ));
+
+    // Withdrawn: a link is a statement about a LIVE register.
+    let watering = irrigation(&mut conn, &fx);
+    repo::soft_delete_irrigation_record(&mut conn, &watering, None).unwrap();
+    assert!(matches!(
+        repo::insert_fertilisation_record(&mut conn, fertigation(Some(watering)), None)
+            .unwrap_err(),
+        module_fertilisation::error::FertilisationError::NotFound
+    ));
+}
+
+/// The irrigation payload the tests above vary, so a fixture change lands once.
+fn irrigation_payload(fx: &Fixture) -> module_fertilisation::models::NewIrrigationRecord {
+    module_fertilisation::models::NewIrrigationRecord {
+        season_id: fx.season_id.clone(),
+        farm_id: fx.farm_id.clone(),
+        irrigated_on: "2026-03-12".into(),
+        irrigation_end_date: None,
+        irrigation_method_code: "drip".into(),
+        volume_value: 320.0,
+        volume_unit_code: "m3_ha".into(),
+        water_nitric_n_mg_l: Some(12.5),
+        water_soluble_p2o5_mg_l: Some(1.8),
+        energy_type_code: None,
+        meter_number: None,
+        notes: None,
+        plots: vec![module_fertilisation::models::NewIrrigationPlot {
+            plot_id: fx.plot_a.clone(),
+            crop_id: None,
+            irrigated_area_ha: Some(3.5),
+        }],
+        water_origins: vec![],
+    }
+}
+
+#[test]
+fn a_correction_that_stops_being_a_fertigation_must_drop_its_link() {
+    // The guard reads the SUBMITTED method, not the stored one, so the two can
+    // never disagree in a saved row.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let material_id = material(&mut conn);
+    let watering = irrigation(&mut conn, &fx);
+    let saved = repo::insert_fertilisation_record(
+        &mut conn,
+        NewFertilisationRecord {
+            application_method_code: "fertigation_localised".into(),
+            irrigation_record_id: Some(watering.clone()),
+            ..sample(&fx, &material_id)
+        },
+        None,
+    )
+    .unwrap();
+
+    let correction = |method: &str, link: Option<String>| UpdateFertilisationRecord {
+        id: saved.record.id.clone(),
+        applied_on: "2026-03-12".into(),
+        application_end_date: None,
+        fertilisation_type_code: "top_dressing".into(),
+        application_method_code: method.into(),
+        dose_value: 250.0,
+        dose_unit_code: "kg_ha".into(),
+        fertiliser_material_id: material_id.clone(),
+        sludge_application: false,
+        sustainable_input_management: true,
+        irrigation_record_id: link,
+        machinery_id: None,
+        service_company: None,
+        service_regfer_number: None,
+        delivery_note_ref: None,
+        yield_estimated_kg_ha: None,
+        yield_final_kg_ha: None,
+        notes: None,
+        plots: vec![NewFertilisationPlot {
+            plot_id: fx.plot_a.clone(),
+            crop_id: None,
+            fertilised_area_ha: Some(3.5),
+        }],
+        practices: vec![],
+    };
+
+    assert!(matches!(
+        repo::update_fertilisation_record(
+            &mut conn,
+            &saved.record.id,
+            correction("broadcast", Some(watering)),
+            None,
+        )
+        .unwrap_err(),
+        module_fertilisation::error::FertilisationError::Invalid("link_needs_fertigation")
+    ));
+
+    let corrected = repo::update_fertilisation_record(
+        &mut conn,
+        &saved.record.id,
+        correction("broadcast", None),
+        None,
+    )
+    .unwrap();
+    assert_eq!(corrected.record.irrigation_record_id, None);
+    // And the twin-only insumos flag round-trips on the same correction.
+    assert!(corrected.record.sustainable_input_management);
 }

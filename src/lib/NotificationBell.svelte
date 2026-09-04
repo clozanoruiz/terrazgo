@@ -6,11 +6,10 @@
   // App.svelte renders one instance per layout (desktop main head, mobile
   // topbar); they share the open state, so the guard below ignores document
   // clicks reaching the instance that is display:none'd by the media query.
+  import TzTooltip from "./TzTooltip.svelte";
+  import { Bell, X } from "@lucide/svelte";
   import { t } from "../i18n.js";
   import { clearAll, dismiss, notifications } from "./notifications.svelte.js";
-
-  // Feather "bell".
-  const BELL = "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9 M13.73 21a2 2 0 0 1-3.46 0";
 
   const count = $derived(notifications.items.length);
   const hasError = $derived(notifications.items.some((n) => n.isError));
@@ -31,18 +30,25 @@
 </script>
 
 <div class="bell-wrap" bind:this={root}>
-  <button
-    type="button"
-    class="bell"
-    aria-label={t("notif.aria")}
-    title={t("notif.aria")}
-    onclick={() => (notifications.open = !notifications.open)}
-  >
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d={BELL} /></svg>
-    {#if count > 0}
-      <span class="bell-badge" class:error={hasError}>{count}</span>
-    {/if}
-  </button>
+  <TzTooltip label={t("notif.aria")} side="bottom">
+    {#snippet trigger(props)}
+      <button
+        {...props}
+        type="button"
+        class="bell"
+        aria-label={t("notif.aria")}
+        onclick={(event) => {
+          props.onclick?.(event);
+          notifications.open = !notifications.open;
+        }}
+      >
+        <Bell />
+        {#if count > 0}
+          <span class="bell-badge" class:error={hasError}>{count}</span>
+        {/if}
+      </button>
+    {/snippet}
+  </TzTooltip>
 
   {#if notifications.open}
     <div class="notif-panel" aria-live="polite">
@@ -53,13 +59,22 @@
           {#each notifications.items as n (n.id)}
             <li class:error={n.isError}>
               <span>{n.text}</span>
-              <button
-                type="button"
-                class="notif-dismiss"
-                aria-label={t("actions.dismiss")}
-                title={t("actions.dismiss")}
-                onclick={() => dismiss(n.id)}>✕</button
-              >
+              <TzTooltip label={t("actions.dismiss")}>
+                {#snippet trigger(props)}
+                  <button
+                    {...props}
+                    type="button"
+                    class="notif-dismiss"
+                    aria-label={t("actions.dismiss")}
+                    onclick={(event) => {
+                      props.onclick?.(event);
+                      dismiss(n.id);
+                    }}
+                  >
+                    <X />
+                  </button>
+                {/snippet}
+              </TzTooltip>
             </li>
           {/each}
         </ul>

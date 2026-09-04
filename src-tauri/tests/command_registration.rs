@@ -75,13 +75,28 @@ fn defined_commands() -> BTreeSet<String> {
 }
 
 /// Every command listed in lib.rs's generate_handler! block.
+///
+/// Comments are stripped BEFORE anything else is parsed, and both halves of
+/// that matter. The list is grouped by defining file under `// ---` headers —
+/// the only thing that says where a command lives, since the re-exported
+/// `commands::<name>` paths deliberately do not — and those headers contain
+/// commas and parentheses, which a naive split on ',' turns into phantom
+/// command names. Stripping first also means a comment can never truncate the
+/// block by containing a ']'.
 fn registered_commands() -> BTreeSet<String> {
     let source = read_source("src/lib.rs");
     let start = source
         .find("generate_handler![")
         .expect("lib.rs contains the generate_handler! block");
     let block = &source[start + "generate_handler![".len()..];
-    let block = &block[..block.find(']').expect("generate_handler! block is closed")];
+    let uncommented: String = block
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let block = &uncommented[..uncommented
+        .find(']')
+        .expect("generate_handler! block is closed")];
     block
         .split(',')
         .map(str::trim)

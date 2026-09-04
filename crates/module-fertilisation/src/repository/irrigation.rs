@@ -25,6 +25,7 @@ use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use serde_json::json;
 use std::collections::HashSet;
 use terrazgo_core::date::now_utc_iso;
+use terrazgo_core::sql::children_by_parent;
 use uuid::Uuid;
 
 /// The two units a volume of irrigation water can carry. The column has a
@@ -259,6 +260,26 @@ pub fn get_irrigation_record(conn: &Connection, id: &str) -> Result<IrrigationRe
 }
 
 /// Oldest first, the order a record book reads in.
+/// Every irrigation of this farm+season INCLUDING the soft-deleted ones — the SIEX
+/// export, which turns a withdrawn record into a `Borrar` entry under the alias
+/// it was first exported with. Its name is the guard: a caller that is not
+/// building an export and wants deleted rows is almost certainly mistaken.
+pub fn list_irrigation_records_for_export(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+) -> Result<Vec<IrrigationRecordDetail>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM irrigation_record
+         WHERE season_id = ?1 AND farm_id = ?2
+         ORDER BY irrigated_on, id",
+    )?;
+    let records = stmt
+        .query_map(params![season_id, farm_id], map_record)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    all_with_details(conn, records)
+}
+
 pub fn list_irrigation_records(
     conn: &Connection,
     season_id: &str,
@@ -272,18 +293,7 @@ pub fn list_irrigation_records(
     let records = stmt
         .query_map(params![season_id, farm_id], map_record)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    records
-        .into_iter()
-        .map(|record| {
-            let plots = plots_of(conn, &record.id)?;
-            let water_origins = origins_of(conn, &record.id)?;
-            Ok(IrrigationRecordDetail {
-                record,
-                plots,
-                water_origins,
-            })
-        })
-        .collect()
+    all_with_details(conn, records)
 }
 
 /// Whether any irrigation hangs off this season — half of the module's arm of
@@ -609,6 +619,55 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
 }
 
 // --- mapping ---------------------------------------------------------------
+
+/// Hydration for a whole list, in two child statements rather than two per
+/// record. The single-record paths keep their point queries.
+///
+/// The origins query keeps its join to `water_origin` and its `w.rowid`
+/// ordering: the register prints them in the lookup's seeded order, and losing
+/// that would reorder a printed cell for the sake of a hoist.
+fn all_with_details(
+    conn: &Connection,
+    records: Vec<IrrigationRecord>,
+) -> Result<Vec<IrrigationRecordDetail>> {
+    let ids: Vec<String> = records.iter().map(|r| r.id.clone()).collect();
+    let mut plots = children_by_parent(
+        conn,
+        "SELECT * FROM irrigation_plot WHERE irrigation_record_id IN ({ids})
+         ORDER BY irrigation_record_id, id",
+        &ids,
+        map_plot,
+        |p| p.irrigation_record_id.clone(),
+    )?;
+    let mut origins = children_by_parent(
+        conn,
+        "SELECT o.irrigation_record_id, o.origin_code FROM irrigation_water_origin o
+         JOIN water_origin w ON w.code = o.origin_code
+         WHERE o.irrigation_record_id IN ({ids})
+         ORDER BY o.irrigation_record_id, w.rowid",
+        &ids,
+        |row| {
+            Ok((
+                row.get::<_, String>("irrigation_record_id")?,
+                row.get::<_, String>("origin_code")?,
+            ))
+        },
+        |(record_id, _)| record_id.clone(),
+    )?;
+    Ok(records
+        .into_iter()
+        .map(|record| IrrigationRecordDetail {
+            plots: plots.remove(&record.id).unwrap_or_default(),
+            water_origins: origins
+                .remove(&record.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, code)| code)
+                .collect(),
+            record,
+        })
+        .collect())
+}
 
 fn plots_of(conn: &Connection, record_id: &str) -> Result<Vec<IrrigationPlot>> {
     let mut stmt =
