@@ -1,65 +1,75 @@
 # Terrazgo
 
-**Aplicación libre y de código abierto para la gestión integral de la explotación agrícola.**
+**Aplicación libre y de código abierto para gestionar toda la explotación agrícola.**
 
 🌐 **[terrazgo.com](https://terrazgo.com)**
 
-Terrazgo funciona primero sin conexión (*offline-first*): todos los datos viven en tu
-dispositivo, en una base de datos local, y la aplicación sigue funcionando completa sin
-cobertura — pensada para el campo, no para la oficina. Hay versiones para escritorio
-(Linux y Windows) y para Android.
+Terrazgo funciona sin conexión. Los datos se guardan en tu propio dispositivo y la
+aplicación sigue funcionando entera aunque no haya cobertura, porque está pensada para
+usarse en el campo. Hay versiones para escritorio (Linux y Windows) y para Android.
 
-> ⚠️ **En desarrollo activo.** Todavía no hay una versión estable. Las versiones
-> publicadas en [Releases](../../releases) son versiones tempranas para probar y opinar:
-> hasta la primera versión estable, actualizar puede requerir empezar con una base de
-> datos nueva — no guardes todavía datos que no puedas permitirte perder.
+> ⚠️ **En desarrollo activo.** Todavía no hay una versión estable. Las versiones de
+> [Releases](../../releases) son versiones tempranas para probar y dar tu opinión. Hasta
+> la primera versión estable, al actualizar puede que tengas que empezar con una base de
+> datos nueva, así que no guardes todavía datos que no puedas permitirte perder.
 
-## Módulos
+## Qué hace
 
-- **Cuaderno de explotación (CUE)** — el primer módulo, ya en pruebas. Cubre los
-  registros del **RD 1311/2012** (tratamientos fitosanitarios y actuaciones no químicas,
-  semilla tratada, tratamientos de postcosecha, locales y medios de transporte, analíticas
-  y cosecha) y los del **RD 1051/2022**, obligatorio desde el 1 de enero de 2026
-  (fertilización, plan de abonado y riego). Registra productos, operadores, asesores y
-  maquinaria, avisa de los plazos de seguridad y de la caducidad de carnés e ITV, y
-  cualquier registro se puede corregir. El cuaderno se imprime en **PDF** siguiendo el
-  modelo oficial y se exporta también como **hoja de cálculo**, en castellano y en
-  catalán. Todo ello con la vista puesta en el registro electrónico obligatorio desde
-  2027 (RD 34/2025, Reglamento UE 2023/564).
-- **Ecorregímenes** — los registros que el **RD 1048/2022** obliga a anotar en el cuaderno
-  a quien solicita un ecorrégimen: pastoreo extensivo (P1), siega sostenible e islas de
-  biodiversidad (P2), espacios de biodiversidad en cultivos bajo agua (P5), cubiertas
-  vegetales (P6) y cubiertas inertes de restos de poda (P7), más las labores de
-  mantenimiento de los pastos comunales del anexo IV. Se imprimen en el apartado 9 del
-  cuaderno, y el aviso de estado señala las anotaciones que aún faltan.
-- **Mapas y SIGPAC** — mapa de la explotación con dibujo de recintos, importación de
-  ficheros (GeoJSON/GeoPackage), consulta SIGPAC (verificación de referencias, superficie
-  oficial, zonas vulnerables a nitratos / Natura 2000 / restricciones fitosanitarias),
-  capas del parcelario y de cultivos declarados, y localización por GPS en el móvil.
-- **Fertilización** — registro de materias fertilizantes con su composición, aplicaciones,
-  plan de abonado y registro de riego.
-- **En camino** — planificación del riego, planificación de cultivos y costes.
+- **Cuaderno de explotación.** Es el primer módulo y ya está en pruebas. Recoge lo que
+  pide el **RD 1311/2012**: tratamientos fitosanitarios y medidas no químicas, semilla
+  tratada, tratamientos de postcosecha, de almacenes y de vehículos, análisis y cosecha.
+  También lo del **RD 1051/2022**, obligatorio desde el 1 de enero de 2026:
+  fertilización, plan de abonado y riego. Llevas un cuaderno por explotación y campaña,
+  registras productos, aplicadores, asesores y maquinaria, y la aplicación te avisa de
+  los plazos de seguridad y de cuándo caducan los carnés y las ITV. Cualquier registro se
+  puede corregir. El cuaderno se imprime en **PDF** con el modelo oficial y se exporta
+  también como **hoja de cálculo**, en castellano o en catalán. Todo pensado para el
+  registro electrónico obligatorio desde 2027 (RD 34/2025, Reglamento UE 2023/564).
+- **Ecorregímenes.** Las anotaciones que el **RD 1048/2022** exige en el cuaderno a quien
+  pide un ecorrégimen: pastoreo extensivo (P1), siega sostenible e islas de biodiversidad
+  (P2), espacios de biodiversidad en cultivos bajo agua (P5), cubiertas vegetales (P6) y
+  cubiertas inertes de restos de poda (P7), además del mantenimiento de los pastos
+  comunales del anexo IV. Salen en el apartado 9 del cuaderno, y la aplicación te dice
+  qué anotaciones te faltan.
+- **Varios dispositivos, un mismo cuaderno.** Puedes anotar en el campo con el móvil y
+  repasarlo en casa con el ordenador, o llevar el cuaderno entre varias personas. Los
+  dispositivos se sincronizan copiando un archivo, sin nube ni cuentas. Si dos personas
+  cambian el mismo registro, Terrazgo te enseña las dos versiones para que elijas; si una
+  misma operación se anota dos veces, te avisa. Un cuaderno borrado se puede recuperar
+  durante 30 días.
+- **Mapas y SIGPAC.** Mapa de la explotación en el que puedes dibujar los recintos o
+  importarlos (GeoJSON o GeoPackage). Consulta el SIGPAC para comprobar referencias, ver
+  la superficie oficial y saber si una parcela está en zona vulnerable a nitratos, en Red
+  Natura 2000 o en una zona con restricciones fitosanitarias. Muestra las capas del
+  parcelario y de los cultivos declarados, y en el móvil te localiza por GPS.
+- **Fertilización.** Registro de abonos con su composición, de las aplicaciones, del plan
+  de abonado y del riego.
+- **Catálogos oficiales.** Los catálogos del FEGA (cultivos, plagas, productos,
+  unidades…) vienen incluidos para que todo funcione sin conexión, y puedes actualizarlos
+  desde *Ajustes* cuando quieras.
+- **Próximamente.** Sincronizar por wifi o bluetooth, planificación del riego y de los
+  cultivos, y costes.
 
-El cuaderno es el primer módulo, no el producto: Terrazgo es una aplicación de gestión
-de toda la explotación, para cualquier cultivo y cualquier comunidad autónoma.
+El cuaderno es el primer módulo, no el producto: Terrazgo quiere servir para gestionar
+toda la explotación, con cualquier cultivo y en cualquier comunidad autónoma.
 
 ## Descargas
 
-En [Releases](../../releases) encontrarás los instaladores de cada versión:
+En [Releases](../../releases) tienes los instaladores de cada versión:
 
-- **Linux** — AppImage, paquete `.deb` (Debian/Ubuntu) y paquete `.rpm` (Fedora/openSUSE)
-- **Windows** — instalador `.exe` y versión portable
-- **Android** — APK para instalación directa (aarch64)
+- **Linux**: AppImage, paquete `.deb` (Debian/Ubuntu) y paquete `.rpm` (Fedora/openSUSE)
+- **Windows**: instalador `.exe` y versión portable
+- **Android**: APK para instalar directamente (aarch64)
 
-## Incidencias y sugerencias
+## Problemas y sugerencias
 
 ¿Algo no funciona o echas algo en falta? Abre una
-[incidencia](../../issues/new/choose) — hay plantillas para errores y propuestas.
+[incidencia](../../issues/new/choose); hay plantillas para avisar de errores y para
+proponer mejoras.
 
 ## Código fuente y licencia
 
-Este repositorio contiene el código fuente completo de cada versión publicada
-(una instantánea por versión). Licencia
-[AGPL-3.0-or-later](LICENSE): libre de usar, estudiar, modificar y redistribuir;
-cualquier versión derivada que se distribuya u ofrezca como servicio debe publicar
-también su código fuente.
+Este repositorio tiene el código fuente completo de cada versión publicada, una copia por
+versión. La licencia es [AGPL-3.0-or-later](LICENSE): puedes usarlo, estudiarlo,
+modificarlo y redistribuirlo, y cualquier versión derivada que se distribuya o se ofrezca
+como servicio tiene que publicar también su código fuente.
