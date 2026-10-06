@@ -12,7 +12,7 @@
   // scrolling past each other, with nothing to say where one ended and the next
   // began. Showing one is also what lets the view be `framed` — a screen with a
   // single subject has a workspace that can fill the frame, so the table and
-  // its inspector each get a height to scroll inside.
+  // its list pane gets a height to scroll inside.
   //
   // The strip is the same `.tabstrip` the record book uses for its registers,
   // rather than a new control: reuse the vocabulary

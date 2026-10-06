@@ -6,8 +6,8 @@
 //! from edits either way — they snapshot the operator's name and licence.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
-use crate::date::now_utc_iso;
+use crate::audit::{begin, log_delete, log_insert, log_update};
+use crate::date::{now_utc_iso, validate_dates};
 use crate::error::{CoreError, Result};
 use crate::models::{NewOperator, Operator, UpdateOperator};
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -19,7 +19,8 @@ pub fn insert_operator(
     actor: Option<&str>,
 ) -> Result<Operator> {
     validate_name(&new.full_name)?;
-    let tx = conn.transaction()?;
+    validate_dates(&[new.licence_expiry_date.as_deref()])?;
+    let tx = begin(conn, actor)?;
     let now = now_utc_iso();
     let operator = Operator {
         id: Uuid::now_v7().to_string(),
@@ -42,7 +43,8 @@ pub fn insert_operator(
             operator.created_at, operator.updated_at
         ],
     )?;
-    log_insert(&tx, "operator", &operator.id, None, actor, &operator)?;
+    let stamp = tx.register("operator", &operator.id, None)?;
+    log_insert(&tx, &stamp, "operator", &operator.id, &operator)?;
     tx.commit()?;
     Ok(operator)
 }
@@ -65,7 +67,8 @@ pub fn update_operator(
     actor: Option<&str>,
 ) -> Result<Operator> {
     validate_name(&update.full_name)?;
-    let tx = conn.transaction()?;
+    validate_dates(&[update.licence_expiry_date.as_deref()])?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM operator WHERE id = ?1 AND deleted_at IS NULL",
@@ -97,16 +100,18 @@ pub fn update_operator(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "operator", id, None, actor, &before, &after)?;
+    let stamp = tx.register("operator", id, None)?;
+    log_update(&tx, &stamp, "operator", id, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
 
 /// Soft delete: the row stays (treatment history must keep resolving), it just
-/// leaves every list and picker. The operator's licence-expiry alert lapses on
-/// the next `refresh_alerts` — the reconciler skips soft-deleted subjects.
+/// leaves every list and picker. The operator's licence-expiry alert goes with
+/// it: the alert rules skip soft-deleted subjects, and the list is worked out
+/// when read.
 pub fn soft_delete_operator(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM operator WHERE id = ?1 AND deleted_at IS NULL",
@@ -123,7 +128,8 @@ pub fn soft_delete_operator(conn: &mut Connection, id: &str, actor: Option<&str>
         "UPDATE operator SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "operator", id, None, actor, &before, Some(&after))?;
+    let stamp = tx.register("operator", id, None)?;
+    log_delete(&tx, &stamp, "operator", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }

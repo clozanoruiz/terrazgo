@@ -7,8 +7,6 @@
 export default {
   "treatments.title": "Phytosanitary treatments",
   "treatments.records_title": "Treatments",
-  "treatments.farm": "Farm",
-  "treatments.season": "Season",
   "treatments.new": "New treatment",
   "treatments.empty": "No treatments recorded for this farm and season yet.",
   "treatments.no_farms": "Create a farm with at least one plot first:",
@@ -35,6 +33,7 @@ export default {
   "treatment.measure_intensity_hint": "Number of traps, number of diffusers, etc.",
   "treatment.measure_intensity_unit": "Intensity unit",
   "treatment.measure_registration": "Registration number of the measure",
+  "treatment.measure_basic_substance": "Basic substance",
   "treatment.measure_intensity_detail": "{value} {unit}",
   "treatment.total_quantity_suggest": "Use {value} {unit} (dose \u00d7 area)",
   "treatment.total_quantity_detail": "{value} {unit} in total",
@@ -68,7 +67,7 @@ export default {
   "treatment.phi_until": "PHI — harvest allowed from {date}",
   "treatment.delete": "Delete",
   "treatment.delete_confirm":
-    "Delete this treatment record? It is hidden from the app but kept for the audit trail.",
+    "Delete this treatment record? It will no longer appear in the record book.",
   "advisory.title": "Record book status",
   "advisory.hint":
     "For information only — the book prints regardless. These are fields a binding annex asks for and the book prints blank.",
@@ -104,6 +103,11 @@ export default {
     "Grazings with no end date, on a campaign already closed (RD 1048/2022 art. 30.2 ter)",
   "advisory.grazing_records_without_end_hint":
     "The one-month deadline runs from the end of grazing, so an open record is not late: the book simply cannot show the annotation as finished.",
+  "advisory.unnamed_codes": "Codes this device’s catalogues do not name",
+  "advisory.unnamed_codes_hint.one":
+    "The book prints 1 code as a bare number, without its name: this device’s reference catalogues do not have it, usually because the record was written on another device with newer catalogues. Update them on the “{settings}” page, under “{catalogues}”.",
+  "advisory.unnamed_codes_hint.other":
+    "The book prints {count} codes as bare numbers, without their names: this device’s reference catalogues do not have them, usually because the records were written on another device with newer catalogues. Update them on the “{settings}” page, under “{catalogues}”.",
   "export.pdf_title": "Printable record book (PDF)",
   "export.pdf_run": "Generate PDF…",
   "export.pdf_hint":
@@ -200,7 +204,7 @@ export default {
   "non_field.quantity_hint": "Optional; prints blank when not stated.",
   "non_field.product_quantity": "Product quantity used",
   "non_field.product_quantity_unit": "Unit (kg or l)",
-  "non_field.delete_confirm": "Delete this treatment? It is kept in the history.",
+  "non_field.delete_confirm": "Delete this treatment? It will no longer appear in the record book.",
 
   // Register 3.2: use of treated seed.
   "seed.title": "Treated seed",
@@ -234,7 +238,7 @@ export default {
   "seed.surface": "Surface sown (ha)",
   "seed.lot_detail": "lot {lot}",
   "seed.quantity_detail": "{kg} kg of seed",
-  "seed.delete_confirm": "Delete this sowing? It is kept in the history.",
+  "seed.delete_confirm": "Delete this sowing? It will no longer appear in the record book.",
 
   // Register 4: analyses. Metadata only: the bulletin is kept separately.
   "analysis.title": "Analyses",
@@ -252,7 +256,7 @@ export default {
   "analysis.keep_hint":
     "The analysis bulletin is kept separately, with the rest of the holding's documentation.",
   "analysis.bulletin_detail": "bulletin {bulletin}",
-  "analysis.delete_confirm": "Delete this analysis? It is kept in the history.",
+  "analysis.delete_confirm": "Delete this analysis? It will no longer appear in the record book.",
 
   // FEGA's four MATERIAL_ANALIZADO values, which separate the standing crop
   // from the produce harvested off it.

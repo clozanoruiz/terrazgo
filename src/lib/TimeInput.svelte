@@ -16,6 +16,7 @@
   import { formatTag, t } from "../i18n.js";
   import { refusalStore } from "./formRefusal.js";
   import { toTime, fromTime } from "./dateValue.js";
+  import RequiredMark from "./RequiredMark.svelte";
 
   let {
     value = $bindable(""),
@@ -68,10 +69,10 @@
     granularity="minute"
   >
     {#if label}
-      <TimeField.Label class="tz-label">{label}</TimeField.Label>
+      <TimeField.Label class="tz-label">{label}<RequiredMark {required} /></TimeField.Label>
     {/if}
 
-    <TimeField.Input id={uid} class="tz-control tz-timefield">
+    <TimeField.Input id={uid} class="tz-control tz-timefield" aria-required={required || undefined}>
       {#snippet children({ segments })}
         <!-- Keyed by index: an HH:MM field carries a `literal` separator, and a
              field with seconds would carry two. -->

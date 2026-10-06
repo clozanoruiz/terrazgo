@@ -20,22 +20,24 @@
 
 mod common;
 
-use common::db;
+use common::{db, db_with_catalogues};
 
-use module_cue::models::*;
-use module_cue::repository as repo;
 use module_ecoscheme::models::{
     CoverMaintenanceLine, GRAZING_MAINTENANCE, GrazingAnimal, NewGrazingRecord, NewSoilCover,
     UpdateSoilCover,
 };
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 use terrazgo_core::models::{NewGeoFeature, PlotEsFields};
 use terrazgo_recordbook::advisory::Duty;
-use terrazgo_recordbook::book_advisory;
+use terrazgo_recordbook::{book_advisory, prints_unnamed_codes};
+use terrazgo_testkit::sync::{hold_codes, join_and_receive, send};
 
 /// The day the advisory is asked on. Passed in rather than read from the clock
 /// so a test pins a date rule instead of drifting with the calendar; the
-/// fixture's campaign has no end date, so only the tests that give it one care.
+/// fixture's campaign ends after it, so only the tests that close it earlier
+/// care.
 const TODAY: &str = "2026-07-01";
 
 struct Fixture {
@@ -48,17 +50,6 @@ struct Fixture {
 /// A complete holding: identity filled, one licensed applicator, one authorised
 /// product. Tests take things away from it.
 fn fixture(conn: &mut Connection) -> Fixture {
-    let season = repo::insert_season(
-        conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
     let farm = repo::insert_farm(
         conn,
         NewFarm {
@@ -67,6 +58,18 @@ fn fixture(conn: &mut Connection) -> Fixture {
             owner_tax_id: Some("12345678Z".into()),
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+    let season = repo::insert_season(
+        conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -89,7 +92,6 @@ fn fixture(conn: &mut Connection) -> Fixture {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: detail.farm.country_code.clone(),
             es: None,
             representative: None,
         },
@@ -256,6 +258,7 @@ fn treatment(
             measure_intensity_value: None,
             measure_intensity_unit_code: None,
             measure_registration_number: None,
+            measure_basic_substance_code: None,
             phi_days_used: Some(14),
             notes: None,
         },
@@ -309,6 +312,7 @@ fn missing_identity_fields_are_named_one_by_one() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )
@@ -316,10 +320,10 @@ fn missing_identity_fields_are_named_one_by_one() {
     let season = repo::insert_season(
         &mut conn,
         NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -493,6 +497,7 @@ fn the_second_decrees_sections_are_reported_only_while_empty() {
                 irrigated_area_ha: Some(40.0),
             }],
             water_origins: vec!["groundwater".into()],
+            practices: vec![],
         },
         None,
     )
@@ -580,10 +585,9 @@ fn close_season_on(conn: &mut Connection, season_id: &str, ends_on: &str) {
         conn,
         season_id,
         terrazgo_core::models::UpdateSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: Some(ends_on.into()),
+            starts_on: "2025-09-01".into(),
+            ends_on: ends_on.into(),
+            custom_label: None,
         },
         None,
     )
@@ -796,5 +800,132 @@ fn an_open_grazing_is_reported_only_once_its_campaign_has_closed() {
     assert_eq!(
         advisory.grazing_records_without_end[0].started_on,
         "2026-04-01"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Codes this device cannot name
+// ---------------------------------------------------------------------------
+
+/// A disease code no vendored FEGA list carries.
+const UNKNOWN_DISEASE: &str = "999999";
+
+/// A growth stage no `EST_FENOLOGICO` row carries.
+const UNKNOWN_STAGE: &str = "99";
+
+/// A holding with one treated plot and its crop, on a device holding the
+/// vendored catalogues.
+fn treated_holding() -> (Connection, Fixture, String, String) {
+    let mut conn = db_with_catalogues();
+    let fx = fixture(&mut conn);
+    let plot = insert_verified_plot(&mut conn, &fx.farm_id, "La Vega", 3.0, "TA");
+    let crop = insert_crop(&mut conn, &plot, &fx.season_id, Some("rainfed"));
+    (conn, fx, plot, crop)
+}
+
+/// A second device holding the vendored catalogues and everything the first
+/// one wrote.
+fn laptop_of(phone: &Connection) -> Connection {
+    let mut laptop = db_with_catalogues();
+    join_and_receive(phone, &mut laptop);
+    laptop
+}
+
+#[test]
+fn a_book_whose_every_code_this_device_names_reports_none() {
+    let (mut conn, fx, plot, crop) = treated_holding();
+    let (record, plots) = treatment(&fx, &plot, Some(&crop));
+    repo::insert_treatment_record(&mut conn, record, plots, None).unwrap();
+
+    let advisory = book_advisory(&conn, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(advisory.unnamed_codes, 0);
+}
+
+#[test]
+fn a_code_only_a_refreshed_device_names_is_counted_once_however_many_rows_print_it() {
+    // The book prints such a code as itself (docs/sync.md → What stays
+    // device-local): the record's legal value, with no name beside it. Two
+    // records naming it are still one code for the farmer to look up.
+    let (mut phone, fx, plot, crop) = treated_holding();
+    hold_codes(&phone, "ENFERMEDADES", &[UNKNOWN_DISEASE]);
+    for _ in 0..2 {
+        let (mut record, plots) = treatment(&fx, &plot, Some(&crop));
+        record.problems[0].problem_code = UNKNOWN_DISEASE.into();
+        repo::insert_treatment_record(&mut phone, record, plots, None).unwrap();
+    }
+    let laptop = laptop_of(&phone);
+
+    let on_phone = book_advisory(&phone, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(on_phone.unnamed_codes, 0, "the phone names it");
+    let on_laptop = book_advisory(&laptop, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(on_laptop.unnamed_codes, 1);
+    assert!(!on_laptop.is_clean());
+}
+
+#[test]
+fn a_growth_stage_only_a_refreshed_device_names_is_counted_too() {
+    // The one code the book resolves outside its shared label lookup, since a
+    // stage prints as two cells (its BBCH and its name).
+    let (mut phone, fx, plot, crop) = treated_holding();
+    hold_codes(&phone, "EST_FENOLOGICO", &[UNKNOWN_STAGE]);
+    let (record, mut plots) = treatment(&fx, &plot, Some(&crop));
+    plots[0].growth_stage_code = Some(UNKNOWN_STAGE.into());
+    repo::insert_treatment_record(&mut phone, record, plots, None).unwrap();
+    let laptop = laptop_of(&phone);
+
+    let advisory = book_advisory(&laptop, &fx.season_id, &fx.farm_id, TODAY).unwrap();
+    assert_eq!(advisory.unnamed_codes, 1);
+}
+
+// --- what an import says ----------------------------------------------------
+// After an import, the books the file wrote into are read as the book would
+// print them: a code no catalogue here names means this device's catalogues
+// may need updating (docs/sync.md → What stays device-local).
+
+#[test]
+fn an_import_that_brings_a_code_this_device_cannot_name_says_so() {
+    let (mut phone, fx, plot, crop) = treated_holding();
+    hold_codes(&phone, "ENFERMEDADES", &[UNKNOWN_DISEASE]);
+    let mut laptop = db_with_catalogues();
+    join_and_receive(&phone, &mut laptop);
+
+    let (mut record, plots) = treatment(&fx, &plot, Some(&crop));
+    record.problems[0].problem_code = UNKNOWN_DISEASE.into();
+    repo::insert_treatment_record(&mut phone, record, plots, None).unwrap();
+    let summary = send(&phone, &mut laptop);
+
+    assert_eq!(summary.books, vec![fx.season_id.clone()]);
+    assert!(prints_unnamed_codes(&laptop, &summary.books, TODAY).unwrap());
+    assert!(
+        !prints_unnamed_codes(&phone, &summary.books, TODAY).unwrap(),
+        "the phone names it"
+    );
+}
+
+#[test]
+fn an_import_of_codes_this_device_names_says_nothing() {
+    let (mut phone, fx, plot, crop) = treated_holding();
+    let mut laptop = db_with_catalogues();
+    join_and_receive(&phone, &mut laptop);
+    let (record, plots) = treatment(&fx, &plot, Some(&crop));
+    repo::insert_treatment_record(&mut phone, record, plots, None).unwrap();
+    let summary = send(&phone, &mut laptop);
+
+    assert!(!summary.books.is_empty());
+    assert!(!prints_unnamed_codes(&laptop, &summary.books, TODAY).unwrap());
+}
+
+#[test]
+fn a_book_this_device_does_not_hold_is_not_read() {
+    // Erased by a purge the same file asked for, or deleted here: nothing of
+    // it prints, so nothing of it can be unnamed.
+    let conn = db_with_catalogues();
+    assert!(
+        !prints_unnamed_codes(
+            &conn,
+            &["0192f3a4-0000-7000-8000-0000000000ff".into()],
+            TODAY
+        )
+        .unwrap()
     );
 }

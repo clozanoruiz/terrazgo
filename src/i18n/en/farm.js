@@ -9,10 +9,12 @@ export default {
   "farms.title": "Farms",
   "farms.new": "New farm",
   "farms.empty": "No farms yet — create the first one.",
-  "farms.back": "← Farms",
+  "farm.section": "Farm",
   "farm.name": "Name",
   "farm.owner": "Owner",
   "farm.country": "Country",
+  "farm.country_fixed_hint":
+    "Set when the farm is created and cannot be changed: it decides which coded lists this holding's records use.",
   "farm.location": "Location",
   "farm.latitude": "Latitude",
   "farm.longitude": "Longitude",
@@ -50,10 +52,10 @@ export default {
   "water_points.title": "Water abstraction points",
   "water_points.new": "New abstraction point",
   "water_points.hint":
-    'Abstraction points for human consumption on or near the plot (record book section 2.2). Tick "none" on plots you have checked and where there are none: blank means the question has not been asked yet.',
+    'Abstraction points for human consumption on or near the plot (record book section 2.2). When editing a plot, tick "no abstraction points" if you have checked and there are none: blank means the question has not been asked yet.',
   "water_points.empty": "No abstraction points recorded yet.",
-  "water_points.none_on": 'No abstraction points on "{plot}" (checked)',
   "water_points.none_column": "No abstraction points (checked)",
+  "plot.water_none_has_points": "This plot has abstraction points recorded.",
   "water_point.denomination": "Name",
   "water_point.inside_plot": "Inside the plot",
   "water_point.distance": "Distance (m)",
@@ -67,14 +69,84 @@ export default {
   "farm.map_title": "Farm map",
   "farm.open_map": "Open in map",
   "plot.on_map": "On the map",
-  "seasons.new": "New season",
-  "seasons.empty": "No seasons yet — create the first campaign.",
-  "season.campaign_year": "Campaign year",
-  "season.label": "Label",
+  "record_books.title": "Record books",
+  "record_books.new": "New record book",
+  "record_books.empty": "No record books yet — create the first for a farm and a campaign.",
+  "record_book.section": "Season",
+  "record_book.delete": "Delete record book",
+  "record_book.not_found": "This record book does not exist or has been deleted.",
+  "removed_books.summary": "Deleted record books ({count})",
+  "removed_books.hint":
+    "Each can be brought back, with what was deleted with it, until the date it shows. After that it is erased for good.",
+  "removed_books.removed_by": "Deleted on {date} by {person} on {device}",
+  "removed_books.removed_on": "Deleted on {date} on {device}",
+  "removed_books.until": "Can be brought back until {date}",
+  "removed_books.was_until": "Could be brought back until {date}",
+  "removed_books.erasing_devices.one":
+    "It will be erased for good once this device knows {devices} has received the deletion: sync that device or, if it is no longer used, retire it in {settings}, under “{peers}”.",
+  "removed_books.erasing_devices.other":
+    "It will be erased for good once this device knows {devices} have received the deletion: sync those devices or, if one is no longer used, retire it in {settings}, under “{peers}”.",
+  "removed_books.erasing_status":
+    "It will be erased for good once what is still pending in it is settled on the “{status}” page.",
+  "removed_books.erasing_due_on": "It will be erased for good from {date}.",
+  "removed_books.erasing_due": "It will be erased for good the next time Terrazgo opens.",
+  "removed_books.no_records": "No records",
+  "removed_books.restore": "Bring back",
+  "removed_books.restore_confirm":
+    "Bring back {farm}'s “{label}” record book, with the records deleted with it?",
+  "removed_books.restored": "Done. The “{label}” record book is back in the list.",
+  "removed_books.restored_records.one":
+    "Done. The “{label}” record book is back in the list, with its record.",
+  "removed_books.restored_records.other":
+    "Done. The “{label}” record book is back in the list, with its {count} records.",
+  "removed_with_book.notice_by":
+    "When this record book was deleted on {date} ({person}, on {device}), its records were deleted with it. The record book later came back to the list, but empty: those records are still deleted. If you bring them back, they return to this record book as they were. You can do so until {until}.",
+  "removed_with_book.notice_on":
+    "When this record book was deleted on {date} (on {device}), its records were deleted with it. The record book later came back to the list, but empty: those records are still deleted. If you bring them back, they return to this record book as they were. You can do so until {until}.",
+  "removed_with_book.restore": "Bring them back",
+  "removed_with_book.restore_confirm.one":
+    "Bring the record deleted with this record book back into it? It returns as it was when the record book was deleted.",
+  "removed_with_book.restore_confirm.other":
+    "Bring the {count} records deleted with this record book back into it? They return as they were when the record book was deleted.",
+  "removed_with_book.restored.one": "Done. The record is back in the record book.",
+  "removed_with_book.restored.other": "Done. The {count} records are back in the record book.",
+  "record_book.merge": "Merge with another record book…",
+  // A record book in a dropdown: its name and its dates, which is what tells
+  // "2025/2026" from "2025/2026 bis" when both are one campaign.
+  "season.option": "{label} · {span}",
+  "season.span": "{starts} – {ends}",
+  "book_merge.title": "Merge with another record book",
+  "book_merge.hint":
+    "If this record book and another of the same farm are really one campaign — started on two devices with different dates, for instance — merge them: the records of one move into the other, and the one left empty is deleted.",
+  "book_merge.other": "Record book to merge with",
+  "book_merge.pick": "Choose a record book",
+  "book_merge.kept": "Record book that stays",
+  "book_merge.kept_hint":
+    "It comes chosen alike on every device. If someone else may be merging these same record books on another device, leave it as it is: if each of you kept a different one, both would disappear until brought back on the “Status” page.",
+  "book_merge.this_book": "{book} (this record book)",
+  "book_merge.outcome":
+    "The records of “{absorbed}” will move into “{kept}”, and “{absorbed}” will be deleted.",
+  "book_merge.submit": "Merge the record books",
+  "book_merge.confirm":
+    "Merge the record books? Every record of “{absorbed}” will move into “{kept}”, and “{absorbed}” will leave the list of record books. No record is erased.",
+  "book_merge.done.one":
+    "Done. The record of “{absorbed}” is now in “{kept}”, and “{absorbed}” has been deleted.",
+  "book_merge.done.other":
+    "Done. The {count} records of “{absorbed}” are now in “{kept}”, and “{absorbed}” has been deleted.",
+  "book_merge.done_empty": "Done. “{absorbed}” held no records and has been deleted.",
+  "season.farm": "Farm",
+  "season.custom_label": "Name",
+  "season.custom_label_hint":
+    "Optional. Left blank, the book is named by its dates: 2025/2026, or 2026 if it starts and ends in the same year.",
   "season.starts": "Starts on",
   "season.ends": "Ends on",
   "season.delete_confirm":
-    'Delete season "{label}"? Only possible while it has no crops and no treatments.',
+    "Delete {farm}'s {label} record book? You can bring it back until {date}, at the foot of the list of record books. After that it will be erased for good.",
+  "season.delete_confirm_records.one":
+    "Delete {farm}'s {label} record book and its record? You can bring them back until {date}, at the foot of the list of record books. After that they will be erased for good.",
+  "season.delete_confirm_records.other":
+    "Delete {farm}'s {label} record book and its {count} records? You can bring them back until {date}, at the foot of the list of record books. After that they will be erased for good.",
+  "season.deleted": "Done. The “{label}” record book has been deleted.",
   "crops.title": "Crops",
   "crops.new": "New crop",
   "crops.empty": "No crops declared for this farm and season yet.",
@@ -278,5 +350,6 @@ export default {
   "harvest.plots_section": "Plots of origin",
   "harvest.quantity_detail": "{quantity} {unit}",
   "harvest.lot_detail": "lot {lot}",
-  "harvest.delete_confirm": "Delete this harvest sale? It is kept in the history.",
+  "harvest.delete_confirm":
+    "Delete this harvest sale? It will no longer appear in the record book.",
 };

@@ -18,6 +18,7 @@
   import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
@@ -25,7 +26,7 @@
   import PlantProductPicker from "./PlantProductPicker.svelte";
   import SpeciesPicker from "./SpeciesPicker.svelte";
   import TzSelect from "./TzSelect.svelte";
-  import { codeItems, nameItems } from "./selectItems.js";
+  import { catalogueItems, codeItems, nameItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
@@ -67,7 +68,7 @@
   };
 
   // Which registry kind each register may name, mirroring
-  // module_cue::premises_link the way SUBJECT_UNIT mirrors its own rule. A
+  // module_phytosanitary::premises_link the way SUBJECT_UNIT mirrors its own rule. A
   // postharvest record treats produce and names no place at all, which is why
   // it is absent here rather than mapped to something.
   const SUBJECT_PREMISES_KIND = {
@@ -236,7 +237,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form —
+  /// The row the panel is editing, so the delete button beside the form —
   /// and the efficacy control above it — know which record they are about.
   /// Null while entering a new one.
   const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
@@ -247,9 +248,13 @@
   }
 
   /// Fetch a category's catalogue once. Also called when a correction opens, so
-  /// a stored problem's select shows its label rather than an empty box.
+  /// a stored problem's select shows its label rather than an empty box, and
+  /// for every category the table lists, so a row names its problems. The
+  /// claim is staked before awaiting, so the effect below can re-run while a
+  /// fetch is in flight.
   function loadProblemCatalogue(category) {
     if (!category || problemCatalogues[category]) return;
+    problemCatalogues = { ...problemCatalogues, [category]: [] };
     run(async () => {
       const codes = await invoke("list_problem_codes", {
         countryCode,
@@ -263,10 +268,7 @@
   // lib/collate.js), so this only shapes the category's codes into items —
   // the hand-rolled filter it replaces lived in a second input.
   function problemItems(row) {
-    return (problemCatalogues[row.category] ?? []).map((code) => ({
-      value: code.code,
-      label: code.label,
-    }));
+    return catalogueItems(problemCatalogues[row.category] ?? [], (code) => code.label);
   }
 
   async function submit() {
@@ -292,25 +294,29 @@
       justifications: [...checkedJustifications],
       notes: notes.trim() || null,
     };
+    let savedId = editingId;
     if (editingId) {
       // A correction carries neither the campaign, the holding, the subject
       // kind nor the efficacy — that one is observed later and keeps its own
       // control in the list.
       await invoke("update_non_field_treatment", { treatmentId: editingId, update: fields });
     } else {
-      await invoke("create_non_field_treatment", {
-        record: {
-          ...fields,
-          season_id: seasonId,
-          farm_id: farmId,
-          country_code: null, // derived from the farm in Rust
-          subject_kind_code: subjectKind,
-          efficacy_code: efficacyCode || null,
-        },
-      });
+      savedId = (
+        await invoke("create_non_field_treatment", {
+          record: {
+            ...fields,
+            season_id: seasonId,
+            farm_id: farmId,
+            country_code: null, // derived from the farm in Rust
+            subject_kind_code: subjectKind,
+            efficacy_code: efficacyCode || null,
+          },
+        })
+      ).record.id;
     }
     hideForm();
     load();
+    await checkSaved("non_field_treatment", savedId);
   }
 
   function setEfficacy(record, code) {
@@ -352,9 +358,24 @@
     )}`;
   }
 
+  // The table names each problem: the catalogue of every category the listed
+  // records use is loaded once.
+  $effect(() => {
+    for (const detail of records) {
+      for (const problem of detail.problems) loadProblemCatalogue(problem.reason_category_code);
+    }
+  });
+
+  /// A problem by its catalogue name, which also covers one the authority has
+  /// retired since; the category and the bare code where this device's
+  /// catalogue lacks it — the treatments page's own wording.
   function problemsCell(problems) {
     return problems
-      .map((p) => `${tCode("reason_category", p.reason_category_code)} ${p.problem_code}`)
+      .map(
+        (p) =>
+          problemCatalogues[p.reason_category_code]?.find((code) => code.code === p.problem_code)
+            ?.label ?? `${tCode("reason_category", p.reason_category_code)} ${p.problem_code}`,
+      )
       .join(", ");
   }
 
@@ -432,7 +453,7 @@
     editingSowingId = null;
   }
 
-  /// The row the seed inspector is editing, so its delete button and its
+  /// The row the seed panel is editing, so its delete button and its
   /// efficacy control know which record they are about. Null while creating.
   const editingSeed = $derived(sowings.find((d) => d.record.id === editingSowingId) ?? null);
 
@@ -471,18 +492,22 @@
         .filter((row) => row.plotId)
         .map((row) => ({ plot_id: row.plotId, surface_sown_ha: Number(row.surface) })),
     };
+    let savedId = editingSowingId;
     if (editingSowingId) {
       await invoke("update_seed_treatment", {
         seedTreatmentId: editingSowingId,
         update: payload,
       });
     } else {
-      await invoke("create_seed_treatment", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId, efficacy_code: null },
-      });
+      savedId = (
+        await invoke("create_seed_treatment", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId, efficacy_code: null },
+        })
+      ).record.id;
     }
     hideSeedForm();
     load();
+    await checkSaved("seed_treatment", savedId);
   }
 
   function setSeedEfficacy(record, code) {
@@ -658,7 +683,7 @@
           {#snippet inspector(formId)}
             <!-- Efficacy is observed after the fact, so a correction never carries
            it: it keeps its own audited setter, now beside the record the
-           inspector names rather than repeated on every row. -->
+           panel names rather than repeated on every row. -->
             {#if editingSeed}
               <div class="form-grid">
                 <TzSelect
@@ -677,7 +702,12 @@
                 <DateInput label={t("seed.sown_on")} required bind:value={sownOn} />
                 <label>
                   <span>{t("crop.species")}</span>
-                  <SpeciesPicker bind:name={seedSpecies} bind:code={seedCropCode} required />
+                  <SpeciesPicker
+                    bind:name={seedSpecies}
+                    bind:code={seedCropCode}
+                    {countryCode}
+                    required
+                  />
                 </label>
                 <TextInput label={t("crop.variety")} bind:value={seedVariety} />
                 <NumberInput label={t("seed.quantity")} min={0.001} bind:value={seedQuantity} />
@@ -873,7 +903,7 @@
           {#snippet inspector(formId)}
             <!-- Efficacy is observed after the fact, so a correction never carries
              it: it keeps its own audited setter, now beside the record the
-             inspector names rather than repeated on every row. -->
+             panel names rather than repeated on every row. -->
             {#if editing}
               <div class="form-grid">
                 <TzSelect
@@ -1018,6 +1048,7 @@
                     <TzCombobox
                       label={t("treatment.problem")}
                       items={problemItems(row)}
+                      catalogue
                       placeholder={t("treatment.problem_filter_hint")}
                       required
                       disabled={!row.category}

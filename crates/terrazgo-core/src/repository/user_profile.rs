@@ -7,7 +7,7 @@
 //! profile is a per-device choice stored in settings.json, not in this table.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{NewUserProfile, UpdateUserProfile, UserProfile};
@@ -20,7 +20,7 @@ pub fn insert_user_profile(
     actor: Option<&str>,
 ) -> Result<UserProfile> {
     validate_name(&new.display_name)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_operator_link(&tx, new.operator_id.as_deref())?;
     let now = now_utc_iso();
     let profile = UserProfile {
@@ -42,7 +42,8 @@ pub fn insert_user_profile(
             profile.updated_at
         ],
     )?;
-    log_insert(&tx, "user_profile", &profile.id, None, actor, &profile)?;
+    let stamp = tx.register("user_profile", &profile.id, None)?;
+    log_insert(&tx, &stamp, "user_profile", &profile.id, &profile)?;
     tx.commit()?;
     Ok(profile)
 }
@@ -67,7 +68,7 @@ pub fn update_user_profile(
     actor: Option<&str>,
 ) -> Result<UserProfile> {
     validate_name(&update.display_name)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_operator_link(&tx, update.operator_id.as_deref())?;
     let before = tx
         .query_row(
@@ -88,7 +89,8 @@ pub fn update_user_profile(
          WHERE id = ?1",
         params![id, after.display_name, after.operator_id, after.updated_at],
     )?;
-    log_update(&tx, "user_profile", id, None, actor, &before, &after)?;
+    let stamp = tx.register("user_profile", id, None)?;
+    log_update(&tx, &stamp, "user_profile", id, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
@@ -102,7 +104,7 @@ pub fn soft_delete_user_profile(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM user_profile WHERE id = ?1 AND deleted_at IS NULL",
@@ -119,7 +121,8 @@ pub fn soft_delete_user_profile(
         "UPDATE user_profile SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "user_profile", id, None, actor, &before, Some(&after))?;
+    let stamp = tx.register("user_profile", id, None)?;
+    log_delete(&tx, &stamp, "user_profile", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }

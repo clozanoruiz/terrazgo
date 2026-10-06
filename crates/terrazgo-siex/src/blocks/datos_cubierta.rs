@@ -17,9 +17,9 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::siex as cue_siex;
 use module_ecoscheme::models::SoilCoverDetail;
 use module_ecoscheme::repository::list_soil_covers_for_export;
+use module_phytosanitary::siex as cue_siex;
 use rusqlite::Connection;
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 

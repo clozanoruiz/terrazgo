@@ -239,12 +239,13 @@ fn list_advisors_excludes_deleted_and_is_stable_in_insertion_order() {
 }
 
 #[test]
-fn list_gip_systems_returns_the_official_frameworks_in_model_order() {
+fn list_gip_systems_offers_spains_frameworks_and_nothing_to_an_unwritten_country() {
     let conn = db();
-    let systems = repo::list_gip_systems(&conn).unwrap();
+    let systems = repo::list_gip_systems(&conn, "es").unwrap();
     let codes: Vec<&str> = systems.iter().map(|s| s.code.as_str()).collect();
     // RD 1311/2012 art. 10-11, in the order the official model's 1.4 footnote
-    // lists the siglas: AE, PI, CP, Atrias, AS, NO.
+    // lists the siglas: AE, PI, CP, Atrias, AS, NO. That order is now the
+    // scheme's own, not the seed file's.
     assert_eq!(
         codes,
         vec![
@@ -261,22 +262,53 @@ fn list_gip_systems_returns_the_official_frameworks_in_model_order() {
             .iter()
             .all(|s| s.i18n_key.starts_with("gip_system."))
     );
+
+    // `fr` is seeded and a farm can be created under it today. Its scheme is
+    // not written, so it is offered NOTHING — never Spain's, and `atria` least
+    // of all, which is a Spanish institution.
+    assert!(repo::list_gip_systems(&conn, "fr").unwrap().is_empty());
+    // An unknown country is not a special case.
+    assert!(repo::list_gip_systems(&conn, "zz").unwrap().is_empty());
 }
 
 #[test]
-fn list_licence_levels_returns_seeded_reference_data() {
+fn list_licence_levels_offers_spains_carne_levels_and_nothing_to_an_unwritten_country() {
     let conn = db();
-    let levels = repo::list_licence_levels(&conn).unwrap();
+    let levels = repo::list_licence_levels(&conn, "es").unwrap();
     let codes: Vec<&str> = levels.iter().map(|l| l.code.as_str()).collect();
-    // Seed order (the RD 1311/2012 niveles de capacitación, rising), not
-    // alphabetical. "asesor" is deliberately absent: advising is a capacity of
-    // the advisor entity, not a carné an applicator holds.
+    // The RD 1311/2012 niveles de capacitación, rising, not alphabetical.
+    // "asesor" is deliberately absent: advising is a capacity of the advisor
+    // entity, not a carné an applicator holds.
     assert_eq!(codes, vec!["basic", "qualified", "fumigator", "pilot"]);
     assert!(
         levels
             .iter()
             .all(|l| l.i18n_key.starts_with("licence_level."))
     );
+
+    // France's Certiphyto has its own categories; until they are written, an
+    // `fr` holding is offered an empty picker rather than a Spanish carné.
+    assert!(repo::list_licence_levels(&conn, "fr").unwrap().is_empty());
+    assert!(repo::list_licence_levels(&conn, "zz").unwrap().is_empty());
+}
+
+/// The scheme half, without a database: a duplicate code would double a row in
+/// every picker, and the seeded-rows contract test only ever sees it once.
+#[test]
+fn no_scheme_names_the_same_code_twice() {
+    for (country, scheme) in [
+        ("es", repo::licence_level_scheme("es")),
+        ("es", repo::gip_system_scheme("es")),
+    ] {
+        let scheme = scheme.expect("Spain's schemes are written");
+        let mut seen = std::collections::BTreeSet::new();
+        for code in scheme {
+            assert!(
+                seen.insert(*code),
+                "{country} names {code} twice, which would double a picker row"
+            );
+        }
+    }
 }
 
 #[test]

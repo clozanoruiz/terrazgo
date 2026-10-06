@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+//! Migration tests (docs/architecture.md testing strategy #3): every migration must apply cleanly
+//! to a fresh database AND on top of the previous version.
+//!
+//! What is asserted here is this crate's own schema, on the composed sequence.
+//! Core's constraints — the NOT NULL on `farm.country_code`, foreign-key
+//! enforcement — are core's to pin, in `terrazgo-core/tests/migrations.rs`;
+//! re-asserting them here made the composed run say the same thing twice and
+//! made core's schema look like something this module owns.
+
+use module_phytosanitary::db::migrations;
+use rusqlite::Connection;
+
+#[test]
+fn migration_definitions_are_valid() {
+    // rusqlite_migration checks the up/down set is internally consistent.
+    migrations()
+        .validate()
+        .expect("migration set should validate");
+}
+
+#[test]
+fn applies_cleanly_to_fresh_database() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    migrations().to_latest(&mut conn).unwrap();
+
+    // Schema exists and the seed migration populated reference data.
+    let countries: i64 = conn
+        .query_row("SELECT count(*) FROM country", [], |r| r.get(0))
+        .unwrap();
+    assert!(countries >= 1, "reference data should be seeded");
+
+    // A representative core table exists and is empty.
+    let treatments: i64 = conn
+        .query_row("SELECT count(*) FROM treatment_record", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(treatments, 0);
+}
+
+#[test]
+fn applies_cleanly_on_top_of_previous_version() {
+    let mut conn = Connection::open_in_memory().unwrap();
+    let m = migrations();
+
+    // Stop at v1 (the core's DDL — migrations() composes core steps before the phytosanitary module's):
+    // the country table exists, reference data not yet seeded.
+    m.to_version(&mut conn, 1).unwrap();
+    let countries_v1: i64 = conn
+        .query_row("SELECT count(*) FROM country", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(countries_v1, 0, "v1 has the schema but no seeds");
+
+    // Upgrade v1 -> latest (applies 0002 on an existing v1 database).
+    m.to_latest(&mut conn).unwrap();
+    let countries_v2: i64 = conn
+        .query_row("SELECT count(*) FROM country", [], |r| r.get(0))
+        .unwrap();
+    assert!(countries_v2 >= 1, "upgrade should seed reference data");
+}

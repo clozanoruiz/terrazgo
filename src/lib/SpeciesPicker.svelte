@@ -11,7 +11,15 @@
   import { invoke } from "./backend.js";
   import CataloguePicker from "./CataloguePicker.svelte";
 
-  let { name = $bindable(""), code = $bindable(null), plotId = null, required = false } = $props();
+  // The catalogue is one country's (FEGA PRODUCTOS): a holding whose country
+  // has none gets an empty list, which is a plain text field.
+  let {
+    name = $bindable(""),
+    code = $bindable(null),
+    countryCode = null,
+    plotId = null,
+    required = false,
+  } = $props();
 
   let options = $state([]);
   let landUse = $state(null);
@@ -19,12 +27,20 @@
 
   $effect(() => {
     const wanted = filterByPlot ? plotId : null;
-    loadOptions(wanted);
+    loadOptions(wanted, countryCode);
   });
 
-  async function loadOptions(wanted) {
+  async function loadOptions(wanted, country) {
+    if (!country) {
+      options = [];
+      landUse = null;
+      return;
+    }
     try {
-      const catalogue = await invoke("list_crop_species", { plotId: wanted ?? null });
+      const catalogue = await invoke("list_crop_species", {
+        countryCode: country,
+        plotId: wanted ?? null,
+      });
       options = catalogue.options;
       landUse = catalogue.land_use;
     } catch {

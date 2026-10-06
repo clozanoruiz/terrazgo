@@ -86,8 +86,9 @@ pub fn report_languages(
 /// silent fallback: printing a legal document in the wrong language must fail
 /// loudly.
 fn report_language(code: &str) -> Result<terrazgo_recordbook::ReportLanguage, CommandError> {
-    terrazgo_recordbook::ReportLanguage::from_code(code)
-        .ok_or_else(|| module_cue::CueError::Invalid("report_language_unknown").into())
+    terrazgo_recordbook::ReportLanguage::from_code(code).ok_or_else(|| {
+        module_phytosanitary::PhytosanitaryError::Invalid("report_language_unknown").into()
+    })
 }
 
 /// Render the printable cuaderno (official-model sections 1, 2.1 and 3.1)

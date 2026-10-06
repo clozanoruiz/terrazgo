@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Reading back the `record_change` row a write just logged.
+//! Reading back the `record_change` row a write just logged: its images, and
+//! where it sits in the sync log.
 //!
 //! Eight copies of this existed across five crates, in two shapes: core and
-//! `module-cue` split the payload into `before`/`after`, `module-fertilisation`
+//! `module-phytosanitary` split the payload into `before`/`after`, `module-fertilisation`
 //! returned the whole document. The three-value shape is the one kept, because
 //! the payload contract *is* two row images (`docs/data-model.md`) and a helper
 //! that hands back the envelope makes every caller re-index into it.
@@ -28,6 +29,38 @@ pub fn last_change(conn: &Connection, table: &str, id: &str) -> (String, Value, 
         let mut doc: Value = serde_json::from_str(&payload).unwrap();
         (op, doc["before"].take(), doc["after"].take())
     })
+    .unwrap()
+}
+
+/// Where an entity's latest change sits in the sync log: the change set it was
+/// written in, and the register it was filed under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stamped {
+    /// `(origin_device, origin_seq)` — the change-set key. Two rows written by
+    /// one transaction share it.
+    pub change_set: (String, i64),
+    /// `(root_table, root_id)` — the register, which is the unit of merge.
+    pub register: (String, String),
+}
+
+/// The latest `record_change` row for an entity, as its change set and its
+/// register. For asserting that a transaction touching several registers
+/// wrote them as ONE change set, each under its own register.
+///
+/// Panics if the entity has no logged change, like [`last_change`].
+pub fn last_stamp(conn: &Connection, table: &str, id: &str) -> Stamped {
+    conn.query_row(
+        "SELECT origin_device, origin_seq, root_table, root_id FROM record_change
+         WHERE entity_table = ?1 AND entity_id = ?2
+         ORDER BY changed_at DESC, id DESC LIMIT 1",
+        [table, id],
+        |r| {
+            Ok(Stamped {
+                change_set: (r.get(0)?, r.get(1)?),
+                register: (r.get(2)?, r.get(3)?),
+            })
+        },
+    )
     .unwrap()
 }
 

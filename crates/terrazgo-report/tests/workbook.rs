@@ -6,7 +6,7 @@
 //! producing a lopsided sheet.
 //!
 //! What the *cells* end up containing is pinned where it is meaningful — on
-//! the workbook description each module builds (see module-cue's
+//! the workbook description each module builds (see module-phytosanitary's
 //! `cuaderno_workbook`) — rather than by unzipping the output here, which
 //! would only re-test `rust_xlsxwriter`'s own serialisation.
 

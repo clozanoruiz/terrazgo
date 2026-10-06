@@ -206,6 +206,20 @@ export function languageTag() {
   return FORMAT_LOCALE[current] ?? current;
 }
 
+// Several names in one sentence — "Móvil de Juan y Tablet" — joined by the
+// LANGUAGE's own word, like plurals: "y", "and" and "i" are the app's words,
+// whatever the machine's regional format.
+const listFormats = new Map();
+
+export function formatList(items) {
+  const tag = languageTag();
+  return intl(
+    listFormats,
+    tag,
+    () => new Intl.ListFormat(tag, { style: "long", type: "conjunction" }),
+  ).format(items);
+}
+
 // The machine's own regional format, resolved through Intl rather than guessed
 // from navigator.language: the two can differ, and this is the one the runtime
 // will actually format with. Undefined locale = "the host default".

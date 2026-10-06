@@ -54,7 +54,7 @@
     /// A strip drawn directly under another strip — section 9's registers
     /// inside the record book's eco-schemes tab. It reads lighter (see
     /// `.tabrow.subtabs`), so two levels are not mistaken for one. Not a
-    /// property of being nested at all: the product inspector's strip sits
+    /// property of being nested at all: the product panel's strip sits
     /// under a form rather than under a strip, and has nothing to be confused
     /// with.
     nested = false,
@@ -73,7 +73,7 @@
     /// Declared rather than inferred from where the strip sits, despite that.
     /// It used to be `.view.framed > .tabs-root > .tabpanel`, which could not
     /// tell the record book's nested strips (a pane) from the product
-    /// inspector's (a block inside a scrolling pane), and widening it to reach
+    /// panel's (a block inside a scrolling box), and widening it to reach
     /// the first would have silently restyled the second.
     framed = false,
     /// Rendered inside the active tab's panel, so the panel is what the tab

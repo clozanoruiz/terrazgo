@@ -6,7 +6,7 @@ INSERT INTO country (code, i18n_key) VALUES
     ('fr', 'country.fr'),
     ('it', 'country.it');
 
--- Units of measure (moved here with the table from module-cue, 2026-08-07).
+-- Units of measure (moved here with the table from module-phytosanitary, 2026-08-07).
 -- Rates first, then concentrations, then amounts; `dimension` is what keeps a
 -- total from being offered where a dose belongs.
 INSERT INTO unit (code, dimension, i18n_key) VALUES
@@ -33,19 +33,22 @@ INSERT INTO unit (code, dimension, i18n_key) VALUES
     ('t',     'quantity',      'unit.t'),
     ('m3',    'quantity',      'unit.m3'),
     -- How MUCH of a non-chemical measure was deployed — the official model's
-    -- "Intensidad de la medida (Nº de trampas, nº de difusores, etc.)". These
-    -- are counts, not masses or volumes, which is why they are a dimension of
-    -- their own: a number of traps can be neither a dose nor an amount of
-    -- product. Each is offered absolute and per hectare because the SIEX
-    -- UNIDADES_MEDIDA catalogue publishes both forms and they answer different
-    -- questions (twelve traps in a plot, versus twelve traps for every
-    -- hectare of it).
+    -- "Intensidad de la medida (Nº de trampas, nº de difusores, etc.)". Counts
+    -- and areas of a measure, not masses or volumes of product, which is why
+    -- they are a dimension of their own. Each count is offered absolute and per
+    -- hectare (or per m²) because the SIEX UNIDADES_MEDIDA catalogue publishes
+    -- those forms and they answer different questions (twelve traps in a plot,
+    -- versus twelve traps for every hectare of it); the areas are what Anexo V
+    -- field 18 gives anti-insect nets.
     ('traps',        'intensity', 'unit.traps'),
     ('traps_ha',     'intensity', 'unit.traps_ha'),
     ('diffusers',    'intensity', 'unit.diffusers'),
     ('diffusers_ha', 'intensity', 'unit.diffusers_ha'),
     ('units',        'intensity', 'unit.units'),
-    ('units_ha',     'intensity', 'unit.units_ha');
+    ('units_ha',     'intensity', 'unit.units_ha'),
+    ('units_m2',     'intensity', 'unit.units_m2'),
+    ('m2',           'intensity', 'unit.m2'),
+    ('net_m2_ha',    'intensity', 'unit.net_m2_ha');
 
 INSERT INTO production_system (code, i18n_key) VALUES
     ('conventional', 'production_system.conventional'),
@@ -71,7 +74,7 @@ INSERT INTO irrigation_system (code, i18n_key) VALUES
     ('gravity',   'irrigation_system.gravity');
 
 -- What a `premises` row is, in core-native words. The register's own vocabulary
--- (storage_premises / transport) belongs to module-cue's
+-- (storage_premises / transport) belongs to module-phytosanitary's
 -- `non_field_subject_kind`; these two say what the THING is, which is core's
 -- business, and the module pairs them.
 INSERT INTO premises_kind (code, i18n_key) VALUES

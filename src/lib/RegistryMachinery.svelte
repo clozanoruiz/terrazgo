@@ -107,7 +107,7 @@
   // sentence — ROMA and REGANIP cover different equipment and are normally
   // exclusive, so an empty cell says something a missing phrase did not.
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(machines.find((m) => m.machinery.id === editingId)?.machinery ?? null);
 </script>

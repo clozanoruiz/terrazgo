@@ -4,7 +4,7 @@
 //! Terrazgo fertilisation module: fertilisation, irrigation and soil records.
 //!
 //! The record book has **two** decrees. RD 1311/2012 governs the phytosanitary
-//! registers, which module-cue owns. RD 1051/2022 art. 5 (amended by
+//! registers, which module-phytosanitary owns. RD 1051/2022 art. 5 (amended by
 //! RD 934/2025) creates the cuaderno's fertilisation section — binding since
 //! 1 January 2026, recorded within one month of each operation — and art. 5.e
 //! puts irrigation doses and dates in the very same duty. That is why the
@@ -26,16 +26,17 @@
 //!   * [`error`]      — `FertilisationError` / `Result`.
 //!
 //! This crate depends on `terrazgo-core` and on nothing else in the workspace:
-//! modules never depend on each other. Where it needs something module-cue
+//! modules never depend on each other. Where it needs something module-phytosanitary
 //! also needs — units of measure — that thing lives in core.
 
 pub mod agronomy;
 pub mod catalogue;
 pub mod db;
+pub mod duplicates;
 pub mod error;
 pub mod models;
 pub mod repository;
 pub mod siex;
 
-pub use db::{BACKUP_SHAPE, migration_set, migrations, open_in_memory};
+pub use db::{BACKUP_SHAPE, ROW_CAPTIONS, SYNC_SHAPE, migration_set, migrations, open_in_memory};
 pub use error::{FertilisationError, Result};

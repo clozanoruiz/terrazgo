@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Terrazgo report crate: in-process PDF generation via Typst, shared by all
-//! modules (the CUE cuaderno first; fertilisation plans, irrigation summaries
+//! modules (the record book first; fertilisation plans, irrigation summaries
 //! and cost reports later). See `docs/architecture.md` → "Report engine".
 //!
 //! Fully offline by construction: the Typst templates are embedded by their
@@ -25,7 +25,7 @@
 //!   country (Spain's co-official languages), so labels arrive from the
 //!   owning module's assembly as ordinary inputs rather than sitting in the
 //!   `.typ` file. One template then serves every language it is printed in.
-//!   See `module_cue::report::labels`.
+//!   See `module_phytosanitary::report::labels`.
 //!
 //! A template, its data and the zero-warnings assertion, end to end:
 //!

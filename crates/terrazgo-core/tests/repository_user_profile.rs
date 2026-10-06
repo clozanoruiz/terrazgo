@@ -256,6 +256,7 @@ fn writes_stamp_the_actor_and_none_stays_null() {
                 siex_code: None,
                 province_code: None,
             }),
+            ..NewFarm::default()
         },
         Some(&profile.id),
     )
@@ -289,7 +290,6 @@ fn writes_stamp_the_actor_and_none_stays_null() {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: "es".into(),
             es: None,
             representative: None,
         },

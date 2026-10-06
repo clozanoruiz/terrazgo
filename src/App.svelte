@@ -8,12 +8,13 @@
   import TzTooltip from "./lib/TzTooltip.svelte";
   import { BitsConfig } from "bits-ui";
   import { formatTag, onLocaleChange, t } from "./i18n.js";
-  import { ChevronsLeft, ChevronsRight } from "@lucide/svelte";
+  import { ChevronLeft, ChevronsLeft, ChevronsRight } from "@lucide/svelte";
 
   import { NAV_ICONS } from "./lib/icons.js";
   import { NAV_ITEMS, activeRoute } from "./lib/nav.js";
   import NotificationBell from "./lib/NotificationBell.svelte";
   import { clearAll } from "./lib/notifications.svelte.js";
+  import { pageTitle } from "./lib/pageTitle.svelte.js";
   import { resolveRoute } from "./lib/routes.js";
 
   let hash = $state(location.hash || "#/status");
@@ -27,6 +28,15 @@
   // lib/routes.js, so a new module screen adds an entry there instead of
   // another branch here.
   const route = $derived(resolveRoute(hash));
+
+  // A detail page goes by the record it shows once the view has loaded it, and
+  // by its section until then — a blank band while a farm loads would read as
+  // a page with no name.
+  const title = $derived(
+    route.parent && pageTitle.hash === hash && pageTitle.label
+      ? pageTitle.label
+      : t(route.titleKey),
+  );
 
   // Collapsed sidebar is a per-device display preference, like the locale.
   let collapsed = $state(localStorage.getItem("terrazgo.sidebar") === "collapsed");
@@ -50,6 +60,26 @@
      also passes locale itself, so it stays correct when a harness mounts a view
      outside this shell. -->
 {#key localeVersion}
+  <!-- One rule for both bands: a detail page opens with a way back to the list
+       it came from. Bell-sized and outlined like the bell, so the band has a
+       control at each end rather than a lone link beside the title. -->
+  {#snippet backButton()}
+    {#if route.parent}
+      <TzTooltip label={t("nav.back_to", { section: t(route.titleKey) })} side="bottom">
+        {#snippet trigger(props)}
+          <a
+            {...props}
+            href={route.parent}
+            class="head-back"
+            aria-label={t("nav.back_to", { section: t(route.titleKey) })}
+          >
+            <ChevronLeft />
+          </a>
+        {/snippet}
+      </TzTooltip>
+    {/if}
+  {/snippet}
+
   <BitsConfig defaultLocale={formatTag()} defaultPortalTo="body">
     <div class="app-shell">
       <!-- Narrow screens only (CSS): the screen's name on top, tabs at the
@@ -58,7 +88,8 @@
            the band is the only place a title can live at all (.main-head is
            hidden at this width). -->
       <header class="topbar">
-        <h1>{t(route.titleKey)}</h1>
+        {@render backButton()}
+        <h1>{title}</h1>
         <div class="topbar-tools">
           <NotificationBell />
         </div>
@@ -121,11 +152,19 @@
            and a control that vanishes on a phone is not a control. They live in
            the view's own first toolbar band, which exists at both widths. -->
         <div class="main-head">
-          <h2 class="view-title">{t(route.titleKey)}</h2>
+          {@render backButton()}
+          <h2 class="view-title">{title}</h2>
           <NotificationBell />
         </div>
 
-        <route.component {...route.props} />
+        <!-- A detail page loads its record once, on mount, so moving from one
+             record's URL straight to another's must mount it afresh: the same
+             component with a new id would otherwise keep showing the first
+             record's data. Top-level routes are keyed by nothing, so a query
+             change like the map's `?plot=` does not remount its view. -->
+        {#key route.parent ? hash : ""}
+          <route.component {...route.props} />
+        {/key}
       </main>
 
       <!-- Narrow screens only (CSS). -->

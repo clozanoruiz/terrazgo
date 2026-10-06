@@ -17,6 +17,7 @@ use module_fertilisation::repository as repo;
 use rusqlite::Connection;
 use terrazgo_core::models::{NewMachinery, NewSeason};
 use terrazgo_core::repository as core_repo;
+use terrazgo_testkit::sync::{hold_codes, join_and_receive};
 
 /// The shared land plus the two spreaders this register needs — one on the
 /// farm, one on the neighbour's.
@@ -218,6 +219,57 @@ fn rejects_a_material_code_outside_the_published_list() {
     new.material_code = "99".into();
 
     let err = repo::insert_fertiliser_material(&mut conn, new, None).unwrap_err();
+    assert!(matches!(
+        err,
+        module_fertilisation::FertilisationError::Invalid("unknown_material_code")
+    ));
+}
+
+#[test]
+fn a_correction_keeps_a_material_code_this_devices_catalogue_lacks_and_checks_a_new_one() {
+    // A material synced from a device whose MAT_FERTI copy is newer
+    // (docs/sync.md → What stays device-local): renaming it here saves, and a
+    // code the correction changes to is still checked.
+    let mut phone = open_in_memory().unwrap();
+    let mut laptop = open_in_memory().unwrap();
+    hold_codes(&phone, "MAT_FERTI", &["14", "25"]);
+    hold_codes(&laptop, "MAT_FERTI", &["14"]);
+    let mut new = sample_material();
+    new.material_code = "25".into();
+    let created = repo::insert_fertiliser_material(&mut phone, new, None).unwrap();
+    join_and_receive(&phone, &mut laptop);
+
+    let correction = |name: &str, code: &str| UpdateFertiliserMaterial {
+        id: created.material.id.clone(),
+        name: name.into(),
+        material_code: code.into(),
+        material_detail_code: None,
+        supplier_name: None,
+        supplier_rega: None,
+        supplier_tax_id: None,
+        supplier_nima: None,
+        manure_treatment_code: None,
+        density_kg_l: None,
+        notes: None,
+        nutrients: created.nutrients.clone(),
+    };
+    let saved = repo::update_fertiliser_material(
+        &mut laptop,
+        &created.material.id,
+        correction("NAC 27 %", "25"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(saved.material.name, "NAC 27 %");
+    assert_eq!(saved.material.material_code, "25");
+
+    let err = repo::update_fertiliser_material(
+        &mut laptop,
+        &created.material.id,
+        correction("NAC 27 %", "26"),
+        None,
+    )
+    .unwrap_err();
     assert!(matches!(
         err,
         module_fertilisation::FertilisationError::Invalid("unknown_material_code")
@@ -610,7 +662,7 @@ fn records_the_good_practices_the_twin_requires_and_the_model_never_asks() {
 #[test]
 fn refuses_no_practices_claimed_beside_a_practice() {
     // Source of truth is the catalogue's own wording: BUENAS_PRACTICAS_AMBITOS
-    // row ("0";"No realiza buenas prácticas";"Fertilización"). Holding it beside
+    // row ("0";"No realiza buenas prácticas";"SI";"SI";"SI"). Holding it beside
     // another code says both that nothing was done and what was done, and the
     // SIEX twin would carry the contradiction out as two BuenaPracticaFertilizante
     // entries.
@@ -932,25 +984,38 @@ fn a_deleted_record_leaves_the_register_and_keeps_its_history() {
     assert!(after["deleted_at"].is_string());
 }
 
+/// Deleting a book deletes its fertilisations, and bringing it back restores each one
+/// whole, the rows belonging to it included (docs/sync.md → Deleting a book
+/// with its records). Core finds the register in the aggregate map; this pins
+/// that it finds THIS one.
 #[test]
-fn a_season_holding_only_a_fertilisation_reports_itself_in_use() {
-    // The shell chains this before deleting a season. A season holding nothing
-    // but a fertilisation record was deletable until this register existed —
-    // the same gap seam 4 of the previous slice closed in module-cue.
+fn deleting_its_book_takes_a_fertilisation_and_bringing_it_back_restores_it_whole() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
     let material_id = material(&mut conn);
-    assert!(!repo::season_has_records(&conn, &fx.season_id).unwrap());
-
     let created =
         repo::insert_fertilisation_record(&mut conn, sample(&fx, &material_id), None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    let id = created.record.id.clone();
+    let before = serde_json::to_value(repo::get_fertilisation_record(&conn, &id).unwrap()).unwrap();
 
-    repo::soft_delete_fertilisation_record(&mut conn, &created.record.id, None).unwrap();
-    assert!(
-        repo::season_has_records(&conn, &fx.season_id).unwrap(),
-        "a soft-deleted record's audit history is only reachable through its season"
+    assert_eq!(
+        terrazgo_core::repository::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        1
     );
+    assert!(matches!(
+        repo::get_fertilisation_record(&conn, &id),
+        Err(module_fertilisation::FertilisationError::NotFound)
+    ));
+
+    terrazgo_core::repository::restore_book(
+        &mut conn,
+        &fx.season_id,
+        &terrazgo_core::date::today_utc(),
+        None,
+    )
+    .unwrap();
+    let after = serde_json::to_value(repo::get_fertilisation_record(&conn, &id).unwrap()).unwrap();
+    terrazgo_testkit::assert_restored(&before, &after);
 }
 
 #[test]
@@ -1012,6 +1077,7 @@ fn irrigation(conn: &mut Connection, fx: &Fixture) -> String {
                 irrigated_area_ha: Some(3.5),
             }],
             water_origins: vec![],
+            practices: vec![],
         },
         None,
     )
@@ -1080,10 +1146,10 @@ fn the_link_may_not_reach_another_holding_another_campaign_or_a_withdrawn_wateri
     let next_season = core_repo::insert_season(
         &mut conn,
         NewSeason {
-            campaign_year: 2027,
-            label: "2026/2027".into(),
-            starts_on: None,
-            ends_on: None,
+            farm_id: fx.farm_id.clone(),
+            starts_on: "2026-09-01".into(),
+            ends_on: "2027-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -1136,6 +1202,7 @@ fn irrigation_payload(fx: &Fixture) -> module_fertilisation::models::NewIrrigati
             irrigated_area_ha: Some(3.5),
         }],
         water_origins: vec![],
+        practices: vec![],
     }
 }
 

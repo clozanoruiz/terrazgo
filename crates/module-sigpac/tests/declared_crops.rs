@@ -58,6 +58,7 @@ fn fixture(parts: [&str; 7], declaration: &[u8]) -> Fixture {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )
@@ -84,10 +85,10 @@ fn fixture(parts: [&str; 7], declaration: &[u8]) -> Fixture {
     let season = insert_season(
         &mut app,
         terrazgo_core::models::NewSeason {
-            campaign_year: 2026,
-            label: "2025-2026".into(),
-            starts_on: None,
-            ends_on: None,
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: Some("2025-2026".into()),
         },
         None,
     )
@@ -501,12 +502,12 @@ fn proposing_writes_nothing() {
 #[test]
 fn species_are_narrowed_by_the_plots_verified_land_use() {
     let fx = fixture(VALLADOLID, DECLARED);
-    let all = crop_species(&fx.app, None).unwrap();
+    let all = crop_species(&fx.app, "es", None).unwrap();
     assert!(all.land_use.is_none());
     assert!(all.options.len() > 1000, "the full catalogue is offered");
 
     store_land_use(&fx, "TA");
-    let filtered = crop_species(&fx.app, Some(&fx.plot_id)).unwrap();
+    let filtered = crop_species(&fx.app, "es", Some(&fx.plot_id)).unwrap();
     assert_eq!(filtered.land_use.as_deref(), Some("TA"));
     assert!(filtered.options.len() < all.options.len());
     // CULTIVO_USO_SIGPAC pairs code 1 (TRIGO BLANDO) with uso TA, tierras
@@ -525,17 +526,49 @@ fn species_are_narrowed_by_the_plots_verified_land_use() {
 #[test]
 fn the_picker_falls_back_to_every_species_when_it_cannot_narrow() {
     let fx = fixture(VALLADOLID, DECLARED);
-    let all = crop_species(&fx.app, None).unwrap().options.len();
+    let all = crop_species(&fx.app, "es", None).unwrap().options.len();
 
     // Never verified: no stored boundary, so no land use to filter by.
-    let unverified = crop_species(&fx.app, Some(&fx.plot_id)).unwrap();
+    let unverified = crop_species(&fx.app, "es", Some(&fx.plot_id)).unwrap();
     assert!(unverified.land_use.is_none());
     assert_eq!(unverified.options.len(), all);
 
     store_land_use(&fx, "NO-SUCH-USE");
-    let empty_match = crop_species(&fx.app, Some(&fx.plot_id)).unwrap();
+    let empty_match = crop_species(&fx.app, "es", Some(&fx.plot_id)).unwrap();
     assert!(empty_match.land_use.is_none());
     assert_eq!(empty_match.options.len(), all);
+}
+
+/// The species catalogue is FEGA's, so it is Spain's. This module is the
+/// Spanish parcel provider and most of it is Spanish by construction, but the
+/// picker is not: it feeds the manual crop form, which every holding uses.
+/// Without the country a French farm was offered Spanish species and could
+/// store a Spanish registry code on a French record.
+///
+/// An empty list is the right answer, not a fallback to Spain's: the field
+/// degrades to free text, and a species with no code is already valid.
+#[test]
+fn the_species_picker_offers_nothing_to_a_country_with_no_catalogue() {
+    let fx = fixture(VALLADOLID, DECLARED);
+    store_land_use(&fx, "TA");
+
+    for country in ["fr", "it", "zz"] {
+        let offered = crop_species(&fx.app, country, Some(&fx.plot_id)).unwrap();
+        assert!(
+            offered.options.is_empty(),
+            "{country} was offered {} Spanish species",
+            offered.options.len()
+        );
+        assert!(offered.land_use.is_none());
+    }
+
+    // And Spain is unaffected.
+    assert!(
+        !crop_species(&fx.app, "es", None)
+            .unwrap()
+            .options
+            .is_empty()
+    );
 }
 
 /// The land use lives in the provider boundary's properties, exactly as

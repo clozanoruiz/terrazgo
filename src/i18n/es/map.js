@@ -57,7 +57,8 @@ export default {
   "map.boundaries": "Contornos guardados",
   "map.no_boundary": "Aún no hay contorno guardado.",
   "map.delete_boundary": "Quitar",
-  "map.delete_boundary_confirm": "¿Quitar el contorno {source}? Su historial se conserva.",
+  "map.delete_boundary_confirm":
+    "¿Quitar el contorno {source}? Dejará de verse en el mapa, pero no se borra de la base de datos.",
   "map.source.manual": "dibujado",
   "map.source.import": "importado",
   "map.source.sigpac": "SIGPAC",

@@ -19,6 +19,7 @@ use module_ecoscheme::models::*;
 use module_ecoscheme::open_in_memory;
 use module_ecoscheme::repository as repo;
 use rusqlite::Connection;
+use terrazgo_testkit::last_stamp;
 
 fn fixture(conn: &mut Connection) -> CoreFixture {
     farm_with_plots(
@@ -299,6 +300,58 @@ fn maintenance_is_written_into_the_registers_that_own_it() {
     assert_eq!(grazings[0].animals[0].animal_count, 40);
 }
 
+/// A cover and its maintenance lines are one act and three registers: the
+/// cover, and each line's own grazing or cultural operation. They land as ONE
+/// change set, each row filed under its own register (docs/sync.md → The
+/// change stamp) — and withdrawing the cover withdraws the lines in the same
+/// change set again.
+#[test]
+fn a_cover_and_its_maintenance_are_one_change_set_in_several_registers() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let mut new = sample(&fx);
+    new.maintenance = vec![
+        maintenance("mowing", "2026-05-12"),
+        grazing_line("2026-06-03", 40),
+    ];
+    let detail = repo::insert_soil_cover(&mut conn, new, None).unwrap();
+    let operation = &repo::list_cultural_operations(&conn, &fx.season_id, &fx.farm_id).unwrap()[0];
+    let grazing = &repo::list_grazing_records(&conn, &fx.season_id, &fx.farm_id).unwrap()[0];
+
+    let cover = last_stamp(&conn, "soil_cover", &detail.record.id);
+    let mowing = last_stamp(&conn, "cultural_operation", &operation.record.id);
+    let pastoreo = last_stamp(&conn, "grazing_record", &grazing.record.id);
+    assert_eq!(mowing.change_set, cover.change_set);
+    assert_eq!(pastoreo.change_set, cover.change_set);
+    assert_eq!(
+        cover.register,
+        ("soil_cover".to_string(), detail.record.id.clone())
+    );
+    assert_eq!(
+        mowing.register,
+        (
+            "cultural_operation".to_string(),
+            operation.record.id.clone()
+        )
+    );
+    assert_eq!(
+        pastoreo.register,
+        ("grazing_record".to_string(), grazing.record.id.clone())
+    );
+
+    repo::soft_delete_soil_cover(&mut conn, &detail.record.id, None).unwrap();
+    let withdrawn = last_stamp(&conn, "soil_cover", &detail.record.id);
+    assert_ne!(withdrawn.change_set, cover.change_set, "a new change set");
+    assert_eq!(
+        last_stamp(&conn, "cultural_operation", &operation.record.id).change_set,
+        withdrawn.change_set
+    );
+    assert_eq!(
+        last_stamp(&conn, "grazing_record", &grazing.record.id).change_set,
+        withdrawn.change_set
+    );
+}
+
 #[test]
 fn a_grazing_line_states_its_animals_like_any_other_grazing() {
     // Entering a pastoreo from the cover form does not excuse it from what the
@@ -324,7 +377,7 @@ fn only_the_three_kinds_model_94_prints_are_maintenance() {
     let fx = fixture(&mut conn);
 
     let mut new = sample(&fx);
-    new.maintenance = vec![maintenance("pruning", "2026-05-12")];
+    new.maintenance = vec![maintenance("green_pruning_with_cleaning", "2026-05-12")];
     assert!(matches!(
         repo::insert_soil_cover(&mut conn, new, None).unwrap_err(),
         module_ecoscheme::EcoschemeError::Invalid("not_a_maintenance_kind")
@@ -651,19 +704,13 @@ fn a_cover_on_another_farm_cannot_be_maintained_from_this_one() {
     let fx = fixture(&mut conn);
     let cover = repo::insert_soil_cover(&mut conn, sample(&fx), None).unwrap();
 
-    // The other farm's own season-scoped record, pointed at this farm's cover.
-    let other_farm_id: String = conn
-        .query_row(
-            "SELECT farm_id FROM plot WHERE id = ?1",
-            [&fx.other_farm_plot],
-            |r| r.get(0),
-        )
-        .unwrap();
+    // The other farm's own season-scoped record, filed under its own season,
+    // pointed at this farm's cover.
     let err = repo::insert_cultural_operation(
         &mut conn,
         NewCulturalOperation {
-            season_id: fx.season_id.clone(),
-            farm_id: other_farm_id,
+            season_id: fx.other_season_id.clone(),
+            farm_id: fx.other_farm_id.clone(),
             practice_code: "plant_cover".into(),
             operation_kind_code: "mowing".into(),
             performed_on: "2026-05-12".into(),
@@ -737,16 +784,48 @@ fn covers_list_oldest_first_within_their_own_season_and_farm() {
     assert_eq!(dates, ["2026-01-20", "2026-03-15", "2026-04-02"]);
 }
 
+/// Deleting a book deletes its covers and the maintenance recorded against
+/// them — those lines are records of the book in two other registers, so each
+/// goes as its own register — and bringing the book back restores the cover
+/// with its maintenance, as it was (docs/sync.md → Deleting a book with its
+/// records).
 #[test]
-fn a_season_holding_a_cover_reports_itself_in_use() {
-    // The shell chains this before deleting a season; a season holding nothing
-    // but a cover would otherwise be deletable.
+fn deleting_its_book_takes_a_cover_with_its_maintenance_and_brings_them_back_together() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
+    let mut new = sample(&fx);
+    new.maintenance = vec![
+        maintenance("mowing", "2026-05-12"),
+        grazing_line("2026-06-01", 40),
+    ];
+    let created = repo::insert_soil_cover(&mut conn, new, None).unwrap();
+    let id = created.record.id.clone();
+    let before = serde_json::to_value(repo::get_soil_cover(&conn, &id).unwrap()).unwrap();
 
-    assert!(!repo::season_has_records(&conn, &fx.season_id).unwrap());
-    repo::insert_soil_cover(&mut conn, sample(&fx), None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    assert_eq!(
+        terrazgo_core::repository::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        3,
+        "the cover, its mowing and its grazing"
+    );
+    assert!(matches!(
+        repo::get_soil_cover(&conn, &id),
+        Err(module_ecoscheme::EcoschemeError::NotFound)
+    ));
+
+    terrazgo_core::repository::restore_book(
+        &mut conn,
+        &fx.season_id,
+        &terrazgo_core::date::today_utc(),
+        None,
+    )
+    .unwrap();
+    let after = serde_json::to_value(repo::get_soil_cover(&conn, &id).unwrap()).unwrap();
+    terrazgo_testkit::assert_restored(&before, &after);
+    assert_eq!(
+        repo::get_soil_cover(&conn, &id).unwrap().maintenance.len(),
+        2,
+        "the lines are back beside it"
+    );
 }
 
 #[test]

@@ -9,10 +9,12 @@ export default {
   "farms.title": "Explotacions",
   "farms.new": "Nova explotació",
   "farms.empty": "Encara no hi ha explotacions; creeu la primera.",
-  "farms.back": "← Explotacions",
+  "farm.section": "Explotació",
   "farm.name": "Nom",
   "farm.owner": "Titular",
   "farm.country": "País",
+  "farm.country_fixed_hint":
+    "S'indica en crear l'explotació i no es pot canviar: determina quines llistes codificades fan servir els seus registres.",
   "farm.location": "Ubicació",
   "farm.latitude": "Latitud",
   "farm.longitude": "Longitud",
@@ -50,10 +52,10 @@ export default {
   "water_points.title": "Captacions d'aigua",
   "water_points.new": "Nova captació",
   "water_points.hint":
-    "Punts de captació d'aigua per a consum humà a la parcel·la o a prop (apartat 2.2 del quadern). Marqueu «sense captacions» a les parcel·les on ho hàgiu comprovat i no n'hi hagi: en blanc vol dir que encara no s'ha comprovat.",
+    "Punts de captació d'aigua per a consum humà a la parcel·la o a prop (apartat 2.2 del quadern). En editar una parcel·la, marqueu «sense captacions» si ho heu comprovat i no n'hi ha: en blanc vol dir que encara no s'ha comprovat.",
   "water_points.empty": "Encara no hi ha captacions registrades.",
-  "water_points.none_on": "Sense captacions a «{plot}» (comprovat)",
   "water_points.none_column": "Sense captacions (comprovat)",
+  "plot.water_none_has_points": "La parcel·la té captacions registrades.",
   "water_point.denomination": "Denominació",
   "water_point.inside_plot": "Inclosa a la parcel·la",
   "water_point.distance": "Distància (m)",
@@ -67,14 +69,85 @@ export default {
   "farm.map_title": "Mapa de l'explotació",
   "farm.open_map": "Obre al mapa",
   "plot.on_map": "Al mapa",
-  "seasons.new": "Nova campanya",
-  "seasons.empty": "Encara no hi ha campanyes; creeu la primera.",
-  "season.campaign_year": "Any de campanya",
-  "season.label": "Etiqueta",
+  "record_books.title": "Quaderns",
+  "record_books.new": "Nou quadern",
+  "record_books.empty":
+    "Encara no hi ha quaderns; creeu-ne el primer per a una explotació i una campanya.",
+  "record_book.section": "Campanya",
+  "record_book.delete": "Suprimeix el quadern",
+  "record_book.not_found": "Aquest quadern no existeix o s'ha suprimit.",
+  "removed_books.summary": "Quaderns suprimits ({count})",
+  "removed_books.hint":
+    "Cadascun es pot recuperar, amb el que es va suprimir amb ell, fins a la data que indica. Després s'esborra definitivament.",
+  "removed_books.removed_by": "Suprimit el {date} per {person} a {device}",
+  "removed_books.removed_on": "Suprimit el {date} a {device}",
+  "removed_books.until": "Es pot recuperar fins al {date}",
+  "removed_books.was_until": "Es podia recuperar fins al {date}",
+  "removed_books.erasing_devices.one":
+    "S'esborrarà definitivament quan consti aquí que {devices} ha rebut la supressió: sincronitzeu aquest dispositiu o, si ja no es fa servir, retireu-lo a {settings}, a «{peers}».",
+  "removed_books.erasing_devices.other":
+    "S'esborrarà definitivament quan consti aquí que {devices} han rebut la supressió: sincronitzeu aquests dispositius o, si algun ja no es fa servir, retireu-lo a {settings}, a «{peers}».",
+  "removed_books.erasing_status":
+    "S'esborrarà definitivament quan es resolgui el que en queda pendent a la pàgina «{status}».",
+  "removed_books.erasing_due_on": "S'esborrarà definitivament a partir del {date}.",
+  "removed_books.erasing_due": "S'esborrarà definitivament la propera vegada que s'obri Terrazgo.",
+  "removed_books.no_records": "Sense registres",
+  "removed_books.restore": "Recupera",
+  "removed_books.restore_confirm":
+    "Voleu recuperar el quadern «{label}» de {farm}, amb els registres que es van suprimir amb ell?",
+  "removed_books.restored": "Fet. El quadern «{label}» torna a ser a la llista.",
+  "removed_books.restored_records.one":
+    "Fet. El quadern «{label}» torna a ser a la llista, amb el seu registre.",
+  "removed_books.restored_records.other":
+    "Fet. El quadern «{label}» torna a ser a la llista, amb els seus {count} registres.",
+  "removed_with_book.notice_by":
+    "En suprimir aquest quadern el {date} ({person}, a {device}) també se'n van suprimir els registres. Després el quadern va tornar a la llista, però buit: aquests registres continuen suprimits. Si els recupereu, tornaran a aquest quadern tal com eren. Podeu fer-ho fins al {until}.",
+  "removed_with_book.notice_on":
+    "En suprimir aquest quadern el {date} (a {device}) també se'n van suprimir els registres. Després el quadern va tornar a la llista, però buit: aquests registres continuen suprimits. Si els recupereu, tornaran a aquest quadern tal com eren. Podeu fer-ho fins al {until}.",
+  "removed_with_book.restore": "Recupera'ls",
+  "removed_with_book.restore_confirm.one":
+    "Voleu tornar a aquest quadern el registre que es va suprimir amb ell? Tornarà tal com era quan es va suprimir el quadern.",
+  "removed_with_book.restore_confirm.other":
+    "Voleu tornar a aquest quadern els {count} registres que es van suprimir amb ell? Tornaran tal com eren quan es va suprimir el quadern.",
+  "removed_with_book.restored.one": "Fet. El registre torna a ser al quadern.",
+  "removed_with_book.restored.other": "Fet. Els {count} registres tornen a ser al quadern.",
+  "record_book.merge": "Uneix amb un altre quadern…",
+  // Un quadern en un desplegable: el nom i les dates, que és el que distingeix
+  // «2025/2026» de «2025/2026 bis» quan són la mateixa campanya.
+  "season.option": "{label} · {span}",
+  "season.span": "{starts} – {ends}",
+  "book_merge.title": "Unir amb un altre quadern",
+  "book_merge.hint":
+    "Si aquest quadern i un altre de la mateixa explotació són en realitat una sola campanya —per exemple, perquè es va començar en dos dispositius amb dates diferents—, uniu-los: els registres d'un passen a l'altre, i el que queda buit se suprimeix.",
+  "book_merge.other": "Quadern amb què unir-lo",
+  "book_merge.pick": "Trieu un quadern",
+  "book_merge.kept": "Quadern que es queda",
+  "book_merge.kept_hint":
+    "Ve triat igual a tots els dispositius. Si una altra persona pot estar unint aquests mateixos quaderns en un altre dispositiu, deixeu-lo tal com és: si cadascú en conservés un de diferent, desapareixerien tots dos fins que es recuperessin a la pàgina «Estat».",
+  "book_merge.this_book": "{book} (aquest quadern)",
+  "book_merge.outcome":
+    "Els registres de «{absorbed}» passaran a «{kept}», i «{absorbed}» se suprimirà.",
+  "book_merge.submit": "Uneix els quaderns",
+  "book_merge.confirm":
+    "Voleu unir els quaderns? Tots els registres de «{absorbed}» passaran a «{kept}», i «{absorbed}» deixarà d'aparèixer a la llista de quaderns. No s'esborra cap registre.",
+  "book_merge.done.one":
+    "Fet. El registre de «{absorbed}» ja és a «{kept}», i «{absorbed}» s'ha suprimit.",
+  "book_merge.done.other":
+    "Fet. Els {count} registres de «{absorbed}» ja són a «{kept}», i «{absorbed}» s'ha suprimit.",
+  "book_merge.done_empty": "Fet. «{absorbed}» no tenia registres i s'ha suprimit.",
+  "season.farm": "Explotació",
+  "season.custom_label": "Nom",
+  "season.custom_label_hint":
+    "Opcional. En blanc, el quadern es nomena per les seves dates: 2025/2026, o 2026 si comença i acaba el mateix any.",
   "season.starts": "Comença el",
   "season.ends": "Acaba el",
   "season.delete_confirm":
-    "Voleu suprimir la campanya «{label}»? Només és possible si no té cultius ni tractaments.",
+    "Voleu suprimir el quadern {label} de {farm}? El podreu recuperar fins al {date}, al peu de la llista de quaderns. Després s'esborrarà definitivament.",
+  "season.delete_confirm_records.one":
+    "Voleu suprimir el quadern {label} de {farm} i el seu registre? Els podreu recuperar fins al {date}, al peu de la llista de quaderns. Després s'esborraran definitivament.",
+  "season.delete_confirm_records.other":
+    "Voleu suprimir el quadern {label} de {farm} i els seus {count} registres? Els podreu recuperar fins al {date}, al peu de la llista de quaderns. Després s'esborraran definitivament.",
+  "season.deleted": "Fet. S'ha suprimit el quadern «{label}».",
   "crops.title": "Cultius",
   "crops.new": "Nou cultiu",
   "crops.empty": "Encara no hi ha cultius declarats per a aquesta explotació i campanya.",
@@ -279,5 +352,6 @@ export default {
   "harvest.plots_section": "Parcel\u00b7les d'origen",
   "harvest.quantity_detail": "{quantity} {unit}",
   "harvest.lot_detail": "lot {lot}",
-  "harvest.delete_confirm": "Voleu suprimir aquesta sortida de collita? Es conserva a l'historial.",
+  "harvest.delete_confirm":
+    "Voleu suprimir aquesta sortida de collita? Deixarà d'aparèixer al quadern.",
 };

@@ -179,7 +179,7 @@ pub struct OtrasActuacionesFito {
     #[serde(rename = "Cantidad")]
     pub cantidad: f64,
     /// `UNIDADES_MEDIDA` code for that count, through
-    /// `module_cue::siex::intensity_unit_to_siex`.
+    /// `module_phytosanitary::siex::intensity_unit_to_siex`.
     #[serde(rename = "Unidad")]
     pub unidad: i64,
     /// The measure's own registration in the MDF registry (*medios de defensa
@@ -188,11 +188,8 @@ pub struct OtrasActuacionesFito {
     #[serde(rename = "NumRegistroMDF", skip_serializing_if = "Option::is_none")]
     pub num_registro_mdf: Option<String>,
     //
-    // `BuenasPracticas` is captured by nothing and has no member here: its
-    // catalogue (`BUENAS_PRACTICAS_AMBITOS`, 97 rows) repeats each code once
-    // per ámbito, so the code alone is not an identity and a single integer
-    // cannot say which row was meant. Voluntario in Anexo V, and no printed
-    // column anywhere.
+    // `BuenasPracticas` is captured by nothing and has no member here:
+    // Voluntario in Anexo V, and no printed column anywhere.
 }
 
 /// One plot+crop unit the treatment covered. The client-assigned code is the
@@ -632,9 +629,9 @@ pub struct Fertilizacion {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct BuenaPracticaFertilizante {
-    /// `BUENAS_PRACTICAS_AMBITOS` code in the "Fertilización" ámbito — the same
-    /// integer means a different practice in each of the three ámbitos, which
-    /// is why `fertilisation_practice` fixes the ámbito by existing.
+    /// `BUENAS_PRACTICAS_AMBITOS` code, claimed on a fertilisation — the
+    /// catalogue is one list for three ámbitos, and `fertilisation_practice`
+    /// fixes the ámbito by existing.
     #[serde(rename = "TipoBPF")]
     pub tipo_bpf: i64,
 }
@@ -804,8 +801,18 @@ pub struct Riego {
     pub tipo_energia: Option<i64>,
     #[serde(rename = "NumContador", skip_serializing_if = "Option::is_none")]
     pub num_contador: Option<String>,
+    #[serde(rename = "BuenasPracticasRiego", skip_serializing_if = "Vec::is_empty")]
+    pub buenas_practicas_riego: Vec<BuenaPracticaRiego>,
     #[serde(rename = "DGCs")]
     pub dgcs: Vec<DgcSuperficie>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BuenaPracticaRiego {
+    /// `BUENAS_PRACTICAS_AMBITOS` code claimed on a watering
+    /// (`irrigation_practice`).
+    #[serde(rename = "TipoBPR")]
+    pub tipo_bpr: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

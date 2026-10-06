@@ -5,7 +5,7 @@
 //! `anyhow` is reserved for the Tauri command boundary (docs/architecture.md → Life of a command).
 //!
 //! Module crates wrap this in their own error type with a variant-preserving
-//! `From` impl (see `CueError`), so a `CoreError::NotFound` stays a `NotFound`
+//! `From` impl (see `PhytosanitaryError`), so a `CoreError::NotFound` stays a `NotFound`
 //! to their callers and tests.
 
 use thiserror::Error;
@@ -47,6 +47,44 @@ pub enum CoreError {
     /// command boundary), not an `Invalid` machine code.
     #[error("catalogue data error: {0}")]
     Catalogue(String),
+
+    /// A write could not be stamped for the sync log: the connection carries no
+    /// device identity, or the clock is outside what the stamp can encode.
+    /// A defect of whoever opened the connection, or of the machine — never
+    /// user input, so like `Catalogue` it maps to `internal`.
+    #[error("change stamp error: {0}")]
+    Stamp(&'static str),
+
+    /// A logged row disagrees with the aggregate map (`sync::install_shape`):
+    /// its table is not in the map, the map says it is never synced, or the
+    /// row names a register other than the one its own values place it in.
+    /// Always a code defect — the message names the table so the failing test
+    /// says where — and refused rather than written, because a row filed under
+    /// the wrong register would be merged as part of it forever after.
+    #[error("sync shape violation: {0}")]
+    ShapeViolation(String),
+
+    /// An incoming bundle carries a stamp further ahead of this device's clock
+    /// than the merge may adopt (`sync::Hlc::MAX_SKEW_MS`, two hours).
+    ///
+    /// A variant of its own rather than an `Invalid` code because the farmer
+    /// has to be told WHICH device and BY HOW MUCH: past a couple of hours a
+    /// clock is usually wrong by days or years, which means the application
+    /// dates that device recorded are wrong too — a defect in the book itself,
+    /// larger than any sync (docs/sync.md → How far ahead a stamp may be).
+    #[error("{peer}'s clock is {ahead_ms} ms ahead of this device")]
+    PeerClockAhead { peer: String, ahead_ms: i64 },
+
+    /// An incoming book would take the name another live book of its farm has
+    /// on this device (docs/sync.md → Seasons created on two devices).
+    ///
+    /// A variant of its own rather than an `Invalid` code because the person
+    /// has to be told WHICH book to rename, and nothing on screen can say it:
+    /// the refusal comes before anything in the file is applied, so the other
+    /// book is not on this device yet. A book's name is only unique within its
+    /// farm, so the farm is named too.
+    #[error("{farm}'s book {label} would take a name already in use on this device")]
+    SeasonLabelCollision { farm: String, label: String },
 }
 
 /// How a boundary error names itself to the frontend: a stable code, and the
@@ -76,11 +114,28 @@ impl Classify for CoreError {
             CoreError::NotFound => ("not_found".into(), json!({})),
             CoreError::InvalidDate(date) => ("invalid_date".into(), json!({ "date": date })),
             CoreError::Invalid(code) => (format!("invalid.{code}"), json!({})),
+            // `hours` is what the message says and `ahead_ms` is the fact it
+            // was rounded from, kept for a diagnostic. Floored, so "more than
+            // {hours} hours ahead" is true rather than generous.
+            CoreError::PeerClockAhead { peer, ahead_ms } => (
+                "invalid.peer_clock_ahead".into(),
+                json!({
+                    "peer": peer,
+                    "ahead_ms": ahead_ms,
+                    "hours": ahead_ms / (60 * 60 * 1000),
+                }),
+            ),
+            CoreError::SeasonLabelCollision { farm, label } => (
+                "invalid.season_label_collision".into(),
+                json!({ "farm": farm, "label": label }),
+            ),
             CoreError::Sqlite(_)
             | CoreError::Migration(_)
             | CoreError::Json(_)
             | CoreError::Io(_)
-            | CoreError::Catalogue(_) => ("internal".into(), json!({})),
+            | CoreError::Catalogue(_)
+            | CoreError::Stamp(_)
+            | CoreError::ShapeViolation(_) => ("internal".into(), json!({})),
         }
     }
 }

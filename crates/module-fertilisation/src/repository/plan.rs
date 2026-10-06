@@ -12,7 +12,7 @@
 //! Fully correctable, and not as a concession: art. 6 explicitly allows a plan
 //! to be adjusted during the campaign to follow the crop and the weather.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update, write_change};
 use super::no_rows_to_not_found;
 use crate::error::{FertilisationError, Result};
 use crate::models::{
@@ -37,7 +37,7 @@ pub fn insert_fertilisation_plan(
     )?;
     validate_yield(new.expected_yield_kg_ha)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let crop_ids = validated_crops(&tx, &new.farm_id, &new.season_id, &new.crop_ids, None)?;
 
     let now = now_utc_iso();
@@ -79,17 +79,11 @@ pub fn insert_fertilisation_plan(
             plan.updated_at
         ],
     )?;
+    let stamp = tx.register("fertilisation_plan", &plan.id, Some(&plan.season_id))?;
     for crop_id in &crop_ids {
-        insert_crop_row(&tx, &plan.id, &plan.season_id, crop_id, actor)?;
+        insert_crop_row(&tx, &plan.id, crop_id, &stamp)?;
     }
-    log_insert(
-        &tx,
-        "fertilisation_plan",
-        &plan.id,
-        Some(&plan.season_id),
-        actor,
-        &plan,
-    )?;
+    log_insert(&tx, &stamp, "fertilisation_plan", &plan.id, &plan)?;
     tx.commit()?;
     Ok(FertilisationPlanDetail { plan, crop_ids })
 }
@@ -108,7 +102,7 @@ pub fn update_fertilisation_plan(
     )?;
     validate_yield(update.expected_yield_kg_ha)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM fertilisation_plan WHERE id = ?1 AND deleted_at IS NULL",
@@ -155,16 +149,9 @@ pub fn update_fertilisation_plan(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "fertilisation_plan",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
-    reconcile_crops(&tx, &after, &crop_ids, actor)?;
+    let stamp = tx.register("fertilisation_plan", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "fertilisation_plan", id, &before, &after)?;
+    reconcile_crops(&tx, &after, &crop_ids, &stamp)?;
     tx.commit()?;
     Ok(FertilisationPlanDetail {
         plan: after,
@@ -177,7 +164,16 @@ pub fn soft_delete_fertilisation_plan(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_fertilisation_plan_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_fertilisation_plan_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM fertilisation_plan WHERE id = ?1 AND deleted_at IS NULL",
@@ -194,16 +190,15 @@ pub fn soft_delete_fertilisation_plan(
         "UPDATE fertilisation_plan SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
+    let stamp = tx.register("fertilisation_plan", id, Some(&before.season_id))?;
     write_change(
-        &tx,
+        tx,
+        &stamp,
         "fertilisation_plan",
         id,
-        Some(&before.season_id),
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -256,24 +251,13 @@ pub fn list_fertilisation_plans(
     all_with_crops(conn, plans)
 }
 
-/// Whether any plan hangs off this season — this register's arm of the guard
-/// the shell chains before deleting one. Soft-deleted rows count.
-pub(super) fn season_has_plans(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM fertilisation_plan WHERE season_id = ?1)",
-        [season_id],
-        |r| r.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- the covered production unit -------------------------------------------
 
 fn reconcile_crops(
     tx: &Transaction,
     plan: &FertilisationPlan,
     desired: &[String],
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let current = crop_rows_tx(tx, &plan.id)?;
     for (row_id, crop_id) in &current {
@@ -284,10 +268,9 @@ fn reconcile_crops(
             )?;
             log_delete(
                 tx,
+                stamp,
                 "fertilisation_plan_crop",
                 row_id,
-                Some(&plan.season_id),
-                actor,
                 &crop_image(row_id, &plan.id, crop_id),
                 None::<&serde_json::Value>,
             )?;
@@ -295,7 +278,7 @@ fn reconcile_crops(
     }
     for crop_id in desired {
         if !current.iter().any(|(_, existing)| existing == crop_id) {
-            insert_crop_row(tx, &plan.id, &plan.season_id, crop_id, actor)?;
+            insert_crop_row(tx, &plan.id, crop_id, stamp)?;
         }
     }
     Ok(())
@@ -304,9 +287,8 @@ fn reconcile_crops(
 fn insert_crop_row(
     tx: &Transaction,
     plan_id: &str,
-    season_id: &str,
     crop_id: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let id = Uuid::now_v7().to_string();
     tx.execute(
@@ -316,10 +298,9 @@ fn insert_crop_row(
     )?;
     log_insert(
         tx,
+        stamp,
         "fertilisation_plan_crop",
         &id,
-        Some(season_id),
-        actor,
         &crop_image(&id, plan_id, crop_id),
     )?;
     Ok(())

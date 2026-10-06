@@ -1,7 +1,7 @@
 -- Terrazgo eco-scheme module — migration 0001: schema (DDL only; seed data lives in 0002).
 --
 -- This module owns the record book's THIRD decree. RD 1311/2012 governs the
--- phytosanitary registers (module-cue) and RD 1051/2022 the fertilisation ones
+-- phytosanitary registers (module-phytosanitary) and RD 1051/2022 the fertilisation ones
 -- (module-fertilisation). RD 1054/2022 anexo II ends its list of what the
 -- cuaderno must contain with "otros aspectos que se recojan en la respectiva
 -- normativa sectorial", and **RD 1048/2022** is that sectoral norm for anyone
@@ -27,7 +27,7 @@
 -- Pre-release this file is squashed freely (dev databases are recreated, not
 -- migrated); it becomes append-only the moment any database contains real data.
 -- Core steps run EARLIER in the composed global sequence, so references to
--- season, farm and plot are valid. This module references module-cue's and
+-- season, farm and plot are valid. This module references module-phytosanitary's and
 -- module-fertilisation's tables NOWHERE — modules never depend on each other.
 --
 -- Conventions (see docs/data-model.md):
@@ -82,7 +82,7 @@ CREATE TABLE eco_practice (
 -- upstream code is a missed opportunity rather than a defect — our lookup is
 -- the stored vocabulary, so nothing breaks and no picker changes.
 CREATE TABLE cultural_operation_kind (
-    code     TEXT PRIMARY KEY,   -- 'mowing', 'brush_cutting', 'pruning', …
+    code     TEXT PRIMARY KEY,   -- 'mowing', 'brush_cutting', 'green_pruning', …
     i18n_key TEXT NOT NULL
 );
 
@@ -97,7 +97,7 @@ CREATE TABLE cultural_operation_kind (
 -- why `ended_on` is the deadline-bearing column and not `started_on`.
 CREATE TABLE grazing_record (
     id             TEXT PRIMARY KEY,
-    season_id      TEXT NOT NULL REFERENCES season(id),
+    season_id      TEXT NOT NULL,
     farm_id        TEXT NOT NULL REFERENCES farm(id),
 
     -- Which duty this evidences. Narrowed by the repository to the practices a
@@ -147,14 +147,27 @@ CREATE TABLE grazing_record (
     notes          TEXT,
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
-    deleted_at     TEXT
+    deleted_at     TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 CREATE INDEX idx_grazing_record_season ON grazing_record (season_id, farm_id);
 
+-- The duplicate rule's window: one farm's grazings whose periods meet
+-- (docs/sync.md → Duplicate suspects). Farm-wide, because two books kept for
+-- one campaign on two devices hold exactly the pairs worth finding.
+CREATE INDEX idx_grazing_record_farm_day ON grazing_record (farm_id, started_on);
+
 -- Model 9.4 resolves its Pastoreo column by cover, once per book rather than
 -- once per printed cover row.
 CREATE INDEX idx_grazing_record_cover ON grazing_record (soil_cover_id);
+
+-- What the purge looks through: the removed grazing records, and nothing else
+-- (docs/sync.md → The purge, as settled). Every register of a book has one.
+CREATE INDEX idx_grazing_record_removed ON grazing_record (deleted_at)
+    WHERE deleted_at IS NOT NULL;
 
 -- Model 9.1's "Referencia SIGPAC de la parcela o grupo de parcelas". The
 -- printed reference is resolved from the plot at print time, never stored
@@ -221,7 +234,7 @@ CREATE TABLE grazing_animal (
 -- the farmer's statement about what the record evidences.
 CREATE TABLE cultural_operation (
     id                  TEXT PRIMARY KEY,
-    season_id           TEXT NOT NULL REFERENCES season(id),
+    season_id           TEXT NOT NULL,
     farm_id             TEXT NOT NULL REFERENCES farm(id),
 
     -- Which duty this evidences; narrowed by the repository to the five a
@@ -261,13 +274,24 @@ CREATE TABLE cultural_operation (
     notes               TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL,
-    deleted_at          TEXT
+    deleted_at          TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 CREATE INDEX idx_cultural_operation_season ON cultural_operation (season_id, farm_id);
 
+-- The duplicate rule's window: one farm's operations within a day of another
+-- (docs/sync.md → Duplicate suspects).
+CREATE INDEX idx_cultural_operation_farm_day ON cultural_operation (farm_id, performed_on);
+
 -- Model 9.4's Siega and Desbrozado columns, resolved by cover once per book.
 CREATE INDEX idx_cultural_operation_cover ON cultural_operation (soil_cover_id);
+
+-- The removed operations, for the purge, as `idx_grazing_record_removed`.
+CREATE INDEX idx_cultural_operation_removed ON cultural_operation (deleted_at)
+    WHERE deleted_at IS NOT NULL;
 
 -- Which plots the operation covered. No surface column: model 9.2 prints the
 -- plot's own SIGPAC surface, read from the parcel register at print time, and
@@ -307,7 +331,7 @@ CREATE TABLE cultural_operation_plot (
 -- than from the form that renders it.
 CREATE TABLE soil_cover (
     id              TEXT PRIMARY KEY,
-    season_id       TEXT NOT NULL REFERENCES season(id),
+    season_id       TEXT NOT NULL,
     farm_id         TEXT NOT NULL REFERENCES farm(id),
 
     -- `plant_cover` (P6, model 9.4) or `inert_cover` (P7, model 9.5); narrowed
@@ -358,10 +382,17 @@ CREATE TABLE soil_cover (
     notes           TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
-    deleted_at      TEXT
+    deleted_at      TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 CREATE INDEX idx_soil_cover_season ON soil_cover (season_id, farm_id);
+
+-- The removed soil covers, for the purge, as `idx_grazing_record_removed`.
+CREATE INDEX idx_soil_cover_removed ON soil_cover (deleted_at)
+    WHERE deleted_at IS NOT NULL;
 
 -- Which plots the cover was established over. `DatosCubierta.DGCs[]`, and model
 -- 9.4/9.5's "Id. Parcelas" column. No surface: the cover's extent is its two

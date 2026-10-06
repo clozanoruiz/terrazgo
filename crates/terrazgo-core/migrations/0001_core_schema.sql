@@ -1,11 +1,11 @@
 -- Terrazgo core — migration 0001: core-owned schema (DDL only; seed data lives in 0002).
 --
--- These tables moved here from module-cue's 0001 on 2026-06-12 (a free pre-release
+-- These tables moved here from module-phytosanitary's 0001 on 2026-06-12 (a free pre-release
 -- squash edit). Ownership line: the core owns the FARM REGISTRY — land (farm, plot),
 -- calendar (season), people (operator), machines (machinery), crops on the land,
 -- their regional extensions and the lookups they reference — plus record_change,
 -- the cross-cutting audit/sync infrastructure every module writes to. Modules own
--- their domain (CUE: products, treatments, alerts). Core steps run FIRST in the
+-- their domain (phytosanitary: products, treatments). Core steps run FIRST in the
 -- composed global sequence, so module tables may reference these.
 --
 -- Pre-release this file is squashed freely (dev databases are recreated, not migrated);
@@ -49,14 +49,19 @@ CREATE TABLE production_system (
     i18n_key TEXT NOT NULL
 );
 
+-- Operator licence levels. NOT a universal vocabulary: these four are Spain's
+-- carné (RD 1311/2012 niveles de capacitación) and France's Certiphyto has its
+-- own. The table holds every country's levels; which ones a country OFFERS is
+-- `repository::country::licence_level_scheme`, and `lookup_scope.rs` checks the
+-- two against each other.
 CREATE TABLE licence_level (
-    code     TEXT PRIMARY KEY,   -- 'basic', 'qualified', 'fumigator', 'pilot' (Spanish carné today; regional mapping is config)
+    code     TEXT PRIMARY KEY,   -- 'basic', 'qualified', 'fumigator', 'pilot' (Spain's; see licence_level_scheme)
     i18n_key TEXT NOT NULL
 );
 
 -- Units of measure, shared by every module that records an amount.
 --
--- Moved here from module-cue on 2026-08-07: module-fertilisation records
+-- Moved here from module-phytosanitary on 2026-08-07: module-fertilisation records
 -- fertiliser doses and irrigation volumes, and modules may never depend on
 -- each other, so the vocabulary had to sit below both. It also lets
 -- `harvest_record` below carry a real foreign key instead of a repository-only
@@ -98,8 +103,13 @@ CREATE TABLE growing_environment (
 -- (AE/PI/CP/Atrias/AS/NO) are Spanish form vocabulary and live in the report
 -- template; the codes stay English. 'not_required' is a real answer, not a
 -- missing one — most conventional holdings are under no GIP advisory duty.
+--
+-- NOT a universal vocabulary: 'atria' is a Spanish institution, and another
+-- member state meets the same EU integrated-pest-management duty through its
+-- own frameworks. Which codes a country OFFERS is
+-- `repository::country::gip_system_scheme`, checked by `lookup_scope.rs`.
 CREATE TABLE gip_system (
-    code     TEXT PRIMARY KEY,   -- 'organic', 'integrated_production', 'private_certification', 'atria', 'advisor_assisted', 'not_required'
+    code     TEXT PRIMARY KEY,   -- Spain's; see gip_system_scheme
     i18n_key TEXT NOT NULL
 );
 
@@ -140,7 +150,7 @@ CREATE TABLE catalogue_code (
     -- to a catalogue is right: it links reference data to reference data, and
     -- both sides are replaced together by an import.
     catalogue_id TEXT NOT NULL REFERENCES catalogue(id),
-    code         TEXT NOT NULL,          -- provider code; NOT unique per catalogue — some catalogues repeat a code per qualifying attr (e.g. one row per ámbito)
+    code         TEXT NOT NULL,          -- provider code; NOT unique per catalogue — some catalogues repeat a code per qualifying attr (e.g. one row per SIGPAC uso)
     label        TEXT NOT NULL,          -- current provider label; deliberately never snapshotted onto records — the code is what's legal, a renamed label should show its new text
     attrs        TEXT,                   -- JSON object of the provider's remaining columns, keys verbatim; NULL when the catalogue is plain code+label
     -- The provider's own lifecycle dates, as ISO 'YYYY-MM-DD': alta,
@@ -165,10 +175,20 @@ CREATE INDEX idx_catalogue_code_lookup ON catalogue_code(catalogue_id, code);
 -- Core user-data tables (UUIDv7 TEXT PKs)
 -- ============================================================================
 
--- The campaign a record belongs to: the universal EU/PAC season, and the axis
--- almost every register in the app is scoped by. Nearly every user table below
--- carries a `season_id`, and every record-book view reads through it — which is
--- why deleting a season that owns records is refused rather than cascaded.
+-- One holding's campaign — and so one record book: Finca Los Llanos's
+-- 2025/2026. The campaign is the universal EU/PAC notion, but each farm keeps
+-- its own rows for it, with its own bounds, because the book is kept per
+-- explotación, an olive holding's campaign does not run like a cereal one's, and
+-- a holding may keep more than one campaign in a year. Nearly every
+-- user table below carries a `season_id`, and every record-book view reads
+-- through it — which is why deleting a season that owns records is refused
+-- rather than cascaded.
+--
+-- A register row names its farm AND its season, so the two must agree: a
+-- record filed under another holding's season would print in neither book.
+-- Every register carrying both columns enforces that with a composite foreign
+-- key onto (id, farm_id) below. `crop` is the one season-scoped table that
+-- cannot — it reaches its farm through its plot — so its insert checks it.
 --
 -- This is the FIRST user-data table in the file, so it carries the shape they
 -- all share; the rest are not repeated:
@@ -187,16 +207,26 @@ CREATE INDEX idx_catalogue_code_lookup ON catalogue_code(catalogue_id, code);
 -- inside the same transaction — see that table at the foot of the file.
 CREATE TABLE season (
     id            TEXT PRIMARY KEY,
-    campaign_year INTEGER NOT NULL,           -- Spanish PAC campaign year, e.g. 2026
-    -- What the farmer calls it, free text: '2026' and '2025/2026' are both
-    -- right, because a campaign spanning the new year is normal and only the
-    -- holding knows which convention its paperwork uses.
+    -- The holding this campaign's book is kept for. Fixed at creation, like
+    -- `plot.farm_id`: moving a season would carry every record in it to another
+    -- farm's book.
+    farm_id       TEXT NOT NULL REFERENCES farm(id),
+    -- The campaign's bounds, 'YYYY-MM-DD', both required: they are what names
+    -- the book. Nothing is validated against them and no register refuses a
+    -- date outside: they describe the campaign, they do not police it, and a
+    -- real farm books an operation early or late.
+    starts_on     TEXT NOT NULL,
+    ends_on       TEXT NOT NULL,
+    -- The name the farmer gave the book, if any. NULL is the everyday case: the
+    -- dates name it.
+    custom_label  TEXT,
+    -- The book's name, what the printed book, the export files and every list
+    -- show. DERIVED, and written by Rust on every insert and update from the
+    -- columns above: `custom_label` when there is one, otherwise the dates'
+    -- years — '2025/2026' when the campaign spans the new year, '2026' when it
+    -- does not. Stored because the rule below indexes it and every reader
+    -- already reads it; its inputs are stored beside it, so it cannot drift.
     label         TEXT NOT NULL,
-    -- Optional campaign bounds. Nothing is validated against them and no
-    -- register refuses a date outside: they describe the campaign, they do not
-    -- police it, and a real farm books an operation early or late.
-    starts_on     TEXT,                       -- 'YYYY-MM-DD'
-    ends_on       TEXT,
     status        TEXT NOT NULL DEFAULT 'active',  -- 'active' | 'archived'
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL,
@@ -205,8 +235,41 @@ CREATE TABLE season (
     -- season may be deleted (no crops, no treatment records) — hiding a season
     -- that owns regulatory records would hide the records with it, since every
     -- record-book view is season-scoped.
-    deleted_at    TEXT
+    deleted_at    TEXT,
+    -- Backstop for the insert's own check (`invalid_date_interval`).
+    CHECK (ends_on >= starts_on)
 );
+
+-- The parent key of every register's (season_id, farm_id) foreign key.
+-- Logically redundant — `id` alone is unique — but SQLite only accepts a
+-- composite foreign key onto a UNIQUE index over exactly those columns, and a
+-- PARTIAL one does not count: the mistake surfaces as "foreign key mismatch" at
+-- the first insert, not when the schema is created. It also serves reading one
+-- farm's campaigns.
+CREATE UNIQUE INDEX idx_season_farm ON season(farm_id, id);
+
+-- One live book per farm per NAME — not per year: a farm may keep several
+-- campaigns in one year, and a second one ending in the same year is simply
+-- given a name of its own. What must not exist is two books nobody can tell
+-- apart in a list, on a printed cover or in an export file name, which is also
+-- what two devices creating the same book offline would produce. A deleted book
+-- frees its name. Backstop for the insert's own check (`season_name_taken`).
+CREATE UNIQUE INDEX idx_season_farm_label_active
+    ON season(farm_id, label) WHERE deleted_at IS NULL;
+
+-- The books current today — whose campaign ended less than a year ago, or has
+-- not ended — which is what the Status view's duplicate list starts from
+-- (docs/sync.md → Duplicate suspects). A seek, so the list does not grow with
+-- the books behind them, however many campaigns a farm keeps.
+CREATE INDEX idx_season_ends_active ON season(ends_on) WHERE deleted_at IS NULL;
+
+-- The removed books, which is where the Status view looks for records left
+-- live in a book that no longer exists — a book deleted on one device while
+-- another recorded into it, or merged into another before a record written
+-- elsewhere arrived (docs/sync.md → Records in a removed book). Empty on almost
+-- every device, so that list costs a seek into nothing rather than a pass over
+-- every book the holdings have ever kept.
+CREATE INDEX idx_season_removed ON season(farm_id, id) WHERE deleted_at IS NOT NULL;
 
 -- The holding (explotación): the unit the record book is kept FOR, and the
 -- root every other user table hangs off directly or through a plot.
@@ -395,6 +458,12 @@ CREATE TABLE crop (
     -- crop each campaign, and both halves are what a treatment resolves
     -- against when it asks "what was growing here when this was applied".
     plot_id                TEXT NOT NULL REFERENCES plot(id),
+    -- Must be a season of the PLOT's farm. No key can say so — the crop reaches
+    -- its farm only through `plot_id`, unlike the registers, which carry
+    -- `farm_id` and a composite key — so `insert_crop` refuses the mismatch
+    -- (`season_not_on_farm`). It is the one place a crop is created, and
+    -- neither half ever changes afterwards. A mismatched crop would be listed
+    -- in no book: each book reads its own season AND its own farm's plots.
     season_id              TEXT NOT NULL REFERENCES season(id),
     -- Free text, and NOT NULL: the species is what the book prints
     -- (model 2.1 "Cultivo"). Free rather than coded because a farmer must be
@@ -602,10 +671,10 @@ CREATE TABLE machinery_es_extension (
 -- Two tables would differ in three columns and double the repository, the form
 -- and the tests.
 --
--- IN CORE, not in module-cue: this is holding infrastructure like `machinery`
+-- IN CORE, not in module-phytosanitary: this is holding infrastructure like `machinery`
 -- ("core = the farm registry — land, calendar, people, machines"), and a store
 -- is a plausible second consumer for module-fertilisation, which may never
--- depend on module-cue. The register that USES it stays in module-cue.
+-- depend on module-phytosanitary. The register that USES it stays in module-phytosanitary.
 CREATE TABLE premises_kind (
     code     TEXT PRIMARY KEY,   -- 'building' | 'vehicle'
     i18n_key TEXT NOT NULL
@@ -615,7 +684,7 @@ CREATE TABLE premises (
     id            TEXT PRIMARY KEY,
     farm_id       TEXT NOT NULL REFERENCES farm(id),
     -- 'building' | 'vehicle'. Core-native words on purpose: the register's own
-    -- vocabulary ('storage_premises' / 'transport') is module-cue's, and core
+    -- vocabulary ('storage_premises' / 'transport') is module-phytosanitary's, and core
     -- may not reference a module's lookup — the `sowing_record` precedent. The
     -- module pairs the two and refuses a mismatch.
     kind_code     TEXT NOT NULL REFERENCES premises_kind(code),
@@ -694,12 +763,12 @@ CREATE TABLE premises_es_extension (
 
 -- Geometry attached to a core entity (plot boundary today; farm boundary,
 -- irrigation features later). USER DATA: synced, audit-logged, soft-deleted —
--- fetched geometry cannot be re-derived offline, so it must roam, unlike alerts.
+-- fetched geometry cannot be re-derived offline, so it must roam.
 --
 -- Subject linkage is an EXCLUSIVE ARC: one nullable FK column per subject type,
 -- with a CHECK that exactly one is set. Deliberately NOT the polymorphic
--- (entity_table, entity_id) pattern of record_change/alert — those rows must
--- outlive or re-derive their subjects, while a geometry must die with its
+-- (entity_table, entity_id) pattern of record_change/alert_acknowledgement —
+-- those rows must outlive their subjects, while a geometry must die with its
 -- subject, and the arc keeps real FK enforcement (orphans impossible). A new
 -- subject type later = one nullable ADD COLUMN (cheap even post-release).
 --
@@ -712,9 +781,9 @@ CREATE TABLE geo_feature (
     -- CHECK at the foot of the table. One nullable FK per subject type rather
     -- than a polymorphic (table, id) pair, so the database still enforces
     -- referential integrity — and so a new subject type is one ADD COLUMN.
-    -- The polymorphic pattern is reserved for record_change and alert, which
-    -- must OUTLIVE the rows they point at; a geometry must die with its
-    -- subject, which is what CASCADE here says.
+    -- The polymorphic pattern is reserved for record_change and
+    -- alert_acknowledgement, which must OUTLIVE the rows they point at; a
+    -- geometry must die with its subject, which is what CASCADE here says.
     plot_id          TEXT REFERENCES plot(id) ON DELETE CASCADE,
     farm_id          TEXT REFERENCES farm(id) ON DELETE CASCADE,
     role             TEXT NOT NULL,       -- 'boundary' today; open set, lowercase English
@@ -748,8 +817,8 @@ CREATE TABLE zone_type (
 );
 
 -- Provider-checked zone intersections per plot and campaign (added
--- 2026-07-08; design history in docs/sigpac-integration.md). Unlike alerts,
--- flags CANNOT be re-derived offline (they come from a provider query), so
+-- 2026-07-08; design history in docs/sigpac-integration.md). Unlike the alerts
+-- worked out from them, flags CANNOT be re-derived offline (they come from a provider query), so
 -- they are user data: record_change-logged, synced, in backups.
 --
 -- Negatives are stored: status='outside' is inspection-grade proof the check
@@ -828,14 +897,14 @@ CREATE INDEX idx_plot_water_point_plot ON plot_water_point(plot_id);
 
 -- The stored negative: "checked, and this plot has no abstraction point".
 --
--- Same philosophy as plot_zone_flag's status='outside' and as the CUE module's
+-- Same philosophy as plot_zone_flag's status='outside' and as the phytosanitary module's
 -- register_declaration: an empty register looks exactly like an unfilled one,
 -- and only the first is evidence the farmer asked the question. Section 2.2 is
 -- binding, so a blank water cell beside a stated "Sin afección" would read as
 -- unfinished work rather than a checked fact.
 --
 -- Its own table rather than a register_declaration row: that one is
--- module-cue's and farm+season scoped, while this is core, per plot and
+-- module-phytosanitary's and farm+season scoped, while this is core, per plot and
 -- season-less. Only the shape carries over.
 CREATE TABLE plot_water_declaration (
     id          TEXT PRIMARY KEY,
@@ -898,7 +967,7 @@ CREATE TABLE sowing_kind (
 
 CREATE TABLE sowing_record (
     id              TEXT PRIMARY KEY,
-    season_id       TEXT NOT NULL REFERENCES season(id),
+    season_id       TEXT NOT NULL,
     farm_id         TEXT NOT NULL REFERENCES farm(id),
 
     -- 'sowing' | 'planting'; SIEX `SiembraPlantacion` 1 and 0. NOT NULL with no
@@ -928,7 +997,10 @@ CREATE TABLE sowing_record (
     notes           TEXT,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
-    deleted_at      TEXT
+    deleted_at      TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 -- Where the sowing went, and which crop it started. Mirrors `harvest_plot`
@@ -963,9 +1035,28 @@ CREATE TABLE sowing_plot (
 
 CREATE INDEX idx_sowing_record_book ON sowing_record(season_id, farm_id);
 
+-- The duplicate rule's window: the farm's sowings within a day of another
+-- (docs/sync.md → Duplicate suspects). Farm-wide rather than per book, because
+-- two devices that each created a book for one campaign hold exactly the pairs
+-- worth finding.
+CREATE INDEX idx_sowing_record_farm_day ON sowing_record(farm_id, sown_on);
+
+-- What the purge looks through: the removed sowings, and nothing else — a live
+-- row is not in it at all, so finding what is due never grows with what is
+-- kept (docs/sync.md → The purge, as settled). Every register of a book has
+-- one; `index_contract.rs` holds a new one to it.
+CREATE INDEX idx_sowing_record_removed ON sowing_record(deleted_at)
+    WHERE deleted_at IS NOT NULL;
+
+-- What still points at a crop. The purge erases a crop only together with
+-- everything that names it, and SQLite answers "does anything still name it"
+-- through this column — without an index, by reading the whole table for every
+-- crop it erases. Partial: a sowing that names no crop has nothing to find.
+CREATE INDEX idx_sowing_plot_crop ON sowing_plot(crop_id) WHERE crop_id IS NOT NULL;
+
 -- Commercialised harvest: model section 5.
 --
--- In core, not in the CUE module: what leaves the holding and to whom is
+-- In core, not in the phytosanitary module: what leaves the holding and to whom is
 -- whole-farm data the costs and analytics modules will want, and modules never
 -- depend on each other. That placement decides two column names below.
 --
@@ -976,7 +1067,7 @@ CREATE INDEX idx_sowing_record_book ON sowing_record(season_id, farm_id);
 -- and the model is the compliance artifact.
 CREATE TABLE harvest_record (
     id                    TEXT PRIMARY KEY,
-    season_id             TEXT NOT NULL REFERENCES season(id),
+    season_id             TEXT NOT NULL,
     farm_id               TEXT NOT NULL REFERENCES farm(id),
     -- One date. The twin requires a FechaInicio and a FechaFin, which a
     -- serializer satisfies by sending this value as both ends; the model prints
@@ -997,7 +1088,7 @@ CREATE TABLE harvest_record (
     plant_product_code    TEXT,
     -- Quantity as value + unit code, never free text. The foreign key became
     -- possible on 2026-08-07, when `unit` moved into core: it used to be a
-    -- module-cue lookup that core could not reference, so the pairing lived in
+    -- module-phytosanitary lookup that core could not reference, so the pairing lived in
     -- the repository alone. The narrower {kg, t} rule stays there — the key
     -- says "a unit", the repository says "a unit that can weigh a harvest".
     -- Both columns are nullable together, because the printed form leaves the
@@ -1021,7 +1112,10 @@ CREATE TABLE harvest_record (
     notes                 TEXT,
     created_at            TEXT NOT NULL,
     updated_at            TEXT NOT NULL,
-    deleted_at            TEXT
+    deleted_at            TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 -- Where the harvest came from, as the model's "Nº de orden parcela/s de
@@ -1041,8 +1135,19 @@ CREATE TABLE harvest_plot (
 
 CREATE INDEX idx_harvest_record_book ON harvest_record(season_id, farm_id);
 
--- Append-only audit log AND future sync delta source. Deliberately has NO foreign keys:
--- it references many tables polymorphically and must outlive the rows it records.
+-- The duplicate rule's window: the farm's harvests on one day (docs/sync.md →
+-- Duplicate suspects).
+CREATE INDEX idx_harvest_record_farm_day ON harvest_record(farm_id, harvested_on);
+
+-- The removed harvests, as `idx_sowing_record_removed`, and what names a crop,
+-- as `idx_sowing_plot_crop` — each for the purge.
+CREATE INDEX idx_harvest_record_removed ON harvest_record(deleted_at)
+    WHERE deleted_at IS NOT NULL;
+CREATE INDEX idx_harvest_plot_crop ON harvest_plot(crop_id) WHERE crop_id IS NOT NULL;
+
+-- Append-only audit log AND the sync delta source (docs/sync.md → Part 2).
+-- Deliberately has NO foreign keys: it references many tables polymorphically
+-- and must outlive the rows it records.
 CREATE TABLE record_change (
     id            TEXT PRIMARY KEY,
     -- WHICH ROW CHANGED, as a polymorphic (table name, id) pair rather than a
@@ -1064,15 +1169,138 @@ CREATE TABLE record_change (
     actor         TEXT,                           -- user_profile.id of the author (the device's
                                                   -- active profile at write time); NULL = recorded
                                                   -- with no active profile
-    payload       TEXT NOT NULL                   -- JSON {"before": ..., "after": ...}
+    payload       TEXT NOT NULL,                  -- JSON {"before": ..., "after": ...}
+    -- THE REGISTER this change belongs to, which is the unit of merge: a
+    -- register and its children merge as one statement, so a treated plot's
+    -- row names its treatment record here. Usually a row's own table and id.
+    -- A register keyed on a SLOT rather than a row (one plot's zone flags for
+    -- one campaign and source, one season's declaration of one register) names
+    -- its slot instead, as a canonical JSON array of the slot's values: two
+    -- devices filling one slot are then two edits of one register, which the
+    -- merge can see, instead of two unrelated rows colliding on a UNIQUE index
+    -- (docs/sync.md → The unit of merge is the whole register).
+    root_table    TEXT NOT NULL,
+    root_id       TEXT NOT NULL,
+    -- WHERE the change was made, and in which of that device's change sets.
+    -- The device is `settings.json`'s device id, not the actor: one says which
+    -- replica wrote the row, the other which person. Every row one transaction
+    -- logs shares both values, so the pair IS the change-set key.
+    origin_device TEXT NOT NULL,
+    origin_seq    INTEGER NOT NULL CHECK (typeof(origin_seq) = 'integer' AND origin_seq > 0),
+    -- The register's version vector AFTER this write, JSON {device: seq} with
+    -- its keys sorted. It is what decides whether two changes conflict.
+    version_vector TEXT NOT NULL,
+    -- Hybrid logical clock: milliseconds since the Unix epoch in the high 48
+    -- bits, a counter in the low 16. It orders changes ALREADY KNOWN to
+    -- conflict and nothing else. Never shown as a time: it may legitimately run
+    -- ahead of the wall clock, and `changed_at` is the instant an inspector
+    -- reads. The type check is not ceremony — in a table without STRICT, a
+    -- stray TEXT value would satisfy `>= 0` and sort after every integer.
+    hlc           INTEGER NOT NULL CHECK (typeof(hlc) = 'integer' AND hlc >= 0),
+    -- One row per entity per change set. Its leading pair also serves the two
+    -- per-device questions: "this device's next change set" (MAX over one
+    -- device) and "what has device D written since seq N" (a range scan).
+    UNIQUE (origin_device, origin_seq, entity_table, entity_id)
 );
 
--- `record_change` is the fastest-growing table in the schema and is indexed only
--- by the row it describes, which is deliberate: nothing in the app reads it by
--- time, so nothing is slow. The first "changes since X" belongs to the Stage-2
--- sync design, and so does the index that query will want — building one now
--- would be guessing at a query nobody has written.
+-- `record_change` is the fastest-growing table in the schema, so every index
+-- on it answers a question something actually asks. There is still no index on
+-- `changed_at`: "changes since X" turned out to be a SEQUENCE question, per
+-- device, which the UNIQUE constraint above already serves.
+--
+-- A row's own history — the correction trail an inspection reads.
 CREATE INDEX idx_record_change_entity ON record_change(entity_table, entity_id);
+-- A register's history in change-set order: what computes its current version
+-- vector before every write, and what a merge reads back to the common ancestor.
+CREATE INDEX idx_record_change_root ON record_change(root_table, root_id, origin_seq);
+-- The clock. Each change set's stamp is one past the highest this log holds,
+-- received changes included, which is how the hybrid clock absorbs what other
+-- devices have seen; this index makes that a single seek instead of a scan.
+CREATE INDEX idx_record_change_hlc ON record_change(hlc);
+
+-- The holding this device syncs within (docs/sync.md → Device identity), which
+-- is what makes a bundle from a neighbour's holding refusable.
+--
+-- DEVICE-LOCAL: never logged, never merged, not a register. It is in the
+-- DATABASE rather than beside `device_id` in settings.json because a restored
+-- backup is the same holding — where a restored device is a different REPLICA,
+-- which is exactly why the device id is re-minted on import and this is not.
+--
+-- Minted LAZILY, on the first export, and never at first launch: two devices
+-- set up separately would each hold a group before anything had decided what
+-- joining means, and would then refuse each other for ever.
+--
+-- One row or none, and the CHECK is what says so rather than a rule in Rust.
+-- A membership list alone could not enforce it — a contractor's phone could
+-- legitimately appear in two farms' `sync_peer` lists, and would then carry one
+-- holding's records into the other — so the group is an IDENTITY, and a device
+-- has at most one. Per-farm scoping, which is what a contractor would actually
+-- need, is multi-tenant separation and is recorded rather than scheduled.
+-- Relaxing the CHECK later means rebuilding the table, since SQLite cannot drop
+-- one in place: free while pre-release, one ordinary migration after.
+CREATE TABLE sync_group (
+    row_id     INTEGER PRIMARY KEY CHECK (row_id = 1),
+    -- UUIDv7, minted on whichever device exported first and adopted by every
+    -- device that joins it.
+    group_id   TEXT NOT NULL,
+    joined_at  TEXT NOT NULL
+);
+
+-- Every device that has written to this book, one row each (docs/sync.md →
+-- Device identity). Synced and logged like any register, so any device can
+-- name a conflict's other side "María's phone" instead of a UUID.
+--
+-- The id IS the device id — a UUIDv7 minted in Rust on the device's first
+-- launch — rather than one minted for the row. Deliberate, in the manner of
+-- `farm_es_extension` being keyed by its farm: two devices naming one phone
+-- must write one row, not two rows claiming the same device.
+CREATE TABLE sync_peer (
+    id          TEXT PRIMARY KEY,
+    -- What people call the device. NULL until somebody names it.
+    label       TEXT,
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    -- A retired device (a lost phone). Soft, like every row the log refers to:
+    -- the changes it made stay attributed to it.
+    deleted_at  TEXT
+);
+
+-- One row per register version waiting for a person to choose it: two devices
+-- wrote without seeing each other, so the register has more than one head
+-- (docs/sync.md → Conflicts as the person sees them).
+--
+-- DERIVED, and device-local — never logged, never synced. The log
+-- already answers this: every device holds the same rows and computes the same
+-- heads from them, so there is nothing to send, and a synced row would be a
+-- second source of truth to disagree with the log the moment a resolution
+-- arrives. What this table buys is only cost: finding conflicts without it
+-- means asking the question of every register ever written, which grows
+-- forever. `merge::settle` writes and clears these as it goes; deleting the
+-- table's contents loses nothing that cannot be recomputed.
+--
+-- Polymorphic and FK-free, like `record_change`: a conflict names
+-- registers in a dozen tables, and the row must survive its register being
+-- deleted on one side — which is itself one of the states worth reviewing.
+CREATE TABLE sync_conflict (
+    root_table   TEXT NOT NULL,
+    root_id      TEXT NOT NULL,
+    -- The version the book is showing, chosen by clock then device id.
+    live_device  TEXT NOT NULL,
+    live_seq     INTEGER NOT NULL,
+    -- The version waiting. Three heads make two rows, not one.
+    other_device TEXT NOT NULL,
+    other_seq    INTEGER NOT NULL,
+    -- The campaign to list it under, off the log row. NULL for a register that
+    -- belongs to the holding rather than to one book (a plot, an operator).
+    season_id    TEXT,
+    detected_at  TEXT NOT NULL,
+    -- One row per losing branch, which is what makes `settle` idempotent:
+    -- re-settling a register rewrites exactly the rows it should.
+    PRIMARY KEY (root_table, root_id, other_device, other_seq)
+);
+
+-- The review queue is read one book at a time, like every other list in the app.
+CREATE INDEX idx_sync_conflict_season ON sync_conflict(season_id);
 
 -- Season-first, and it REPLACED a (plot_id, season_id) index on 2026-08-24
 -- rather than joining it. Season-first is how the app reads — one campaign's
@@ -1081,6 +1309,9 @@ CREATE INDEX idx_record_change_entity ON record_change(entity_table, entity_id);
 -- query filters crops by plot alone, and the one that reads a single plot's
 -- crops binds the season too, so equality on both columns is served either way.
 CREATE INDEX idx_crop_season_plot     ON crop(season_id, plot_id);
+
+-- The removed crops, for the purge, as `idx_sowing_record_removed`.
+CREATE INDEX idx_crop_removed ON crop(deleted_at) WHERE deleted_at IS NOT NULL;
 
 -- Invisible at a smallholder's dozen plots and the first thing a
 -- cooperative-sized holding would feel: every per-farm listing resolves its
@@ -1095,10 +1326,10 @@ CREATE INDEX idx_plot_farm            ON plot(farm_id);
 CREATE INDEX idx_machinery_farm       ON machinery(farm_id);
 
 -- Integer aliases regulatory exports assign to activity records (2026-07-15;
--- moved module-cue → core 2026-08-20, design in docs/siex-export.md → gap 1).
+-- moved module-phytosanitary → core 2026-08-20, design in docs/siex-export.md → gap 1).
 -- In CORE because it is a generic mechanism, not a treatment one: it already
 -- aliased `crop` (a core row) on the day it shipped, and the SIEX export mints
--- aliases for registers owned by core, module-cue, module-fertilisation and
+-- aliases for registers owned by core, module-phytosanitary, module-fertilisation and
 -- module-ecoscheme. A module's table storing keys on behalf of two other
 -- modules' rows is the coupling the layering exists to prevent — "shared DATA
 -- → core", the same call that moved `unit` on 2026-08-07. SIEX's IdAjena* edit/delete keys are
@@ -1111,9 +1342,10 @@ CREATE INDEX idx_machinery_farm       ON machinery(farm_id);
 -- splits into one TratamFito per crop); its value is serializer-defined,
 -- opaque here. Polymorphic like record_change, so no FK. Synced user data
 -- (aliases must roam and survive backups — they cannot be re-derived):
--- insert-logged in record_change. Known limit, recorded in the design doc:
--- two devices exporting independently before syncing could mint colliding
--- aliases — a sync-stage-2 design item, acceptable while one device exports.
+-- insert-logged in record_change. Two devices exporting independently before
+-- syncing could mint colliding aliases; the design that prevents it is one
+-- submitting device per farm (docs/sync.md → `export_alias` collisions),
+-- built with the exporter, which nothing can reach today.
 CREATE TABLE export_alias (
     id           TEXT PRIMARY KEY,
     target       TEXT NOT NULL,              -- 'siex' | future export regimes
@@ -1131,4 +1363,165 @@ CREATE TABLE export_alias (
     created_at   TEXT NOT NULL,
     UNIQUE (target, entity_table, entity_id, split_key),
     UNIQUE (target, alias)
+);
+
+-- "Does any target hold an alias for this record?" — what the purge asks before
+-- erasing one: a record the authority may hold has to be withdrawn there
+-- first, and only the exporter's submission log can say it was (docs/sync.md →
+-- When a register goes). The UNIQUE leads with the target, which the purge
+-- does not know.
+CREATE INDEX idx_export_alias_entity ON export_alias(entity_table, entity_id);
+
+-- One person's act on an alert: seen ('acknowledged') or hidden ('dismissed').
+-- USER DATA, synced and logged like any register, because it is the one thing
+-- about an alert no device can re-derive (docs/sync.md → Alert acknowledgements
+-- roam). The alerts themselves are stored nowhere: each crate that raises them
+-- works out the ones holding now whenever the list is read, and core assembles
+-- it (docs/data-model.md → "Alerts: the settled design"). In CORE since
+-- 2026-09-24 because any module may raise an alert, and a module may never
+-- depend on another.
+--
+-- INSERT-ONLY: a second act is a second row, never an update of the first. Two
+-- devices acting on one alert therefore write two registers rather than two
+-- versions of one, so they never conflict and nobody is asked — the strongest
+-- act wins at read time (`alerts::alert_status`: dismissed over acknowledged).
+-- No UNIQUE for the same reason; a duplicate act changes nothing it could
+-- disagree about, and a device skips writing one it can see is redundant.
+--
+-- WHAT the act is about is polymorphic and FK-free, like record_change: an act
+-- must outlive the condition it was made on, which lapses. It also names the
+-- deadline it was about, so a renewed licence's NEXT expiry is a new alert and
+-- not one somebody already dismissed. Acts about a deadline that has passed are
+-- never read again and are not pruned: a pruned row costs a logged delete,
+-- which measured larger than the row it frees.
+--
+-- `alert_type_code` is FK-free too, and there is no kinds table: a kind is a
+-- constant declared by the crate that raises it, so adding one needs no
+-- migration — and so never moves `user_version`, which delta exchange requires
+-- to be equal. An act about a kind this build does not know (synced from a
+-- newer one, or about a retired kind) is kept and matches nothing.
+CREATE TABLE alert_acknowledgement (
+    id              TEXT PRIMARY KEY,
+    alert_type_code TEXT NOT NULL,
+    subject_table   TEXT NOT NULL,
+    subject_id      TEXT NOT NULL,
+    -- The due date the person acted on; NULL for a standing condition (a zone
+    -- flag), which has no date to end on.
+    due_date        TEXT,
+    status          TEXT NOT NULL CHECK (status IN ('acknowledged', 'dismissed')),
+    created_at      TEXT NOT NULL
+);
+
+-- The acts on the subjects of the alerts holding NOW, reached one subject at a
+-- time. Acts accumulate for as long as the farmer uses the app and almost all
+-- of them are about deadlines long gone, so the list must seek into this table
+-- from today's subjects and never scan it. Subject first: the list asks by
+-- subject id alone, and recording an act asks by all three.
+CREATE INDEX idx_alert_acknowledgement_subject
+    ON alert_acknowledgement(subject_id, alert_type_code, subject_table);
+
+-- What a person said about two records that looked like one operation recorded
+-- twice: that both are real ('distinct'), or that they are one and which was
+-- kept ('duplicate'). USER DATA, synced and logged, because no device can
+-- re-derive a judgement. The suspicions themselves are stored nowhere: each
+-- register's rule is run whenever the list is read (docs/sync.md → Duplicate
+-- suspects).
+--
+-- INSERT-ONLY, alert_acknowledgement's shape and for its reason: two devices
+-- judging one pair write two registers rather than two versions of one, so
+-- they never conflict. A 'duplicate' act is written in the same change set as
+-- the soft delete of the record it removed, so the audit trail reads the
+-- removal and its reason side by side — no register carries a reason column.
+--
+-- Polymorphic and FK-free like record_change: the pair may be in any of a
+-- dozen tables, and an act must outlive a record's deletion, which is exactly
+-- what a 'duplicate' act is about. `subject_table` is copied from the rule
+-- that raised the suspicion, a constant in the owning crate, never from a
+-- screen. The pair is stored smaller id first so every device names it alike.
+CREATE TABLE duplicate_verdict (
+    id            TEXT PRIMARY KEY,
+    subject_table TEXT NOT NULL,
+    first_id      TEXT NOT NULL,
+    second_id     TEXT NOT NULL,
+    verdict       TEXT NOT NULL CHECK (verdict IN ('distinct', 'duplicate')),
+    -- For 'duplicate', the record kept, which is one of the pair; the other is
+    -- the one this act removed. NULL for 'distinct', which keeps both.
+    kept_id       TEXT,
+    created_at    TEXT NOT NULL,
+    CHECK (first_id < second_id),
+    CHECK (
+        (verdict = 'distinct'  AND kept_id IS NULL)
+     OR (verdict = 'duplicate' AND kept_id IN (first_id, second_id))
+    )
+);
+
+-- "Has this pair been judged?" — asked once per suspected pair whenever the
+-- list is read, so a seek on the pair and never a scan of the acts.
+CREATE INDEX idx_duplicate_verdict_pair ON duplicate_verdict(first_id, second_id);
+
+-- "Was this removed record kept by somebody else?" — how two opposite removals
+-- are found: each device kept the record the other removed.
+CREATE INDEX idx_duplicate_verdict_kept ON duplicate_verdict(kept_id);
+
+-- One register erased for good by the purge, and the version that removed it
+-- (docs/sync.md → The purge, as settled). USER DATA, synced and logged: it is
+-- how every other device learns what to erase, and a device joining later
+-- receives it with the log.
+--
+-- INSERT-ONLY, alert_acknowledgement's shape and for its reason: two devices
+-- erasing one register write two rows — two registers — rather than two
+-- versions of one, so they never conflict.
+--
+-- **The row stays, and it is a marker.** It holds no content — a table, an id,
+-- a version — and every write stamps its register on top of every row naming
+-- it (`audit::WriteTx::register`). That is what lets a book go at all: its id
+-- comes from its farm and dates, so opening the same campaign again writes the
+-- same id, which must be newer than the deletion everywhere and not a rival to
+-- it. An import reads it too: an arriving change the removal had seen is
+-- dropped, one written on top of it applies, and one that never saw it is
+-- discarded and reported.
+--
+-- Polymorphic and FK-free like record_change: what it names is gone.
+CREATE TABLE purged_register (
+    id          TEXT PRIMARY KEY,
+    root_table  TEXT NOT NULL,
+    root_id     TEXT NOT NULL,
+    -- The register's version vector at its removal, JSON {device: seq} — the
+    -- version every device compares what it holds of the register against.
+    removal     TEXT NOT NULL,
+    purged_at   TEXT NOT NULL
+);
+
+-- "Is this register erased, and by which removal?" — asked by every stamp and
+-- by an import, once per register, so a seek and never a scan.
+CREATE INDEX idx_purged_register_root ON purged_register(root_table, root_id);
+
+-- The highest change-set number this database has held from each device
+-- (docs/sync.md → What a database has held, and what a file starts from).
+--
+-- DEVICE-LOCAL: never logged, never synced. It is what a manifest says this
+-- device holds, and where its own next number starts — the log's own highest
+-- number would do, except that the purge takes change sets out of the log, and
+-- a number must never be handed to a second change set. So it is raised when a
+-- file applies and when the purge runs, and never lowered. In the database
+-- file rather than settings.json because it describes what the file holds: a
+-- backup restored elsewhere holds exactly what it held.
+CREATE TABLE sync_held (
+    device   TEXT PRIMARY KEY,
+    through  INTEGER NOT NULL CHECK (typeof(through) = 'integer' AND through >= 0)
+);
+
+-- What this device knows each device of the group holds: the highest `seen`
+-- heard from it, in a file it sent or passed on in another device's file
+-- (docs/sync.md → What each device knows of the others).
+--
+-- DEVICE-LOCAL, and raised only after a file has applied, when holding
+-- everything its sender held makes the knowledge true here. It only ever says
+-- less than is true, so the purge it decides can come later than it could,
+-- never early. Carried in every manifest, so the phones learn of each other
+-- through the laptop.
+CREATE TABLE sync_known (
+    device  TEXT PRIMARY KEY,
+    -- JSON {device: seq}, keys sorted, as record_change.version_vector.
+    seen    TEXT NOT NULL
 );

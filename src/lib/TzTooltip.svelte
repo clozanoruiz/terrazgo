@@ -13,7 +13,7 @@
   // appearance.
   //
   // Bits UI rather than a CSS-only tooltip, because several triggers sit inside
-  // clipping ancestors — `.tabstrip` clips, `.view.framed` clips, the inspector
+  // clipping ancestors — `.tabstrip` clips, `.view.framed` clips, the panel body
   // scrolls — and a tip that is a child of its trigger gets cut off by every one
   // of them. This portals to <body>.
   //

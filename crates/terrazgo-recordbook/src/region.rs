@@ -17,7 +17,7 @@
 //! what it cannot say.
 
 use crate::labels::ReportLanguage;
-use module_cue::Result;
+use module_phytosanitary::Result;
 use rusqlite::Connection;
 
 /// INE province codes → the languages co-official there, beyond Castilian.

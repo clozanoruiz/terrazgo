@@ -19,7 +19,7 @@
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
   import TzSelect from "./TzSelect.svelte";
-  import { codeItems, nameItems } from "./selectItems.js";
+  import { catalogueItems, codeItems, nameItems } from "./selectItems.js";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
   import TzTabs from "./TzTabs.svelte";
@@ -73,7 +73,7 @@
   let editFormulationCode = $state("");
   let editPhiDays = $state("");
 
-  // The inspector's own tabs: which child collection is showing, and which of
+  // The panel's own tabs: which child collection is showing, and which of
   // its rows (or "new") the nested panel below is about.
   let childTab = $state("substances");
   let childOpen = $state(null);
@@ -210,7 +210,7 @@
     await reload();
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(products.find((d) => d.product.id === openId) ?? null);
 
@@ -379,9 +379,9 @@
     {/if}
   {/snippet}
 
-  {#snippet inspector()}
+  {#snippet inspector(formId)}
     {#if createOpen}
-      <TzForm onsubmit={submitCreate}>
+      <TzForm id={formId} onsubmit={submitCreate}>
         <div class="form-grid">
           <TextInput label={t("product.name")} required bind:value={name} />
           <TextInput label={t("product.holder")} bind:value={holder} />
@@ -415,27 +415,19 @@
             {#if authKind === "exceptional"}
               <TzSelect
                 label={t("product.exceptional_substance")}
-                items={(excSubstances[authCountry] ?? []).map((code) => ({
-                  value: code.code,
-                  label: code.label,
-                }))}
+                items={catalogueItems(excSubstances[authCountry] ?? [], (code) => code.label)}
+                catalogue
                 required
                 bind:value={authExcSubstance}
               />
             {/if}
           </div>
         </fieldset>
-        <div class="form-actions">
-          <button type="submit">{t("form.save")}</button>
-          <button type="button" class="btn-cancel" onclick={() => (createOpen = false)}>
-            {t("form.cancel")}
-          </button>
-        </div>
       </TzForm>
     {:else if editing}
-      <!-- A product carries two child collections. They live in the inspector
-           with the product they belong to, which is what the pane is for. -->
-      <TzForm onsubmit={submitEdit}>
+      <!-- A product carries two child collections. They live in the panel with
+           the product they belong to, which is what the panel is for. -->
+      <TzForm id={formId} onsubmit={submitEdit}>
         <div class="form-grid">
           <TextInput label={t("product.name")} required bind:value={editName} />
           <TextInput label={t("product.holder")} bind:value={editHolder} />
@@ -447,16 +439,13 @@
           />
           <NumberInput label={t("product.phi_days")} min={0} integer bind:value={editPhiDays} />
         </div>
-        <div class="form-actions">
-          <button type="submit">{t("form.save")}</button>
-        </div>
       </TzForm>
 
-      <!-- The product's two child collections, as tabs inside the pane. Same
+      <!-- The product's two child collections, as tabs inside the panel. Same
            system as the screen outside it — a strip picks the collection, a
-           table lists it, a row opens a panel — except the nested panel opens
-           BELOW rather than beside: the inspector is already the narrow column,
-           and splitting it again would leave two columns too thin to read. -->
+           table lists it, a row opens a subpanel — except the subpanel opens
+           BELOW rather than beside: the panel is already one column, and
+           splitting it again would leave two too thin to read. -->
       <TzTabs items={childTabs} bind:value={childTab} onchange={() => (childOpen = null)}>
         {#snippet panel(item)}
           <div class="view-head">
@@ -537,14 +526,14 @@
                never edited. -->
           {#if childOpen}
             <div class="subpanel">
-              <div class="inspector-head">
+              <div class="subpanel-head">
                 <span>{childTitle}</span>
                 <TzTooltip label={t("form.close")}>
                   {#snippet trigger(props)}
                     <button
                       {...props}
                       type="button"
-                      class="inspector-close"
+                      class="subpanel-close"
                       onclick={(event) => {
                         props.onclick?.(event);
                         childOpen = null;
@@ -608,10 +597,11 @@
                   {#if addAuthKind === "exceptional"}
                     <TzSelect
                       label={t("product.exceptional_substance")}
-                      items={(excSubstances[addAuthCountry] ?? []).map((code) => ({
-                        value: code.code,
-                        label: code.label,
-                      }))}
+                      items={catalogueItems(
+                        excSubstances[addAuthCountry] ?? [],
+                        (code) => code.label,
+                      )}
+                      catalogue
                       bind:value={addAuthExcSubstance}
                     />
                   {/if}
@@ -628,7 +618,7 @@
                   <dt>{t("substance.concentration")}</dt>
                   <dd>{substanceAmount(selectedSubstance)}</dd>
                 </dl>
-                <div class="inspector-actions">
+                <div class="form-actions">
                   <button
                     type="button"
                     class="btn-danger"
@@ -644,7 +634,7 @@
                   <dt>{t("product.auth_kind")}</dt>
                   <dd>{tCode("authorisation_kind", selectedAuthorisation.kind_code)}</dd>
                 </dl>
-                <div class="inspector-actions">
+                <div class="form-actions">
                   <button
                     type="button"
                     class="btn-danger"
@@ -659,5 +649,28 @@
         {/snippet}
       </TzTabs>
     {/if}
+  {/snippet}
+
+  <!-- One bar for both branches. They are `{#if createOpen} … {:else if
+       editing}`, so only one form element exists at a time and one minted id
+       reaches whichever it is.
+
+       Cancel is offered on BOTH, where the edit branch used to have none: in a
+       pinned bar a lone Save sits beside Delete, and two buttons that far apart
+       with no way back between them read as a trap. -->
+  {#snippet actions(formId)}
+    <div class="form-actions">
+      <button type="submit" form={formId}>{t("form.save")}</button>
+      <button
+        type="button"
+        class="btn-cancel"
+        onclick={() => {
+          createOpen = false;
+          openId = null;
+        }}
+      >
+        {t("form.cancel")}
+      </button>
+    </div>
   {/snippet}
 </TzWorkspace>

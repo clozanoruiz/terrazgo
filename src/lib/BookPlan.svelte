@@ -19,6 +19,7 @@
   // disagree with the register above it.
   import { formatDate, formatNumber, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
@@ -30,7 +31,7 @@
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
 
-  let { farmId, seasonId, crops } = $props();
+  let { farmId, seasonId, countryCode, crops } = $props();
 
   let plans = $state([]);
   let loading = $state(true);
@@ -82,7 +83,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which plan it is about. Null while creating.
   const editing = $derived(plans.find((d) => d.plan.id === editingId) ?? null);
 
@@ -107,18 +108,22 @@
       crop_ids: chosenCrops,
     };
 
+    let savedId = editingId;
     if (editingId) {
       await invoke("update_fertilisation_plan", {
         planId: editingId,
         update: { ...payload, id: editingId },
       });
     } else {
-      await invoke("create_fertilisation_plan", {
-        plan: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_fertilisation_plan", {
+          plan: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).plan.id;
     }
     hideForm();
     load();
+    await checkSaved("fertilisation_plan", savedId);
   }
 
   function remove(plan) {
@@ -208,7 +213,7 @@
           />
           <label>
             <span>{t("plan.preceding_crop")}</span>
-            <SpeciesPicker bind:name={precedingName} bind:code={precedingCode} />
+            <SpeciesPicker bind:name={precedingName} bind:code={precedingCode} {countryCode} />
           </label>
           <TextInput label={t("treatment.notes")} bind:value={notes} />
           <TzCheckbox label={t("plan.tool_generated")} bind:checked={toolGenerated} />

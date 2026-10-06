@@ -3,10 +3,10 @@
 
 //! Error type for the SIEX export.
 //!
-//! The serializer borrowed `module_cue::Result` while it lived inside that
+//! The serializer borrowed `module_phytosanitary::Result` while it lived inside that
 //! crate. That stopped being defensible the moment it read a second domain: a
 //! descriptor is not a treatment, and a failure while serializing an irrigation
-//! record must not surface as a CUE error. Same reasoning, and the same shape,
+//! record must not surface as a phytosanitary error. Same reasoning, and the same shape,
 //! as `RecordbookError` — the two consumer crates are siblings.
 //!
 //! The variants are thin for the same reason the book's are: building a
@@ -68,15 +68,15 @@ impl From<terrazgo_core::CoreError> for SiexError {
     }
 }
 
-impl From<module_cue::CueError> for SiexError {
-    fn from(e: module_cue::CueError) -> Self {
-        use module_cue::CueError;
+impl From<module_phytosanitary::PhytosanitaryError> for SiexError {
+    fn from(e: module_phytosanitary::PhytosanitaryError) -> Self {
+        use module_phytosanitary::PhytosanitaryError;
         match e {
-            CueError::Sqlite(e) => SiexError::Sqlite(e),
-            CueError::Json(e) => SiexError::Json(e),
-            CueError::NotFound => SiexError::NotFound,
-            CueError::InvalidDate(d) => SiexError::InvalidDate(d),
-            CueError::Invalid(msg) => SiexError::Invalid(msg),
+            PhytosanitaryError::Sqlite(e) => SiexError::Sqlite(e),
+            PhytosanitaryError::Json(e) => SiexError::Json(e),
+            PhytosanitaryError::NotFound => SiexError::NotFound,
+            PhytosanitaryError::InvalidDate(d) => SiexError::InvalidDate(d),
+            PhytosanitaryError::Invalid(msg) => SiexError::Invalid(msg),
             other => SiexError::Internal(other.to_string()),
         }
     }

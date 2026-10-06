@@ -29,6 +29,7 @@
   import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import NumberInput from "./NumberInput.svelte";
   import BookPlan from "./BookPlan.svelte";
@@ -36,7 +37,7 @@
   import TzCheckbox from "./TzCheckbox.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { codeItems, nameItems } from "./selectItems.js";
-  import { togglePractice } from "./practiceSelection.js";
+  import { shownPractices, togglePractice } from "./practiceSelection.js";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
   import TzWorkspace from "./TzWorkspace.svelte";
@@ -148,7 +149,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
 
@@ -177,6 +178,10 @@
         .join(" — "),
     })),
   );
+
+  // What the list draws: the practices it may offer, plus every one the record
+  // already claims (see shownPractices).
+  const practiceList = $derived(shownPractices(practiceOptions, chosenPractices));
 
   /// Claimed practices, summarised on the collapsed disclosure so the count is
   /// readable without opening a list of forty-one sentences.
@@ -223,18 +228,22 @@
       practices: chosenPractices,
     };
 
+    let savedId = editingId;
     if (editingId) {
       await invoke("update_fertilisation_record", {
         fertilisationRecordId: editingId,
         update: { ...payload, id: editingId },
       });
     } else {
-      await invoke("create_fertilisation_record", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_fertilisation_record", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideForm();
     load();
+    await checkSaved("fertilisation_record", savedId);
   }
 
   function remove(record) {
@@ -475,7 +484,7 @@
               <summary>{practicesSummary}</summary>
               <p class="detail">{t("fertilisation.practices_hint")}</p>
               <div class="checkbox-list stacked practices-list">
-                {#each practiceOptions as practice (practice.code)}
+                {#each practiceList.shown as practice (practice.code)}
                   <TzCheckbox
                     label={practice.name}
                     checked={chosenPractices.includes(practice.code)}
@@ -484,6 +493,11 @@
                   />
                 {/each}
               </div>
+              {#if practiceList.unknown}
+                <p class="detail">
+                  {t("form.catalogue_code_unknown", { settings: t("nav.settings") })}
+                </p>
+              {/if}
             </details>
           </fieldset>
         {/if}
@@ -501,7 +515,7 @@
   <!-- Model section 7.1 lives under 6 in the same tab: the plan is what these
        applications are measured against, and putting the recommendation a
        click away from the register it judges would help nobody. -->
-  <BookPlan {farmId} {seasonId} {crops} />
+  <BookPlan {farmId} {seasonId} {countryCode} {crops} />
 {/if}
 
 <style>
@@ -510,6 +524,7 @@
   .practices-list {
     max-height: 18rem;
     overflow-y: auto;
+    overscroll-behavior-y: none;
     padding-right: var(--space-2);
   }
 

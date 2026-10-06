@@ -26,7 +26,7 @@
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
   import TzSelect from "./TzSelect.svelte";
-  import { codeItems } from "./selectItems.js";
+  import { catalogueItems, codeItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
@@ -55,6 +55,13 @@
   let materialCode = $state("");
   let detailCode = $state(null);
   let detailName = $state("");
+  // A stored detail code the loaded list does not carry: written on a device
+  // whose catalogue is newer, so this one shows the code itself and says why.
+  const detailUnknown = $derived(
+    Boolean(detailCode) &&
+      detailOptions.length > 0 &&
+      !detailOptions.some((option) => option.code === detailCode),
+  );
   let supplierName = $state("");
   // C.e's three identifiers are mutually exclusive, so the form asks WHICH one
   // and then for the number — a farmer cannot fill two by accident.
@@ -99,9 +106,10 @@
         materialCode: kindCode || null,
       });
       // Editing an existing material: the stored code carries no name of its
-      // own, so it is resolved once the narrowed list is in.
+      // own, so it is resolved once the narrowed list is in — or shown as
+      // itself when this device's catalogue lacks it (see `detailUnknown`).
       if (detailCode && !detailName) {
-        detailName = detailOptions.find((o) => o.code === detailCode)?.name ?? "";
+        detailName = detailOptions.find((o) => o.code === detailCode)?.name ?? detailCode;
       }
     });
   }
@@ -110,17 +118,18 @@
     return { kindCode: "macro", nutrientCode: "", percentage: "" };
   }
 
-  /// Take the composition the catalogue publishes for the chosen product, so
-  /// Anexo III C.h's eight values need not be copied off the sack by hand.
+  /// Take what the catalogue publishes for the chosen product — its
+  /// composition and, for a liquid, its density — so Anexo III C.h's eight
+  /// values need not be copied off the sack by hand.
   ///
-  /// Explicitly asked for, and it never overwrites: a line the farmer already
-  /// entered wins, because the label in their hand is the source of truth and
-  /// this snapshot rides app releases. Heavy metals are never offered — the
-  /// provider's columns mix percentages with mg/kg and nothing in the file
-  /// tells them apart, so C.i's metals stay hand-entered.
+  /// Explicitly asked for, and it never overwrites: a line or a density the
+  /// farmer already entered wins, because the label in their hand is the source
+  /// of truth and this snapshot rides app releases. Heavy metals are never
+  /// offered — the provider's columns mix percentages with mg/kg and nothing in
+  /// the file tells them apart, so C.i's metals stay hand-entered.
   function fillFromCatalogue() {
     run(async () => {
-      const lines = await invoke("fertiliser_material_composition", {
+      const proposal = await invoke("fertiliser_material_proposal", {
         countryCode,
         detailCode: detailCode,
       });
@@ -128,7 +137,7 @@
         nutrientRows.some(
           (row) => row.kindCode === line.kind_code && row.nutrientCode === line.nutrient_code,
         );
-      const added = lines.filter((line) => !already(line));
+      const added = proposal.composition.filter((line) => !already(line));
       for (const line of added) {
         ensureNutrients(line.kind_code);
         nutrientRows.push({
@@ -139,11 +148,14 @@
       }
       // Drop the blank row the form may be showing, now that there is content.
       nutrientRows = nutrientRows.filter((row) => row.nutrientCode !== "" || row.percentage !== "");
-      notify(
-        added.length > 0
-          ? t("material.filled", { count: added.length })
-          : t("material.filled_none"),
-      );
+      const densityTaken = proposal.density_kg_l != null && density === "";
+      if (densityTaken) density = proposal.density_kg_l;
+      const filled = [];
+      if (added.length > 0) filled.push(t("material.filled", { count: added.length }));
+      if (densityTaken) {
+        filled.push(t("material.filled_density", { density: formatNumber(proposal.density_kg_l) }));
+      }
+      notify(filled.length > 0 ? filled.join(" ") : t("material.filled_none"));
     });
   }
 
@@ -232,7 +244,7 @@
     });
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(materials.find((d) => d.material.id === editingId)?.material ?? null);
 
@@ -326,7 +338,8 @@
         <!-- MAT_FERTI: a closed list the decree enumerates, in its own order. -->
         <TzSelect
           label={t("material.kind")}
-          items={materialKinds.map((kind) => ({ value: kind.code, label: kind.name }))}
+          items={catalogueItems(materialKinds)}
+          catalogue
           required
           bind:value={materialCode}
           onchange={onKindChosen}
@@ -340,6 +353,11 @@
             placeholder={t("material.detail")}
           />
           <small>{t("material.detail_hint")}</small>
+          {#if detailUnknown}
+            <small>
+              {t("form.catalogue_code_unknown", { settings: t("nav.settings") })}
+            </small>
+          {/if}
         </label>
         <TzSelect
           label={t("material.manure_treatment")}
@@ -394,10 +412,8 @@
             <!-- MICRONUTRIENTES alone is 99 entries, past the listbox cap. -->
             <TzCombobox
               label={t("material.nutrient")}
-              items={(nutrientOptions[row.kindCode] ?? []).map((option) => ({
-                value: option.code,
-                label: option.name,
-              }))}
+              items={catalogueItems(nutrientOptions[row.kindCode] ?? [])}
+              catalogue
               bind:value={row.nutrientCode}
             />
             <NumberInput

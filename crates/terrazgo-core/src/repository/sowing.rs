@@ -23,7 +23,7 @@
 //! when a correction restates the plots — restating them is the same act as
 //! re-entering the row.
 
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{
@@ -44,7 +44,7 @@ pub fn insert_sowing_record(
     validate_flooding(&new.sown_on, new.flooded_on.as_deref())?;
     validate_seed_quantity(new.seed_quantity_kg)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let plots = validated_plots(&tx, &new.farm_id, &new.plots)?;
 
     let now = now_utc_iso();
@@ -83,24 +83,12 @@ pub fn insert_sowing_record(
     )?;
 
     let mut plot_rows = Vec::new();
+    let stamp = tx.register("sowing_record", &record.id, Some(&record.season_id))?;
     for plot in plots {
-        plot_rows.push(insert_plot_row(
-            &tx,
-            &record.id,
-            &record.season_id,
-            plot,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(&tx, &record.id, plot, &stamp)?);
     }
 
-    log_insert(
-        &tx,
-        "sowing_record",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(&tx, &stamp, "sowing_record", &record.id, &record)?;
     tx.commit()?;
     Ok(SowingRecordDetail {
         record,
@@ -124,7 +112,7 @@ pub fn update_sowing_record(
     validate_flooding(&update.sown_on, update.flooded_on.as_deref())?;
     validate_seed_quantity(update.seed_quantity_kg)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM sowing_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -160,17 +148,10 @@ pub fn update_sowing_record(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "sowing_record",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    let stamp = tx.register("sowing_record", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "sowing_record", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(&tx, &after, plots, actor)?;
+    let plot_rows = reconcile_plots(&tx, &after, plots, &stamp)?;
     tx.commit()?;
     Ok(SowingRecordDetail {
         record: after,
@@ -183,7 +164,16 @@ pub fn soft_delete_sowing_record(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_sowing_record_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_sowing_record_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM sowing_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -200,16 +190,8 @@ pub fn soft_delete_sowing_record(
         "UPDATE sowing_record SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(
-        &tx,
-        "sowing_record",
-        id,
-        Some(&before.season_id),
-        actor,
-        &before,
-        Some(&after),
-    )?;
-    tx.commit()?;
+    let stamp = tx.register("sowing_record", id, Some(&before.season_id))?;
+    log_delete(tx, &stamp, "sowing_record", id, &before, Some(&after))?;
     Ok(())
 }
 
@@ -263,25 +245,13 @@ pub fn list_sowing_records(
     all_with_details(conn, records)
 }
 
-/// Whether any sowing hangs off this season — part of the guard
-/// `soft_delete_season` uses. Soft-deleted records count, like the harvests':
-/// their audit history is only reachable through the season.
-pub(super) fn season_has_sowings(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sowing_record WHERE season_id = ?1)",
-        [season_id],
-        |row| row.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- reconcile -------------------------------------------------------------
 
 fn reconcile_plots(
     tx: &Transaction,
     record: &SowingRecord,
     desired: Vec<NewSowingPlot>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<SowingPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -292,10 +262,9 @@ fn reconcile_plots(
             tx.execute("DELETE FROM sowing_plot WHERE id = ?1", [&existing.id])?;
             log_delete(
                 tx,
+                stamp,
                 "sowing_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&SowingPlot>,
             )?;
@@ -326,27 +295,13 @@ fn reconcile_plots(
                             after.variety_snapshot
                         ],
                     )?;
-                    log_update(
-                        tx,
-                        "sowing_plot",
-                        &existing.id,
-                        Some(&record.season_id),
-                        actor,
-                        existing,
-                        &after,
-                    )?;
+                    log_update(tx, stamp, "sowing_plot", &existing.id, existing, &after)?;
                     rows.push(after);
                 } else {
                     rows.push(existing.clone());
                 }
             }
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                want,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, want, stamp)?),
         }
     }
     Ok(rows)
@@ -355,9 +310,8 @@ fn reconcile_plots(
 fn insert_plot_row(
     tx: &Transaction,
     sowing_record_id: &str,
-    season_id: &str,
     plot: NewSowingPlot,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<SowingPlot> {
     let (crop_name, variety) = crop_snapshot(tx, plot.crop_id.as_deref())?;
     let row = SowingPlot {
@@ -381,7 +335,7 @@ fn insert_plot_row(
             row.variety_snapshot
         ],
     )?;
-    log_insert(tx, "sowing_plot", &row.id, Some(season_id), actor, &row)?;
+    log_insert(tx, stamp, "sowing_plot", &row.id, &row)?;
     Ok(row)
 }
 

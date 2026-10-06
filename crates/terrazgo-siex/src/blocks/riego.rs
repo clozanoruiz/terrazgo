@@ -9,19 +9,19 @@
 //! carries them, and the date is an interval because both the twin and RD
 //! 1051/2022 art. 5.f allow one. So this seam is wiring, not design.
 //!
-//! Two things it does NOT send. `BuenasPracticasRiego` is optional in the
-//! schema and Voluntario in Anexo V, and nothing captures irrigation good
-//! practices — only fertilisation's, which the twin REQUIRES. And the water's
-//! nitric N and soluble P₂O₅, which the register does hold, belong to
+//! `BuenasPracticasRiego` comes from `irrigation_practice` (2026-10-06):
+//! Voluntario in Anexo V 3.11, obligatorio condicionado in the 2027 model, and
+//! sent whenever the farmer claimed one. What it does NOT send is the water's
+//! nitric N and soluble P₂O₅, which the register does hold but which belong to
 //! `Fertirrigacion` inside the fertilisation block rather than here.
 
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::siex as cue_siex;
 use module_fertilisation::models::IrrigationRecordDetail;
 use module_fertilisation::repository::list_irrigation_records_for_export;
 use module_fertilisation::siex;
+use module_phytosanitary::siex as cue_siex;
 use rusqlite::Connection;
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 
@@ -96,6 +96,19 @@ fn entry(
         .as_deref()
         .and_then(|code| code.trim().parse::<i64>().ok());
 
+    // Codes stored verbatim; one that is not an integer cannot be sent, the
+    // fertilisation block's rule for the same catalogue.
+    let buenas_practicas_riego = detail
+        .practices
+        .iter()
+        .map(|code| {
+            code.trim()
+                .parse::<i64>()
+                .map(|tipo_bpr| BuenaPracticaRiego { tipo_bpr })
+                .map_err(|_| unmappable())
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let dgcs = detail
         .plots
         .iter()
@@ -121,6 +134,7 @@ fn entry(
         origen_agua,
         tipo_energia,
         num_contador: record.meter_number.clone(),
+        buenas_practicas_riego,
         dgcs,
     }))
 }

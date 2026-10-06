@@ -17,7 +17,7 @@ use std::path::Path;
 use terrazgo_geo::GeoError;
 use terrazgo_geo::import::{list_boundary_file, read_boundary_geometry};
 // The RAII temp-path guard this file introduced, now shared: core's and
-// module-cue's backup tests had the same need and were removing their files by
+// module-phytosanitary's backup tests had the same need and were removing their files by
 // hand, which a failing assertion skips.
 use terrazgo_testkit::TempFile;
 

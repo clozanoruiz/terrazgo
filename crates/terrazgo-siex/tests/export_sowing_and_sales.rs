@@ -9,8 +9,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use terrazgo_siex::export_precheck;
 
 // ---------------------------------------------------------------------------
@@ -286,13 +286,29 @@ fn a_link_may_not_reach_another_farm_or_another_campaign() {
             owner_name: None,
             owner_tax_id: None,
             es: None,
+            ..NewFarm::default()
         },
         None,
     )
     .unwrap()
     .id;
     let other_plot = insert_plot(&mut conn, &other_farm, "Parcela ajena", 3.0);
+    // The neighbour's own campaign: a season belongs to one farm, so its sowing
+    // cannot be filed under this farm's.
+    let other_season = repo::insert_season(
+        &mut conn,
+        terrazgo_core::models::NewSeason {
+            farm_id: other_farm.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: Some("2026".into()),
+        },
+        None,
+    )
+    .unwrap()
+    .id;
     let elsewhere = terrazgo_core::models::NewSowingRecord {
+        season_id: other_season,
         farm_id: other_farm.clone(),
         plots: vec![terrazgo_core::models::NewSowingPlot {
             plot_id: other_plot,
@@ -309,7 +325,7 @@ fn a_link_may_not_reach_another_farm_or_another_campaign() {
     };
     assert!(matches!(
         repo::insert_seed_treatment(&mut conn, crossed, None).unwrap_err(),
-        module_cue::error::CueError::Invalid("sowing_not_on_farm")
+        module_phytosanitary::error::PhytosanitaryError::Invalid("sowing_not_on_farm")
     ));
 }
 

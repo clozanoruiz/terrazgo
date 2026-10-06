@@ -17,7 +17,7 @@
 // id to `open_external_link` and never a URL, which is what lets the opener
 // plugin be registered with no `opener:allow-open-url` granted to the frontend.
 // Keeping the URL in one place also means these two lists cannot disagree
-// about a destination — only about an id, which src-tauri/tests/registry_hints.rs
+// about a destination — only about an id, which src-tauri/tests/contracts/registry_hints.rs
 // catches.
 //
 // Entry contract:

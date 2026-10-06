@@ -11,8 +11,14 @@
 //!     every long-lived connection is held by so shutdown can close it.
 //!   * [`models`]     — core entity structs (farm, plot) + `New*` insert inputs.
 //!   * [`repository`] — CRUD for the core entities, with audit logging.
+//!   * [`alerts`]     — what every crate that raises alerts shares: the
+//!     standard shape, the kinds, the status rules. Nothing stores an alert;
+//!     the list is assembled when read (`repository::list_alerts`).
 //!   * [`audit`]      — append-only `record_change` helpers, used by every crate
-//!     that writes synced user data.
+//!     that writes synced user data, and the change stamp every write opens.
+//!   * [`sync`]       — the sync foundations every write needs: the device a
+//!     connection writes as, the hybrid logical clock, version vectors, and
+//!     core's half of the aggregate map.
 //!   * [`backup`]     — export a consistent snapshot / validate before import.
 //!   * [`catalogue`]  — imported reference catalogues (vendored FEGA SIEX
 //!     snapshot, upsert-only `ensure_catalogues` at startup).
@@ -32,21 +38,24 @@
 //!
 //! // Core's schema alone, in memory, with foreign keys on. The app opens its
 //! // real database through the shell's composed runner instead — core steps
-//! // first, then each registered module's.
+//! // first, then each registered module's. Either way the connection carries
+//! // the DEVICE it writes as and the map every log row is checked against
+//! // (`sync::install_device`, `sync::install_shape`): those are fixed for the
+//! // connection's life, so its opener installs them.
 //! let mut conn = terrazgo_core::open_in_memory()?;
 //!
-//! // Every write takes an actor: the active user profile's id, or None. It is
-//! // a parameter rather than connection state so it cannot be forgotten past
-//! // the compiler, and so a backup import swapping the connection cannot
-//! // silently drop it.
+//! // Every write takes an actor: the active user profile's id, or None. The
+//! // actor changes per command, so unlike the device it is a parameter rather
+//! // than connection state: it cannot be forgotten past the compiler, and a
+//! // backup import swapping the connection cannot silently drop it.
 //! let farm = repo::insert_farm(
 //!     &mut conn,
+//!     // Only the name and the country are obliged; the rest of model 1.1 is
+//!     // optional at creation and can be filled in later.
 //!     NewFarm {
 //!         name: "Finca La Vega".into(),
-//!         owner_name: None,
-//!         owner_tax_id: None,
 //!         country_code: "es".into(),
-//!         es: None,
+//!         ..NewFarm::default()
 //!     },
 //!     Some("profile-1"),
 //! )?;
@@ -82,17 +91,22 @@
 //! functions — [`date`], [`geojson`] — carry a worked example each, because
 //! there the example IS the specification and costs nothing to run.
 
+pub mod alerts;
 pub mod audit;
 pub mod backup;
+pub mod bundle;
 pub mod catalogue;
 pub mod date;
 pub mod db;
+pub mod duplicates;
 pub mod error;
 pub mod geojson;
+pub mod merge;
 pub mod models;
 pub mod repository;
 pub mod settings;
 pub mod sql;
+pub mod sync;
 
 pub use db::{Database, DbGuard, Unavailable, migration_set, migrations, open_in_memory};
 pub use error::{Classify, CoreError, Result};

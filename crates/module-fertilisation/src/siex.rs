@@ -4,7 +4,7 @@
 //! Mapping between this module's neutral codes and the Spanish SIEX coding
 //! (FEGA catalogues; design in docs/siex-export.md).
 //!
-//! Same two-tier rule as module-cue's `siex`: small closed lists are owned as
+//! Same two-tier rule as module-phytosanitary's `siex`: small closed lists are owned as
 //! English lookups and mapped here, while provider lists too large to own are
 //! stored verbatim as catalogue codes and only named. Both lists in this module
 //! are small and closed, so both are mapped.
@@ -128,7 +128,7 @@ pub const DENSITY_UNIT_SIEX: i64 = 12;
 ///
 /// Anexo III C.l and Anexo V's fields 41-42 both fix it ("mg/l o ppm", which
 /// are the same number for water), so the columns carry no unit of their own
-/// and this is how the serializer states it. The same code module-cue reaches
+/// and this is how the serializer states it. The same code module-phytosanitary reaches
 /// for when a g/L dose has to be sent as mg/L.
 pub const WATER_CONCENTRATION_UNIT_SIEX: i64 = 20;
 
@@ -164,16 +164,21 @@ pub fn good_practice_catalogue(country_code: &str) -> Option<&'static str> {
     (country_code == "es").then_some("BUENAS_PRACTICAS_AMBITOS")
 }
 
-/// The `BUENAS_PRACTICAS_AMBITOS` column that says which vocabulary a row
-/// belongs to, and the value that selects fertilisation's. Verbatim provider
-/// strings — a mirror of an external contract, accent included.
-pub const GOOD_PRACTICE_SCOPE_KEY: &str = "Ámbito";
-pub const FERTILISATION_SCOPE: &str = "Fertilización";
+/// The `BUENAS_PRACTICAS_AMBITOS` column that says whether a practice may be
+/// claimed on a fertilisation, and the value that says it may. Verbatim
+/// provider strings — a mirror of an external contract, accent included.
+pub const FERTILISATION_SCOPE_KEY: &str = "Ámbito Fertilización";
+pub const IN_SCOPE: &str = "SI";
 
-/// The row every ámbito of `BUENAS_PRACTICAS_AMBITOS` opens with, spelled "No
-/// realiza buenas prácticas". An ordinary code in the file, and the catalogue's
-/// shape says nothing about it — but its MEANING contradicts every other row,
-/// which is why `validated_practices` refuses to store it beside one.
+/// The column that says whether a practice may be claimed on an irrigation —
+/// `Riego.BuenasPracticasRiego`'s vocabulary.
+pub const IRRIGATION_SCOPE_KEY: &str = "Ámbito Riego";
+
+/// The row `BUENAS_PRACTICAS_AMBITOS` opens with, spelled "No realiza buenas
+/// prácticas" and claimable in every ámbito. An ordinary code in the file, and
+/// the catalogue's shape says nothing about it — but its MEANING contradicts
+/// every other row, which is why `validated_practices` refuses to store it
+/// beside one.
 pub const NO_PRACTICES_CODE: &str = "0";
 
 /// The `DETALLE_MATERIAL_FERT` column carrying the parent `MAT_FERTI` code.

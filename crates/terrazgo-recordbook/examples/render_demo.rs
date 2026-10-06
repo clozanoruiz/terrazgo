@@ -8,7 +8,7 @@
 fn main() {
     let mut conn = terrazgo_recordbook::open_in_memory().unwrap();
     terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
-    let summary = module_cue::demo::seed_demo(&mut conn).unwrap();
+    let summary = module_phytosanitary::demo::seed_demo(&mut conn).unwrap();
     assert!(summary.seeded);
     let (season_id, farm_id): (String, String) = conn
         .query_row(

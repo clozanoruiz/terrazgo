@@ -24,7 +24,7 @@ use terrazgo_core::catalogue::{self, CatalogueCode};
 /// Every vendored SIEX catalogue (idTabla ids). Kept in sync by hand with
 /// `catalogue.rs`'s `VENDORED`; `imports_all_vendored_catalogues` fails if the
 /// two drift, in either direction.
-const VENDORED_IDS: [&str; 49] = [
+const VENDORED_IDS: [&str; 50] = [
     "AUTORIZACION_EXCP",
     "BUENAS_PRACTICAS_AMBITOS",
     "COMUNIDAD_AUTONOMA",
@@ -61,6 +61,7 @@ const VENDORED_IDS: [&str; 49] = [
     "SIST_CULTIVO",
     "SIST_EXPLOTACION",
     "SIST_RIEGO",
+    "SUSTANCIAS_BASICAS",
     "SUST_ACTIVAS",
     "TIPENERGIA",
     "TIPO_ANALISIS",
@@ -137,17 +138,18 @@ fn imports_all_vendored_catalogues() {
         VENDORED_IDS.len() as i64,
         "VENDORED_IDS and catalogue.rs's VENDORED have drifted"
     );
-    // The snapshot holds 17582 stored rows across the 49 files (17583 data
+    // The snapshot holds 17575 stored rows across the 50 files (17576 data
     // rows less COMUNIDAD_AUTONOMA's code-less placeholder). Codes are only
     // ever added or baja-dated upstream, so a refreshed snapshot may grow
-    // this number but must never shrink it.
+    // this number; it shrinks only when a file changes SHAPE, which is a
+    // review of its own.
     //
     // 17384 across 48 files until 2026-08-18, when ESPECIE_ANIMAL's 198
     // species arrived with the grazing register that reads them.
     let codes: i64 = conn
         .query_row("SELECT COUNT(*) FROM catalogue_code", [], |r| r.get(0))
         .unwrap();
-    assert!(codes >= 17582, "expected >= 17582 codes, got {codes}");
+    assert!(codes >= 17575, "expected >= 17575 codes, got {codes}");
 }
 
 #[test]
@@ -295,8 +297,9 @@ fn crop_catalogue_keeps_attribute_columns() {
 /// EPPO column, so the code looks derivable from `crop.crop_code` — and this
 /// pins how far that actually goes, because it is **not** every crop.
 ///
-/// Measured 2026-08-12 against the vendored snapshot: **151 of the 1023 active
-/// rows carry no EPPO code**, and the gap is structural rather than an
+/// Measured 2026-10-06 against the vendored snapshot: **152 of the 1024 active
+/// rows carry no EPPO code** (151 of 1023 on 2026-08-12; the one added since,
+/// `ENDIBIA BELGA`, came without one), and the gap is structural rather than an
 /// omission. EPPO codes a plant taxon, and a large part of this catalogue is
 /// not one: `BARBECHO TRADICIONAL` and `BARBECHO MEDIOAMBIENTAL` are fallow,
 /// `PASTOS PERMANENTES DE 5 O MÁS AÑOS` is a land use, `FLORES` is a generic
@@ -314,7 +317,7 @@ fn crop_catalogue_keeps_attribute_columns() {
 fn eppo_coverage_of_the_crop_catalogue_is_incomplete() {
     let conn = db_with_catalogues();
     let active = terrazgo_core::catalogue::active_codes(&conn, "PRODUCTOS").unwrap();
-    assert_eq!(active.len(), 1023, "active PRODUCTOS rows");
+    assert_eq!(active.len(), 1024, "active PRODUCTOS rows");
 
     let without_eppo = active
         .iter()
@@ -327,7 +330,7 @@ fn eppo_coverage_of_the_crop_catalogue_is_incomplete() {
         })
         .count();
     assert_eq!(
-        without_eppo, 151,
+        without_eppo, 152,
         "active PRODUCTOS rows with no EPPO code — the EU annex's crop-name \
          correspondence is not derivable for these"
     );
@@ -373,18 +376,145 @@ fn retired_codes_stay_resolvable_but_leave_the_picker() {
 }
 
 #[test]
+fn every_held_code_says_whether_a_picker_may_offer_it() {
+    // A picker still has to NAME a code it no longer offers — the one a record
+    // already carries — so it reads every code this device holds, each marked
+    // (docs/sync.md → What stays device-local).
+    let conn = db_with_catalogues();
+    // Retired by the authority: AUTORIZACION_EXCP 1, baja-dated 11/11/2025.
+    assert!(!one(&conn, "AUTORIZACION_EXCP", "1").offered);
+    assert!(one(&conn, "ENFERMEDADES", "254").offered);
+    // Dropped from the provider's file with no baja date — our mark, set by a
+    // refresh.
+    conn.execute(
+        "UPDATE catalogue_code SET absent_since = '2026-09-01'
+         WHERE catalogue_id = 'ENFERMEDADES' AND code = '254'",
+        [],
+    )
+    .unwrap();
+    assert!(!one(&conn, "ENFERMEDADES", "254").offered);
+}
+
+#[test]
+fn a_pickers_list_holds_every_code_once_and_offers_only_the_live_ones() {
+    let conn = db_with_catalogues();
+    let label = |row: &CatalogueCode| row.label.clone();
+    let picks = catalogue::held_picks(&conn, "AUTORIZACION_EXCP", |_| true, label).unwrap();
+
+    // Every code, once, in the provider's own order.
+    let mut in_file_order: Vec<String> = Vec::new();
+    for row in catalogue::all_codes(&conn, "AUTORIZACION_EXCP").unwrap() {
+        if !in_file_order.contains(&row.code) {
+            in_file_order.push(row.code);
+        }
+    }
+    let codes: Vec<String> = picks.iter().map(|pick| pick.code.clone()).collect();
+    assert_eq!(codes, in_file_order);
+    // Offered: exactly what the old active-only list offered.
+    let offered: HashSet<String> = picks
+        .iter()
+        .filter(|pick| pick.offered)
+        .map(|pick| pick.code.clone())
+        .collect();
+    let active: HashSet<String> = catalogue::active_codes(&conn, "AUTORIZACION_EXCP")
+        .unwrap()
+        .into_iter()
+        .map(|row| row.code)
+        .collect();
+    assert_eq!(offered, active);
+    assert!(picks.iter().any(|pick| pick.code == "1" && !pick.offered));
+}
+
+#[test]
+fn a_code_held_in_several_rows_is_offered_while_any_of_them_is_live() {
+    // CULTIVO_USO_SIGPAC repeats crop code 1 (TRIGO BLANDO) once per SIGPAC
+    // uso: EP, TA, TH and ZC.
+    let conn = db_with_catalogues();
+    let label = |row: &CatalogueCode| row.label.clone();
+    let wheat = |conn: &Connection| {
+        catalogue::held_picks(conn, "CULTIVO_USO_SIGPAC", |_| true, label)
+            .unwrap()
+            .into_iter()
+            .filter(|pick| pick.code == "1")
+            .collect::<Vec<_>>()
+    };
+    let retire = |uso: &str| {
+        conn.execute(
+            "UPDATE catalogue_code SET retired_on = '2026-01-01'
+             WHERE catalogue_id = 'CULTIVO_USO_SIGPAC' AND code = '1'
+               AND json_extract(attrs, '$.\"Uso SIGPAC\"') = ?1",
+            [uso],
+        )
+        .unwrap()
+    };
+    assert_eq!(wheat(&conn).len(), 1);
+    assert_eq!(retire("TA"), 1);
+    assert!(wheat(&conn)[0].offered, "three usos still carry it");
+    for uso in ["EP", "TH", "ZC"] {
+        retire(uso);
+    }
+    assert!(!wheat(&conn)[0].offered);
+
+    // A filter applies before the code is counted: only one uso's rows.
+    let arable = catalogue::held_picks(
+        &conn,
+        "CULTIVO_USO_SIGPAC",
+        |row| {
+            row.attrs
+                .as_ref()
+                .and_then(|attrs| attrs["Uso SIGPAC"].as_str())
+                == Some("TA")
+        },
+        label,
+    )
+    .unwrap();
+    assert!(arable.iter().any(|pick| pick.code == "1" && !pick.offered));
+}
+
+#[test]
+fn good_practices_are_one_row_each_flagged_per_ambito() {
+    // BUENAS_PRACTICAS_AMBITOS: one row per practice, and one SI/NO column per
+    // ámbito it may be claimed in. A practice reads the same in every ámbito,
+    // so the code alone names it.
+    let conn = db_with_catalogues();
+    let ambitos = [
+        "Ámbito Fitosanitario",
+        "Ámbito Fertilización",
+        "Ámbito Riego",
+    ];
+    let rows = catalogue::all_codes(&conn, "BUENAS_PRACTICAS_AMBITOS").unwrap();
+    for row in &rows {
+        let attrs = row.attrs.as_ref().unwrap();
+        for ambito in ambitos {
+            assert!(
+                matches!(attrs[ambito].as_str(), Some("SI" | "NO")),
+                "practice {} holds {:?} under {ambito}",
+                row.code,
+                attrs[ambito]
+            );
+        }
+    }
+    // "No realiza buenas prácticas" may be claimed in all three.
+    let zero = one(&conn, "BUENAS_PRACTICAS_AMBITOS", "0");
+    assert!(
+        ambitos
+            .iter()
+            .all(|a| zero.attrs.as_ref().unwrap()[a] == "SI")
+    );
+    // How many each ámbito offers, read off the file: 26 / 41 / 31.
+    let claimable = |ambito: &str| {
+        rows.iter()
+            .filter(|row| row.attrs.as_ref().unwrap()[ambito] == "SI")
+            .count()
+    };
+    assert_eq!(claimable("Ámbito Fitosanitario"), 26);
+    assert_eq!(claimable("Ámbito Fertilización"), 41);
+    assert_eq!(claimable("Ámbito Riego"), 31);
+}
+
+#[test]
 fn composite_identity_catalogues_keep_every_row_per_code() {
     let conn = db_with_catalogues();
-    // BUENAS_PRACTICAS_AMBITOS repeats code 0 ("No realiza buenas prácticas")
-    // once per ámbito — Fertilización / Riego / Fitosanitario in the snapshot.
-    let rows = catalogue::find_code(&conn, "BUENAS_PRACTICAS_AMBITOS", "0").unwrap();
-    assert_eq!(rows.len(), 3);
-    let mut ambitos: Vec<String> = rows
-        .iter()
-        .map(|r| r.attrs.as_ref().unwrap()["Ámbito"].as_str().unwrap().into())
-        .collect();
-    ambitos.sort();
-    assert_eq!(ambitos, ["Fertilización", "Fitosanitario", "Riego"]);
     // CULTIVO_USO_SIGPAC relates one crop code to several SIGPAC usos.
     let wheat_usos = catalogue::find_code(&conn, "CULTIVO_USO_SIGPAC", "1").unwrap();
     assert_eq!(wheat_usos.len(), 4);

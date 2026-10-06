@@ -13,7 +13,7 @@
 //! never rewrites a legal record. The record stays fully correctable all the
 //! same — the snapshot is what makes that safe, not what forbids it.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update, write_change};
 use super::no_rows_to_not_found;
 use crate::error::{FertilisationError, Result};
 use crate::models::{
@@ -51,7 +51,7 @@ pub fn insert_fertilisation_record(
     validate_dose(new.dose_value, &new.dose_unit_code)?;
     validate_yields(new.yield_estimated_kg_ha, new.yield_final_kg_ha)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_codes(
         &tx,
         &new.fertilisation_type_code,
@@ -134,27 +134,15 @@ pub fn insert_fertilisation_record(
     )?;
 
     let mut plot_rows = Vec::new();
+    let stamp = tx.register("fertilisation_record", &record.id, Some(&record.season_id))?;
     for plot in plots {
-        plot_rows.push(insert_plot_row(
-            &tx,
-            &record.id,
-            &record.season_id,
-            plot,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(&tx, &record.id, plot, &stamp)?);
     }
     for practice in &practices {
-        insert_practice_row(&tx, &record.id, &record.season_id, practice, actor)?;
+        insert_practice_row(&tx, &record.id, practice, &stamp)?;
     }
 
-    log_insert(
-        &tx,
-        "fertilisation_record",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(&tx, &stamp, "fertilisation_record", &record.id, &record)?;
     tx.commit()?;
     Ok(FertilisationRecordDetail {
         record,
@@ -183,7 +171,7 @@ pub fn update_fertilisation_record(
     validate_dose(update.dose_value, &update.dose_unit_code)?;
     validate_yields(update.yield_estimated_kg_ha, update.yield_final_kg_ha)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_codes(
         &tx,
         &update.fertilisation_type_code,
@@ -278,18 +266,11 @@ pub fn update_fertilisation_record(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "fertilisation_record",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    let stamp = tx.register("fertilisation_record", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "fertilisation_record", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(&tx, &after, plots, actor)?;
-    reconcile_practices(&tx, &after, &practices, actor)?;
+    let plot_rows = reconcile_plots(&tx, &after, plots, &stamp)?;
+    reconcile_practices(&tx, &after, &practices, &stamp)?;
     tx.commit()?;
     Ok(FertilisationRecordDetail {
         record: after,
@@ -303,7 +284,16 @@ pub fn soft_delete_fertilisation_record(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_fertilisation_record_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_fertilisation_record_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM fertilisation_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -320,16 +310,15 @@ pub fn soft_delete_fertilisation_record(
         "UPDATE fertilisation_record SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
+    let stamp = tx.register("fertilisation_record", id, Some(&before.season_id))?;
     write_change(
-        &tx,
+        tx,
+        &stamp,
         "fertilisation_record",
         id,
-        Some(&before.season_id),
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -387,25 +376,13 @@ pub fn list_fertilisation_records(
     all_with_details(conn, records)
 }
 
-/// Whether any fertilisation record hangs off this season. Soft-deleted rows
-/// count: their audit history is only reachable through the season they belong
-/// to.
-pub(super) fn season_has_fertilisation(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM fertilisation_record WHERE season_id = ?1)",
-        [season_id],
-        |r| r.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- reconciliation --------------------------------------------------------
 
 fn reconcile_plots(
     tx: &Transaction,
     record: &FertilisationRecord,
     desired: Vec<NewFertilisationPlot>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<FertilisationPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -417,10 +394,9 @@ fn reconcile_plots(
             )?;
             log_delete(
                 tx,
+                stamp,
                 "fertilisation_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&FertilisationPlot>,
             )?;
@@ -444,10 +420,9 @@ fn reconcile_plots(
                     )?;
                     log_update(
                         tx,
+                        stamp,
                         "fertilisation_plot",
                         &existing.id,
-                        Some(&record.season_id),
-                        actor,
                         existing,
                         &after,
                     )?;
@@ -456,13 +431,7 @@ fn reconcile_plots(
                     rows.push(existing.clone());
                 }
             }
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                want,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, want, stamp)?),
         }
     }
     Ok(rows)
@@ -476,7 +445,7 @@ fn reconcile_practices(
     tx: &Transaction,
     record: &FertilisationRecord,
     desired: &[String],
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let current = practice_rows_tx(tx, &record.id)?;
     for (row_id, code) in &current {
@@ -485,10 +454,9 @@ fn reconcile_practices(
             let gone = practice_image(row_id, &record.id, code);
             log_delete(
                 tx,
+                stamp,
                 "fertilisation_practice",
                 row_id,
-                Some(&record.season_id),
-                actor,
                 &gone,
                 None::<&serde_json::Value>,
             )?;
@@ -496,7 +464,7 @@ fn reconcile_practices(
     }
     for code in desired {
         if !current.iter().any(|(_, existing)| existing == code) {
-            insert_practice_row(tx, &record.id, &record.season_id, code, actor)?;
+            insert_practice_row(tx, &record.id, code, stamp)?;
         }
     }
     Ok(())
@@ -505,9 +473,8 @@ fn reconcile_practices(
 fn insert_plot_row(
     tx: &Transaction,
     fertilisation_record_id: &str,
-    season_id: &str,
     plot: NewFertilisationPlot,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<FertilisationPlot> {
     let row = FertilisationPlot {
         id: Uuid::now_v7().to_string(),
@@ -528,23 +495,15 @@ fn insert_plot_row(
             row.fertilised_area_ha
         ],
     )?;
-    log_insert(
-        tx,
-        "fertilisation_plot",
-        &row.id,
-        Some(season_id),
-        actor,
-        &row,
-    )?;
+    log_insert(tx, stamp, "fertilisation_plot", &row.id, &row)?;
     Ok(row)
 }
 
 fn insert_practice_row(
     tx: &Transaction,
     fertilisation_record_id: &str,
-    season_id: &str,
     practice_code: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let id = Uuid::now_v7().to_string();
     tx.execute(
@@ -554,10 +513,9 @@ fn insert_practice_row(
     )?;
     log_insert(
         tx,
+        stamp,
         "fertilisation_practice",
         &id,
-        Some(season_id),
-        actor,
         &practice_image(&id, fertilisation_record_id, practice_code),
     )?;
     Ok(())
@@ -800,10 +758,12 @@ fn validated_plots(
 }
 
 /// `BUENAS_PRACTICAS_AMBITOS` codes, stored verbatim and NOT validated against
-/// the catalogue: the file is keyed on (code, ámbito) and the same integer
-/// means a different practice in each of the three, so this table's own
-/// existence is what fixes the ámbito — there is no ámbito-blind membership
-/// test that would mean anything.
+/// the catalogue — the picker-narrows-never-the-repository rule: a catalogue
+/// that grows between releases makes a code this device does not know lawful,
+/// and the file moves practices between its three ámbitos by flipping a
+/// "SI" to "NO". The table a code is stored in is what fixes the ámbito —
+/// `fertilisation_practice` here, `irrigation_practice` for a watering, which
+/// shares this rule.
 ///
 /// Duplicates fold, and the result is sorted numerically so a freshly written
 /// record and one read back list its practices identically.
@@ -815,7 +775,7 @@ fn validated_plots(
 /// grows between releases and refusing an unlisted code would make a lawful
 /// practice unrecordable. This is a contradictory pair of KNOWN codes whose
 /// meanings cannot drift, and a register that can hold it exports it.
-fn validated_practices(codes: &[String]) -> Result<Vec<String>> {
+pub(super) fn validated_practices(codes: &[String]) -> Result<Vec<String>> {
     let mut seen = HashSet::new();
     let mut kept = Vec::new();
     for code in codes {

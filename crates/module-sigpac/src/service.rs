@@ -111,6 +111,23 @@ pub fn verify_plot(
 /// are codes in it, and it is vendored, so a declared crop gets a name with no
 /// network involved.
 const CROP_CATALOGUE: &str = "PRODUCTOS";
+
+/// Which catalogue names a country's crop species, the shape every other coded
+/// field already uses (`premises_class_catalogue` and its fifteen siblings).
+///
+/// This module is Spain's parcel provider, so most of it is Spanish by
+/// construction — but [`crop_species`] is not: it feeds the manual crop form,
+/// which every holding uses. Without this, a French farm was offered FEGA's
+/// species list and could store a Spanish registry code on a French record,
+/// which is exactly what "records stay country-neutral" forbids. `None` means
+/// the picker offers nothing and the field falls back to free text, which the
+/// data model already allows — a species with no code is valid.
+fn crop_catalogue(country_code: &str) -> Option<&'static str> {
+    match country_code {
+        "es" => Some(CROP_CATALOGUE),
+        _ => None,
+    }
+}
 /// Crop code ↔ SIGPAC land use, the vendored catalogue that says which crops
 /// are plausible on tierra arable, on pasture, and so on.
 const CROP_LAND_USE_CATALOGUE: &str = "CULTIVO_USO_SIGPAC";
@@ -182,7 +199,7 @@ pub struct CropProposals {
 /// recorded and returns rows to review. Nothing is written here — accepting a
 /// row is a separate, user-confirmed step through core's crop repository.
 ///
-/// `treated_crop_ids` comes from the CUE module via the shell (the two modules
+/// `treated_crop_ids` comes from the phytosanitary module via the shell (the two modules
 /// never call each other): a crop this season's treatments point at is never
 /// proposed for overwriting.
 pub fn propose_crops(
@@ -375,6 +392,10 @@ fn normalize(name: &str) -> String {
 /// The catalogue's name for a declared code, or `None` when nothing resolves
 /// it — the code is kept regardless, so an unknown crop is still importable
 /// with a name the farmer types.
+///
+/// Not country-dispatched, deliberately: the code being resolved arrived from
+/// SIGPAC, so it is a `PRODUCTOS` code by construction. Asking which catalogue
+/// a country uses would be ceremony over a question already answered.
 fn resolve_species(app: &Connection, code: &str) -> Result<Option<String>> {
     let rows = catalogue::find_code(app, CROP_CATALOGUE, code)?;
     Ok(rows.into_iter().next().map(|row| row.label))
@@ -435,8 +456,20 @@ pub struct SpeciesCatalogue {
 /// is a convenience and degrades to the full list whenever it cannot be
 /// trusted: no plot, no verified boundary, no land use, or a land use that
 /// matches nothing. A filter that hides everything is worse than no filter.
-pub fn crop_species(app: &Connection, plot_id: Option<&str>) -> Result<SpeciesCatalogue> {
-    let all: Vec<SpeciesOption> = catalogue::active_codes(app, CROP_CATALOGUE)?
+/// Offered per country: a holding whose country has no species catalogue gets
+/// an empty list, which the picker renders as a plain text field.
+pub fn crop_species(
+    app: &Connection,
+    country_code: &str,
+    plot_id: Option<&str>,
+) -> Result<SpeciesCatalogue> {
+    let Some(catalogue_id) = crop_catalogue(country_code) else {
+        return Ok(SpeciesCatalogue {
+            options: Vec::new(),
+            land_use: None,
+        });
+    };
+    let all: Vec<SpeciesOption> = catalogue::active_codes(app, catalogue_id)?
         .into_iter()
         .map(|row| SpeciesOption {
             code: row.code,

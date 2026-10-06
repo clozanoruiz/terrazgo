@@ -48,8 +48,6 @@ const COMMANDS = {
   productionSystems: "list_production_systems",
   irrigationSystems: "list_irrigation_systems",
   growingEnvironments: "list_growing_environments",
-  gipSystems: "list_gip_systems",
-  licenceLevels: "list_licence_levels",
   irrigationMethods: "list_irrigation_methods",
   waterOrigins: "list_water_origins",
   fertilisationTypes: "list_fertilisation_types",
@@ -64,6 +62,12 @@ const COMMANDS = {
   // list_substance_codes all take a country (or a category), so they are
   // per-holding reference data rather than session-wide. Caching them would
   // need a key, and the view already knows the argument.
+  //
+  // list_licence_levels and list_gip_systems left this map for the same reason
+  // (2026-09-06). They look universal and are not: the carné levels are RD
+  // 1311/2012's and `atria` is a Spanish institution, so both take a country
+  // now. A lookup that belongs to one country's scheme cannot live in a
+  // session-wide cache, and `lookup_scope.rs` fails if one is put back.
 };
 
 /// Every list, empty until loaded. Components read these directly and re-render

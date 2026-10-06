@@ -34,14 +34,16 @@
 // crate: it is Apache-2.0 alone where the rest offer MIT as well, and a row
 // saying otherwise would be a false statement about somebody's licence.
 //
-// THIS LIST CANNOT SILENTLY ROT. `src-tauri/tests/third_party.rs` reads the
+// THIS LIST CANNOT SILENTLY ROT. `src-tauri/tests/contracts/third_party.rs` reads the
 // Cargo and npm manifests and refuses a dependency that is missing here, an
 // entry naming a package that is gone, and a licence with no allowlisted link.
 // A hand-written inventory with nothing checking it is exactly the failure the
 // catalogue audit found (docs/maintenance.md §1).
 //
 // A dual licence is stored as the alternatives it offers, in the order the
-// package states them: "MIT OR Apache-2.0" means the reader may take either.
+// package states them: "MIT OR Apache-2.0" is what the package says, and the
+// offer is what makes taking one of them lawful. The panel shows only the one
+// Terrazgo takes — `licenceShown` below.
 
 export const THIRD_PARTY = [
   // --- Rust -----------------------------------------------------------------
@@ -88,10 +90,12 @@ export const THIRD_PARTY = [
   { name: "anyhow", kind: "rust", licences: ["MIT", "Apache-2.0"], packages: ["anyhow"] },
   { name: "thiserror", kind: "rust", licences: ["MIT", "Apache-2.0"], packages: ["thiserror"] },
   { name: "csv", kind: "rust", licences: ["Unlicense", "MIT"], packages: ["csv"] },
+  { name: "flate2", kind: "rust", licences: ["MIT", "Apache-2.0"], packages: ["flate2"] },
+  { name: "twox-hash", kind: "rust", licences: ["MIT"], packages: ["twox-hash"] },
   { name: "jiff", kind: "rust", licences: ["Unlicense", "MIT"], packages: ["jiff"] },
   { name: "geozero", kind: "rust", licences: ["MIT", "Apache-2.0"], packages: ["geozero"] },
   { name: "jni", kind: "rust", licences: ["MIT", "Apache-2.0"], packages: ["jni"] },
-  { name: "os_info", kind: "rust", licences: ["MIT"], packages: ["os_info"] },
+  { name: "sysinfo", kind: "rust", licences: ["MIT"], packages: ["sysinfo"] },
   {
     name: "rust_xlsxwriter",
     kind: "rust",
@@ -168,6 +172,35 @@ export const THIRD_PARTY = [
     licenceFile: "src/fonts/LICENSE",
   },
 ];
+
+/// The licence a row is shown under: its only one, or — where it offers a
+/// choice — the one Terrazgo takes.
+///
+/// A dual licence is the licensor's offer of a choice ("Licensed under either
+/// of … at your option", serde's README), and whoever takes one option may
+/// redistribute under that one alone: "each user could choose to use and
+/// redistribute Perl under one license or the other" is the FSF's own reading
+/// of a disjunction (gnu.org/licenses/license-compatibility.html). So the panel
+/// carries one text per library, not one per option.
+///
+/// MIT wherever it is offered, and every row offering a choice offers it. The
+/// FSF lists it (as "Expat") as compatible with the GNU GPL, with no version
+/// qualifier — Apache-2.0 is compatible with version 3 only, and this app is
+/// AGPL-3.0-or-later. Its one condition is that the notice travel with the
+/// copies, which the panel is; it is a kilobyte where Apache-2.0 is eleven; and
+/// it carries no NOTICE-file duty (Apache-2.0 §4(d)). For csv and jiff the
+/// other option is the Unlicense, which would serve too — MIT keeps it one rule.
+///
+/// A row offering a choice WITHOUT MIT throws: which option to take is a
+/// decision, and the generator stops for it rather than guessing.
+export function licenceShown(lib) {
+  if (lib.licences.length === 1) return lib.licences[0];
+  if (lib.licences.includes("MIT")) return "MIT";
+  throw new Error(
+    `${lib.name} offers ${lib.licences.join(" or ")} and not MIT: decide which one ` +
+      `Terrazgo takes, and teach licenceShown in src/lib/thirdParty.js.`,
+  );
+}
 
 /// The allowlisted link id for an SPDX licence id.
 ///

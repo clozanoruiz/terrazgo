@@ -17,13 +17,14 @@
   import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
   import DateInput from "./DateInput.svelte";
   import PlantProductPicker from "./PlantProductPicker.svelte";
   import TzSelect from "./TzSelect.svelte";
-  import { codeItems, nameItems } from "./selectItems.js";
+  import { catalogueItems, codeItems, nameItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
@@ -124,26 +125,27 @@
   // items. SUST_ACTIVAS runs to 283 entries, which is why it is a combobox and
   // not a listbox.
   function substanceItems() {
-    return substanceCatalogue.map((substance) => ({
-      value: substance.code,
-      label: substance.name,
-    }));
+    return catalogueItems(substanceCatalogue);
   }
 
   /// Anexo III A.3's nine soil figures. Kept as a plain object of strings, the
   /// way every other numeric input in this app is: empty means the bulletin did
   /// not report it, which is different from zero.
+  ///
+  /// Keyed by the names the command uses, which are the record's own — the nine
+  /// are flat fields of an analysis, not a block inside it. That is what lets
+  /// this read and send them without building a single field name.
   function emptySoil() {
     return {
-      ph: "",
-      organic_matter_pct: "",
-      available_p_mg_kg: "",
-      available_k_mg_kg: "",
-      total_n_pct: "",
-      conductivity_ds_m: "",
-      sand_pct: "",
-      silt_pct: "",
-      clay_pct: "",
+      soil_ph: "",
+      soil_organic_matter_pct: "",
+      soil_available_p_mg_kg: "",
+      soil_available_k_mg_kg: "",
+      soil_total_n_pct: "",
+      soil_conductivity_ds_m: "",
+      soil_sand_pct: "",
+      soil_silt_pct: "",
+      soil_clay_pct: "",
     };
   }
 
@@ -171,8 +173,9 @@
       ? detail.substances.map((s) => ({ code: s.substance_code, filter: "" }))
       : [];
     soil = { ...emptySoil() };
-    for (const [key, value] of Object.entries(detail?.record.soil ?? {})) {
-      if (value !== null && value !== undefined && key in soil) soil[key] = value;
+    for (const key of Object.keys(soil)) {
+      const value = detail?.record[key];
+      if (value !== null && value !== undefined) soil[key] = value;
     }
     loadSubstances();
     analysisFormOpen = true;
@@ -183,7 +186,7 @@
     editingAnalysisId = null;
   }
 
-  /// The row the analyses inspector is editing, so its delete button knows
+  /// The row the analyses panel is editing, so its delete button knows
   /// which record it is about. Null while creating.
   const editingAnalysis = $derived(analyses.find((d) => d.record.id === editingAnalysisId) ?? null);
 
@@ -198,7 +201,7 @@
       substances_detected: substances.trim() || null,
       // Empty stays null, never 0: an unmeasured parameter is unknown, and a
       // zero would be a figure the laboratory never reported.
-      soil: Object.fromEntries(
+      ...Object.fromEntries(
         Object.entries(soil).map(([key, value]) => [key, value === "" ? null : Number(value)]),
       ),
       notes: analysisNotes.trim() || null,
@@ -206,18 +209,22 @@
       analysis_type_codes: [...checkedAnalysisTypes],
       substance_codes: substanceRows.filter((row) => row.code).map((row) => row.code),
     };
+    let savedId = editingAnalysisId;
     if (editingAnalysisId) {
       await invoke("update_analysis_record", {
         analysisRecordId: editingAnalysisId,
         update: payload,
       });
     } else {
-      await invoke("create_analysis_record", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_analysis_record", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideAnalysisForm();
     load();
+    await checkSaved("analysis_record", savedId);
   }
 
   function deleteAnalysis(record) {
@@ -272,7 +279,7 @@
     editingHarvestId = null;
   }
 
-  /// The row the harvest inspector is editing, so its delete button knows
+  /// The row the harvest panel is editing, so its delete button knows
   /// which record it is about. Null while creating.
   const editingHarvest = $derived(harvests.find((d) => d.record.id === editingHarvestId) ?? null);
 
@@ -307,18 +314,22 @@
       notes: harvestNotes.trim() || null,
       plots: submittedPlots(harvestPlots),
     };
+    let savedId = editingHarvestId;
     if (editingHarvestId) {
       await invoke("update_harvest_record", {
         harvestRecordId: editingHarvestId,
         update: payload,
       });
     } else {
-      await invoke("create_harvest_record", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_harvest_record", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideHarvestForm();
     load();
+    await checkSaved("harvest_record", savedId);
   }
 
   function deleteHarvest(record) {
@@ -582,6 +593,7 @@
               <TzCombobox
                 label={t("analysis.substance")}
                 items={substanceItems()}
+                catalogue
                 placeholder={t("analysis.substance_filter_hint")}
                 bind:value={row.code}
               />
@@ -604,51 +616,56 @@
             <legend>{t("analysis.soil_section")}</legend>
             <p class="detail">{t("analysis.soil_hint")}</p>
             <div class="form-grid">
-              <NumberInput label={t("analysis.soil_ph")} min={0} max={14} bind:value={soil.ph} />
+              <NumberInput
+                label={t("analysis.soil_ph")}
+                min={0}
+                max={14}
+                bind:value={soil.soil_ph}
+              />
               <NumberInput
                 label={t("analysis.soil_organic_matter")}
                 min={0}
                 max={100}
-                bind:value={soil.organic_matter_pct}
+                bind:value={soil.soil_organic_matter_pct}
               />
               <NumberInput
                 label={t("analysis.soil_p")}
                 min={0}
-                bind:value={soil.available_p_mg_kg}
+                bind:value={soil.soil_available_p_mg_kg}
               />
               <NumberInput
                 label={t("analysis.soil_k")}
                 min={0}
-                bind:value={soil.available_k_mg_kg}
+                bind:value={soil.soil_available_k_mg_kg}
               />
               <NumberInput
                 label={t("analysis.soil_n")}
                 min={0}
                 max={100}
-                bind:value={soil.total_n_pct}
+                bind:value={soil.soil_total_n_pct}
               />
               <NumberInput
                 label={t("analysis.soil_conductivity")}
                 min={0}
-                bind:value={soil.conductivity_ds_m}
+                bind:value={soil.soil_conductivity_ds_m}
               />
               <NumberInput
                 label={t("analysis.soil_sand")}
                 min={0}
                 max={100}
-                bind:value={soil.sand_pct}
+                bind:value={soil.soil_sand_pct}
               />
               <NumberInput
                 label={t("analysis.soil_silt")}
                 min={0}
                 max={100}
-                bind:value={soil.silt_pct}
+                bind:value={soil.soil_silt_pct}
               />
               <NumberInput
                 label={t("analysis.soil_clay")}
                 min={0}
                 max={100}
-                bind:value={soil.clay_pct}
+                bind:value={soil.soil_clay_pct}
               />
             </div>
           </fieldset>

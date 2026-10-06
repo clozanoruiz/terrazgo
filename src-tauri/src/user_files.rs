@@ -16,7 +16,8 @@
 //! Two shapes cover all callers:
 //!  * writes — [`write_user_file`] (in-memory bytes), or [`stage_dest`] +
 //!    [`copy_to_user_file`] when the producer needs a real path to write to
-//!    (SQLite's `VACUUM INTO`);
+//!    (SQLite's `VACUUM INTO`); both go through [`fill_user_file`], which
+//!    returns only once the bytes are in the file;
 //!  * reads — [`stage_user_source`], which passes plain paths through and
 //!    stages a URI into a private temp copy (rusqlite and the GPKG reader
 //!    need real paths). Staged copies are deleted on drop.
@@ -38,24 +39,77 @@ fn parse(path: &str) -> FilePath {
 }
 
 /// Write bytes to a save-dialog destination (overwriting is already confirmed
-/// by the dialog itself). Truncates: on Android the picker pre-creates the
-/// document, and a re-export over a longer previous file must not leave a
-/// tail of stale bytes.
+/// by the dialog itself).
 pub fn write_user_file(app: &AppHandle, dest: &str, bytes: &[u8]) -> io::Result<()> {
-    let mut opts = OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
-    let mut file = app.fs().open(parse(dest), opts)?;
-    file.write_all(bytes)
+    fill_user_file(app, dest, |file| file.write_all(bytes))
 }
 
 /// Stream an already-written local file (e.g. a verified backup snapshot) to
 /// a save-dialog destination.
 pub fn copy_to_user_file(app: &AppHandle, src: &Path, dest: &str) -> io::Result<u64> {
+    let mut input = std::fs::File::open(src)?;
+    let copied = fill_user_file(app, dest, |out| io::copy(&mut input, out))?;
+
+    // The destination is the one file on this path that nobody validates — the
+    // caller verified the STAGING snapshot and then streamed it here — so at
+    // minimum it must have received every byte.
+    let expected = input.metadata()?.len();
+    if copied != expected {
+        return Err(io::Error::other(format!(
+            "incomplete copy to the chosen destination: {copied} of {expected} bytes"
+        )));
+    }
+    Ok(copied)
+}
+
+/// Open a save-dialog destination, let `fill` write it, and return only once
+/// the bytes are in the file — the one way this module writes one, so no
+/// export can say it is saved early. Truncates: on Android the picker
+/// pre-creates the document, and a re-export over a longer previous file must
+/// not leave a tail of stale bytes.
+///
+/// **The `sync_all` is load-bearing, and it is the reason this function
+/// exists.** A write returning does not mean the bytes are in the file:
+/// Android's shared storage is FUSE-backed, so writes are queued and
+/// materialise afterwards, and `File::flush` is a no-op for a file — it forces
+/// nothing. Without the sync the caller reports success, and the UI says the
+/// file is saved while it is still filling in. Anyone reading the folder in
+/// that window — the farmer, a laptop over the cable, the picker itself — sees
+/// a truncated or empty file. That is what a 0-byte export in `Download/` is,
+/// and it is why an export that had in fact worked looked like a failure worth
+/// retrying. *Corrected 2026-10-04*: only the backup's copy synced; every other
+/// export — the record book, the spreadsheet, the SIEX file, the sync file —
+/// wrote without waiting.
+///
+/// What the sync costs is the device's, not ours, and it splits along whether
+/// the kernel supports **FUSE passthrough** (`source.android.com/docs/core/
+/// storage/fuse-passthrough`), which lets the kernel hand I/O to the lower
+/// filesystem instead of routing every request through MediaProvider. Measured
+/// 2026-09-05, same code, same 6 MB database:
+///
+/// | Device | Kernel | Passthrough | `sync_all` |
+/// | --- | --- | --- | --- |
+/// | Pixel 8a | 6.1, launched Android 14 | yes (`/mnt/pass_through` is f2fs) | **12 ms** (493 MB/s) |
+/// | Galaxy A22 | 4.14, launched Android 11 | no | **~12 s** (506 KB/s) |
+///
+/// Both set `persist.sys.fuse.passthrough.enable=true`; only one has a kernel
+/// that can honour it, because a device upgraded from Android 11 keeps its
+/// frozen kernel. So the sync is free on capable hardware and slow on the
+/// hardware that was always going to be slow — the bytes have to arrive either
+/// way, and all this changes is whether the app waits for them or lies. Buffer
+/// size is NOT the lever: 8 KiB and 1 MiB copies were within milliseconds of
+/// each other, because writeback chunking belongs to the kernel, not to us.
+fn fill_user_file<T>(
+    app: &AppHandle,
+    dest: &str,
+    fill: impl FnOnce(&mut std::fs::File) -> io::Result<T>,
+) -> io::Result<T> {
     let mut opts = OpenOptions::new();
     opts.write(true).create(true).truncate(true);
-    let mut out = app.fs().open(parse(dest), opts)?;
-    let mut input = std::fs::File::open(src)?;
-    io::copy(&mut input, &mut out)
+    let mut file = app.fs().open(parse(dest), opts)?;
+    let filled = fill(&mut file)?;
+    file.sync_all()?;
+    Ok(filled)
 }
 
 /// A private staging file in the app cache dir; deleted on drop (best-effort

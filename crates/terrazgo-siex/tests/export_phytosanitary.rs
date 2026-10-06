@@ -10,8 +10,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use terrazgo_siex::{SiexError, build_cuaderno, export_precheck};
 
 // ---------------------------------------------------------------------------
@@ -71,6 +71,41 @@ fn a_purely_non_chemical_actuation_exports_as_its_own_treatment() {
         entry.get("ProductosFito").is_none(),
         "a measure-only entry must not carry ProductosFito: {entry}"
     );
+}
+
+/// A basic substance used as measure 11, stated in kg/ha — one of the amounts
+/// Anexo V field 18 admits for a measure. The substance itself has no member in
+/// 3.11.4 (the 2027 model adds one, Anexo 03 field 366), so the entry is the
+/// measure alone and stays schema-valid; what was captured is not lost, it
+/// waits in `measure_basic_substance_code`.
+#[test]
+fn a_basic_substance_measure_exports_its_amount_and_nothing_the_schema_lacks() {
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    let mut record = non_chemical(&fx, "2026-05-04");
+    record.measure_code = Some("11".into());
+    record.measure_basic_substance_code = Some("28".into()); // Vinagre
+    record.measure_intensity_value = Some(2.5);
+    record.measure_intensity_unit_code = Some("kg_ha".into());
+    repo::insert_treatment_record(
+        &mut conn,
+        record,
+        vec![on_plot(&fx.wheat_plot_id, Some(&fx.wheat_crop_id), 4.0)],
+        None,
+    )
+    .unwrap();
+
+    let check = export_precheck(&conn, &fx.season_id, &fx.farm_id).unwrap();
+    assert!(check.is_clean(), "{check:?}");
+
+    let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
+    assert_schema_valid(&doc);
+    let measure = &treatment_activities(&doc)[0]["OtrasActuacionesFito"];
+    assert_eq!(measure["TipoMedida"], 11);
+    assert_eq!(measure["Cantidad"], 2.5);
+    assert_eq!(measure["Unidad"], 17); // UNIDADES_MEDIDA 17 = kg/ha
+    let members: Vec<&String> = measure.as_object().unwrap().keys().collect();
+    assert_eq!(members, ["Cantidad", "TipoMedida", "Unidad"]);
 }
 
 /// The mixed record — a spray AND a measure on one row, which the register

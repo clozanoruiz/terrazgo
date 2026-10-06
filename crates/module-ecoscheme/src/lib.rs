@@ -4,7 +4,7 @@
 //! Terrazgo eco-scheme module: grazing, cultural operations and soil covers.
 //!
 //! The record book has **three** decrees. RD 1311/2012 governs the
-//! phytosanitary registers (module-cue) and RD 1051/2022 the fertilisation,
+//! phytosanitary registers (module-phytosanitary) and RD 1051/2022 the fertilisation,
 //! plan de abonado and irrigation ones (module-fertilisation). RD 1054/2022
 //! anexo II closes its list of the cuaderno's contents with *"otros aspectos
 //! que se recojan en la respectiva normativa sectorial"*, and **RD 1048/2022**
@@ -45,10 +45,11 @@
 
 pub mod catalogue;
 pub mod db;
+pub mod duplicates;
 pub mod error;
 pub mod models;
 pub mod repository;
 pub mod siex;
 
-pub use db::{BACKUP_SHAPE, migration_set, migrations, open_in_memory};
+pub use db::{BACKUP_SHAPE, ROW_CAPTIONS, SYNC_SHAPE, migration_set, migrations, open_in_memory};
 pub use error::{EcoschemeError, Result};

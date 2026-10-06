@@ -32,6 +32,25 @@ function field({
   };
 }
 
+/// A <label> holding several text runs, some of them aria-hidden. Only the two
+/// methods `fieldLabel`'s fallback uses are modelled, and a clone is a deep
+/// enough copy that removing from it leaves the original alone.
+function labelOf(parts) {
+  const make = (own) => ({
+    get textContent() {
+      return own.map((p) => p.text).join("");
+    },
+    querySelectorAll: () =>
+      own
+        .filter((p) => p.hidden)
+        .map((p) => ({
+          remove: () => own.splice(own.indexOf(p), 1),
+        })),
+    cloneNode: () => make(own.map((p) => ({ ...p }))),
+  });
+  return make(parts.map((p) => ({ ...p })));
+}
+
 describe("invalidFields", () => {
   it("reports invalid controls in the order given, which is DOM order", () => {
     const problems = invalidFields([
@@ -73,6 +92,23 @@ describe("invalidFields", () => {
   it("falls back to the associated <label>, trimmed", () => {
     // The shape CataloguePicker's call sites use: <label><span>Especie</span>…
     const problems = invalidFields([field({ labels: [{ textContent: "\n  Especie\n" }] })]);
+    expect(problems[0].label).toBe("Especie");
+  });
+
+  it("leaves an aria-hidden mark out of the name it reports", () => {
+    // The required asterisk is aria-hidden, so the summary must name the field
+    // "Nombre completo" and not "Nombre completo*". `labelOf` below is the
+    // smallest faithful stand-in for a <label> with children: the fallback uses
+    // exactly cloneNode and querySelectorAll, and a clone's removals must not
+    // reach the original.
+    const label = labelOf([{ text: "Nombre completo" }, { text: "*", hidden: true }]);
+    const problems = invalidFields([field({ labels: [label] })]);
+    expect(problems[0].label).toBe("Nombre completo");
+    expect(label.textContent).toBe("Nombre completo*");
+  });
+
+  it("keeps a label that has no hidden part exactly as it reads", () => {
+    const problems = invalidFields([field({ labels: [labelOf([{ text: "  Especie  " }])] })]);
     expect(problems[0].label).toBe("Especie");
   });
 

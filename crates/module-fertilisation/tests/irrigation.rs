@@ -40,6 +40,7 @@ fn sample(fx: &CoreFixture) -> NewIrrigationRecord {
             irrigated_area_ha: Some(3.5),
         }],
         water_origins: vec![],
+        practices: vec![],
     }
 }
 
@@ -277,6 +278,91 @@ fn rejects_an_unknown_water_origin() {
     ));
 }
 
+// Good practices: FEGA `BUENAS_PRACTICAS_AMBITOS`, the ones marked "SI" under
+// "Ámbito Riego". The twin's `Riego.BuenasPracticasRiego` is Voluntario in
+// Anexo V 3.11 and becomes obligatorio condicionado "según normativa
+// autonómica" in the 2027 model (Anexo 03 field 481). No decree asks, so they
+// are captured and never demanded.
+
+#[test]
+fn records_the_good_practices_in_catalogue_order_and_never_demands_them() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let bare = repo::insert_irrigation_record(&mut conn, sample(&fx), None).unwrap();
+    assert!(bare.practices.is_empty());
+
+    let mut new = sample(&fx);
+    // 33 "Riego por aspersión nocturno", 23 "Riego localizado.", 33 again.
+    new.practices = vec!["33".into(), "23".into(), "33".into()];
+    let detail = repo::insert_irrigation_record(&mut conn, new, None).unwrap();
+    assert_eq!(detail.practices, vec!["23", "33"]);
+    let stored = repo::get_irrigation_record(&conn, &detail.record.id).unwrap();
+    assert_eq!(stored.practices, detail.practices);
+}
+
+#[test]
+fn refuses_no_practices_claimed_beside_a_practice() {
+    // "0" is "No realiza buenas prácticas", claimable in every ámbito — beside
+    // another code it says both that nothing was done and what was.
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let mut new = sample(&fx);
+    new.practices = vec!["0".into(), "23".into()];
+    assert!(matches!(
+        repo::insert_irrigation_record(&mut conn, new, None).unwrap_err(),
+        module_fertilisation::FertilisationError::Invalid("practices_contradict_none")
+    ));
+}
+
+#[test]
+fn a_removed_practice_leaves_a_logged_deletion() {
+    let mut conn = open_in_memory().unwrap();
+    let fx = fixture(&mut conn);
+    let mut new = sample(&fx);
+    new.practices = vec!["23".into()];
+    let created = repo::insert_irrigation_record(&mut conn, new, None).unwrap();
+    let row_id: String = conn
+        .query_row(
+            "SELECT id FROM irrigation_practice WHERE irrigation_record_id = ?1",
+            [&created.record.id],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    repo::update_irrigation_record(
+        &mut conn,
+        &created.record.id,
+        UpdateIrrigationRecord {
+            id: created.record.id.clone(),
+            irrigated_on: created.record.irrigated_on.clone(),
+            irrigation_end_date: None,
+            irrigation_method_code: created.record.irrigation_method_code.clone(),
+            volume_value: created.record.volume_value,
+            volume_unit_code: created.record.volume_unit_code.clone(),
+            water_nitric_n_mg_l: None,
+            water_soluble_p2o5_mg_l: None,
+            energy_type_code: None,
+            meter_number: None,
+            notes: None,
+            plots: vec![NewIrrigationPlot {
+                plot_id: fx.plot_a.clone(),
+                crop_id: None,
+                irrigated_area_ha: Some(3.5),
+            }],
+            water_origins: vec![],
+            practices: vec!["33".into()],
+        },
+        Some("user-1"),
+    )
+    .unwrap();
+
+    let (op, before, _) = last_change(&conn, "irrigation_practice", &row_id);
+    assert_eq!(op, "delete");
+    assert_eq!(before["practice_code"], "23");
+    let stored = repo::get_irrigation_record(&conn, &created.record.id).unwrap();
+    assert_eq!(stored.practices, vec!["33"]);
+}
+
 #[test]
 fn corrects_a_record_in_place_and_reconciles_its_plots() {
     // Fully correctable from the start, the `seed_treatment` condition: this
@@ -317,6 +403,7 @@ fn corrects_a_record_in_place_and_reconciles_its_plots() {
                 },
             ],
             water_origins: vec!["groundwater".into()],
+            practices: vec![],
         },
         Some("user-1"),
     )
@@ -381,6 +468,7 @@ fn a_removed_water_origin_leaves_a_logged_deletion() {
                 irrigated_area_ha: Some(3.5),
             }],
             water_origins: vec![],
+            practices: vec![],
         },
         Some("user-1"),
     )
@@ -429,21 +517,36 @@ fn lists_records_oldest_first() {
     assert_eq!(dates, vec!["2026-05-20", "2026-06-14", "2026-07-02"]);
 }
 
+/// Deleting a book deletes its irrigations, and bringing it back restores each one
+/// whole, the rows belonging to it included (docs/sync.md → Deleting a book
+/// with its records). Core finds the register in the aggregate map; this pins
+/// that it finds THIS one.
 #[test]
-fn a_season_holding_an_irrigation_reports_itself_in_use() {
-    // The shell chains this before deleting a season: every register is
-    // season-scoped, and hiding the season would hide its records.
+fn deleting_its_book_takes_an_irrigation_and_bringing_it_back_restores_it_whole() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
-    assert!(!repo::season_has_records(&conn, &fx.season_id).unwrap());
-
     let created = repo::insert_irrigation_record(&mut conn, sample(&fx), None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    let id = created.record.id.clone();
+    let before = serde_json::to_value(repo::get_irrigation_record(&conn, &id).unwrap()).unwrap();
 
-    // Soft-deleted records still count: their audit history is only reachable
-    // through the season they belong to.
-    repo::soft_delete_irrigation_record(&mut conn, &created.record.id, None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    assert_eq!(
+        terrazgo_core::repository::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        1
+    );
+    assert!(matches!(
+        repo::get_irrigation_record(&conn, &id),
+        Err(module_fertilisation::FertilisationError::NotFound)
+    ));
+
+    terrazgo_core::repository::restore_book(
+        &mut conn,
+        &fx.season_id,
+        &terrazgo_core::date::today_utc(),
+        None,
+    )
+    .unwrap();
+    let after = serde_json::to_value(repo::get_irrigation_record(&conn, &id).unwrap()).unwrap();
+    terrazgo_testkit::assert_restored(&before, &after);
 }
 
 #[test]
@@ -454,6 +557,7 @@ fn deleting_a_record_takes_its_children_with_it() {
     let fx = fixture(&mut conn);
     let mut new = sample(&fx);
     new.water_origins = vec!["surface".into()];
+    new.practices = vec!["23".into()];
     let created = repo::insert_irrigation_record(&mut conn, new, None).unwrap();
 
     conn.execute(
@@ -470,5 +574,8 @@ fn deleting_a_record_takes_its_children_with_it() {
             r.get(0)
         })
         .unwrap();
-    assert_eq!((plots, origins), (0, 0));
+    let practices: i64 = conn
+        .query_row("SELECT COUNT(*) FROM irrigation_practice", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!((plots, origins, practices), (0, 0, 0));
 }

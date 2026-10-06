@@ -195,7 +195,7 @@ pub struct FertilisationPlot {
 pub struct FertilisationRecordDetail {
     pub record: FertilisationRecord,
     pub plots: Vec<FertilisationPlot>,
-    /// `BUENAS_PRACTICAS_AMBITOS` codes in the "Fertilización" ámbito, stored
+    /// `BUENAS_PRACTICAS_AMBITOS` codes claimed on this fertilisation, stored
     /// verbatim. Required by the twin, absent from the printed model, so
     /// captured and never demanded.
     pub practices: Vec<String>,
@@ -411,6 +411,9 @@ pub struct IrrigationRecordDetail {
     /// `water_origin` codes; an array in the twin, because one irrigation can
     /// draw on more than one source.
     pub water_origins: Vec<String>,
+    /// `BUENAS_PRACTICAS_AMBITOS` codes claimed for this watering, sorted
+    /// numerically. Captured and never demanded.
+    pub practices: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -445,6 +448,8 @@ pub struct NewIrrigationRecord {
     pub plots: Vec<NewIrrigationPlot>,
     #[serde(default)]
     pub water_origins: Vec<String>,
+    #[serde(default)]
+    pub practices: Vec<String>,
 }
 
 /// Full-row update. `season_id` and `farm_id` are deliberately absent: an
@@ -477,4 +482,6 @@ pub struct UpdateIrrigationRecord {
     pub plots: Vec<NewIrrigationPlot>,
     #[serde(default)]
     pub water_origins: Vec<String>,
+    #[serde(default)]
+    pub practices: Vec<String>,
 }

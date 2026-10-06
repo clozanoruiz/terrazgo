@@ -10,6 +10,16 @@ export default {
   // tècnic, precedit d'internal_intro per orientar l'usuari normal.
   "error.internal_intro": "S'ha produït un error intern:",
   "error.not_found": "El registre no existeix.",
+  "error.invalid.conflict_version_gone":
+    "Un altre dispositiu ja ha decidit sobre aquest registre. Torneu a obrir-lo per veure com ha quedat.",
+  "error.invalid.register_not_in_conflict": "Aquest registre ja no té versions en espera.",
+  "error.invalid.duplicate_pair_one_record": "Un registre no pot ser duplicat de si mateix.",
+  "error.invalid.duplicate_kept_gone":
+    "El registre que volíeu conservar ja s'ha eliminat, potser des d'un altre dispositiu. Torneu a obrir la llista per veure com ha quedat.",
+  "error.invalid.duplicate_restore_refused":
+    "Aquest registre ja no es pot recuperar des d'aquí: s'ha recuperat o modificat des d'un altre dispositiu. Torneu a obrir la llista per veure com ha quedat.",
+  "error.invalid.sync_peer_is_this_device":
+    "No es pot retirar el dispositiu que esteu fent servir.",
   "error.invalid.unknown_link": "Aquest enllaç no està disponible en aquesta versió.",
   "error.invalid.empty_name": "El nom no pot estar buit.",
   "error.invalid.operator_not_found": "L'operador seleccionat ja no existeix.",
@@ -31,8 +41,53 @@ export default {
   "error.invalid.unknown_substance_code":
     "La substància indicada no és al catàleg oficial d'autoritzacions excepcionals.",
   "error.invalid.nonpositive_area": "La superfície ha de ser més gran que zero.",
-  "error.invalid.season_in_use":
-    "No es pot suprimir una campanya amb cultius o tractaments registrats. Elimineu-ne abans el contingut.",
+  "error.invalid.season_name_taken":
+    "Aquesta explotació ja té un quadern amb aquest nom. Doneu-li un altre nom per distingir-los.",
+  "error.invalid.season_dates_taken":
+    "Aquesta explotació ja té un quadern amb aquestes mateixes dates. Obriu-lo, o canvieu-ne les dates.",
+  "error.invalid.season_restore_name_taken":
+    "Un altre quadern d'aquesta explotació ja es diu així. Per recuperar aquest, canvieu abans el nom de l'altre; o passeu-hi els registres en lloc de recuperar-lo.",
+  "error.invalid.book_merge_same_book": "Un quadern no es pot unir amb si mateix.",
+  "error.invalid.book_merge_other_farm":
+    "Els registres només poden passar a un altre quadern de la mateixa explotació.",
+  "error.invalid.book_merge_conflicts_waiting":
+    "En aquest quadern hi ha registres escrits alhora en dos dispositius que esperen la vostra decisió. Decidiu-los a la pàgina «Estat» abans d'unir-lo amb un altre: en unir-los es resoldrien sense que ningú els veiés.",
+  "error.invalid.book_merge_removals_waiting":
+    "En aquest quadern, dues persones van eliminar cadascuna la còpia contrària d'un duplicat, i l'operació ja no és al quadern. Recupereu-ne una de les dues a la pàgina «Estat» abans d'unir-lo amb un altre.",
+  "error.invalid.book_delete_conflicts_waiting":
+    "Aquest quadern, o alguna cosa que conté, es va escriure alhora en dos dispositius i espera la vostra decisió. Decidiu-ho a la pàgina «Estat» abans de suprimir-lo: en suprimir-lo es resoldria sense que ningú ho veiés.",
+  "error.invalid.book_delete_removals_waiting":
+    "En aquest quadern, dues persones van eliminar cadascuna la còpia contrària d'un duplicat, i l'operació ja no és al quadern. Recupereu-ne una de les dues a la pàgina «Estat» abans de suprimir-lo.",
+  "error.invalid.book_restore_conflicts_waiting":
+    "Aquest quadern, o alguna cosa que conté, es va escriure alhora en dos dispositius i espera la vostra decisió. Decidiu-ho a la pàgina «Estat» abans de recuperar-lo: en recuperar-lo es resoldria sense que ningú ho veiés.",
+  "error.invalid.stray_conflicts_waiting":
+    "Algun d'aquests registres es va escriure alhora en dos dispositius i espera la vostra decisió. Decidiu-lo a la pàgina «Estat» abans de moure'ls: cada versió pot ser a un quadern diferent.",
+  "error.invalid.season_label_collision":
+    "El fitxer porta un quadern de {farm} anomenat «{label}», i en aquest dispositiu ja n'hi ha un altre amb aquest nom: tots dos es van crear en dispositius diferents abans de sincronitzar. Canvieu el nom del quadern «{label}» d'aquest dispositiu i torneu a importar el fitxer. Si eren la mateixa campanya, després uniu-los des de la pàgina de qualsevol dels dos, amb «Uneix amb un altre quadern…»: els registres que es repeteixin apareixeran com a possibles duplicats perquè decidiu quin conserveu.",
+  "error.invalid.bundle_incomplete":
+    "El fitxer de sincronització està incomplet: es va copiar a mitges o es va tallar pel camí. Torneu a exportar-lo a l'altre dispositiu i copieu-lo sencer.",
+  "error.invalid.bundle_unreadable":
+    "Aquest fitxer no és una sincronització de Terrazgo, o està malmès.",
+  "error.invalid.bundle_format_unsupported":
+    "Aquest fitxer de sincronització el va escriure una versió més nova de Terrazgo. Actualitzeu aquest dispositiu per poder llegir-lo.",
+  "error.invalid.bundle_schema_mismatch":
+    "Els dos dispositius no tenen la mateixa versió de Terrazgo. Actualitzeu el que vagi endarrerit: els canvis solts no es poden convertir d'una versió a una altra, encara que una còpia de seguretat sencera sí.",
+  "error.invalid.bundle_skips_changes":
+    "Aquest fitxer es va preparar per a un altre dispositiu i deixa fora canvis que aquest encara no té, de manera que no s'ha aplicat res. Al dispositiu que el va exportar, importeu primer un fitxer d'aquest i torneu a exportar: el fitxer nou portarà tot el que falta.",
+  "error.invalid.device_identity_shared":
+    "Dos dispositius escriuen amb la mateixa identitat, i les seves anotacions ja no coincideixen. Sol passar en copiar la carpeta de dades de l'aplicació en lloc d'instal·lar-la. Restaureu-ne un des d'una còpia de seguretat: així rep una identitat nova.",
+  "error.invalid.peer_clock_ahead":
+    "El rellotge de l'altre dispositiu va més de {hours} h avançat respecte a aquest. Corregiu-lo abans de sincronitzar: si va tan desviat, les dates que aquell dispositiu hagi anotat també seran incorrectes, i això afecta el quadern.",
+  "error.invalid.sync_not_paired":
+    "Aquest dispositiu encara no està aparellat amb el que va crear el fitxer. Aparelleu-los perquè comparteixin quadern: després, aquest mateix fitxer s'aplicarà sense tornar a copiar-lo.",
+  "error.invalid.sync_group_mismatch":
+    "Aquest fitxer ve d'un grup de dispositius diferent del d'aquest. Si tots dos són vostres els podeu unir, però aquest dispositiu deixarà el grup on és ara.",
+  "error.invalid.sync_group_invalid":
+    "L'identificador de grup del fitxer no és vàlid: el fitxer està malmès.",
+  "error.invalid.register_has_no_head":
+    "Dos dispositius escriuen amb la mateixa identitat, perquè es va copiar la carpeta de dades de l'aplicació en lloc d'instal·lar-la. Fins que un d'ells no es restauri des d'una còpia de seguretat —cosa que li dona una identitat nova—, les seves anotacions no es poden combinar.",
+  "error.invalid.season_not_on_farm":
+    "La parcel·la i la campanya pertanyen a explotacions diferents.",
   "error.invalid.missing_distance":
     "Indiqueu la distància a la parcel·la: és obligatòria quan la captació queda fora.",
   "error.invalid.water_point_distance_inside":
@@ -83,6 +138,8 @@ export default {
     "La parcel·la no té una referència SIGPAC completa — ompliu abans les set parts.",
   "error.invalid.zone_status_invalid":
     "El resultat intern de la comprovació de zones no era utilitzable.",
+  "error.invalid.alert_deadline_mismatch":
+    "No s'ha pogut marcar l'alerta: la data rebuda no correspon al seu tipus. Torneu a obrir la pàgina «Estat».",
   "error.invalid.quantity_unit_mismatch":
     "La unitat no correspon al que s'ha tractat: tones per a producte vegetal, m\u00b3 per a locals i vehicles.",
   "error.invalid.invalid_product_quantity":
@@ -158,6 +215,8 @@ export default {
   "error.invalid.unknown_measure_code": "La mesura indicada no figura al catàleg oficial.",
   "error.invalid.invalid_intensity":
     "La intensitat s'ha d'indicar amb la seva unitat (trampes, difusors…) i ser més gran que zero.",
+  "error.invalid.basic_substance_without_its_measure":
+    "La substància bàsica només s'indica amb la mesura «Usos de sustancias básicas».",
 
   // Ecorègims — 9.1 pasturatge extensiu (RD 1048/2022 art. 30.2 ter).
   "error.invalid.practice_not_grazing":

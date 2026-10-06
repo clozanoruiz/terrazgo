@@ -11,7 +11,7 @@
 //!
 //! A Rust struct rather than a dictionary file: a missing translation is then a
 //! COMPILE error, which is stronger than the key-parity contract test the
-//! frontend dictionaries need (`src-tauri/tests/i18n_contract.rs`), and serde
+//! frontend dictionaries need (`src-tauri/tests/contracts/i18n_contract.rs`), and serde
 //! turns the same struct into the template's `sys.inputs.labels` for free.
 //!
 //! # What does NOT live here
@@ -753,6 +753,8 @@ pub struct Values {
     pub unit_diffusers_ha: &'static str,
     pub unit_units: Plural,
     pub unit_units_ha: &'static str,
+    pub unit_units_m2: &'static str,
+    pub unit_net_m2_ha: &'static str,
     pub justification_threshold: &'static str,
     pub justification_monitoring: &'static str,
     pub justification_dss: &'static str,
@@ -866,7 +868,7 @@ pub struct Values {
     pub operation_mowing: &'static str,
     pub operation_brush_cutting: &'static str,
     pub operation_drainage: &'static str,
-    pub operation_pruning: &'static str,
+    pub operation_green_pruning_with_cleaning: &'static str,
     pub operation_thinning: &'static str,
     pub operation_staking: &'static str,
     pub operation_grafting: &'static str,
@@ -1141,7 +1143,14 @@ impl Labels {
             "diffusers_ha" => self.value.unit_diffusers_ha,
             "units" => self.value.unit_units.select(count),
             "units_ha" => self.value.unit_units_ha,
-            other => other,
+            "units_m2" => self.value.unit_units_m2,
+            "net_m2_ha" => self.value.unit_net_m2_ha,
+            // The amounts and plain areas a measure is stated in (kg, kg/ha,
+            // m²) are symbols, the same in every language.
+            other => match crate::unit_symbol(other) {
+                "" => other,
+                symbol => symbol,
+            },
         }
     }
 
@@ -1220,7 +1229,7 @@ impl Labels {
             "mowing" => self.value.operation_mowing,
             "brush_cutting" => self.value.operation_brush_cutting,
             "drainage" => self.value.operation_drainage,
-            "pruning" => self.value.operation_pruning,
+            "green_pruning_with_cleaning" => self.value.operation_green_pruning_with_cleaning,
             "thinning" => self.value.operation_thinning,
             "staking" => self.value.operation_staking,
             "grafting" => self.value.operation_grafting,
@@ -1876,6 +1885,8 @@ static ES: Labels = Labels {
             other: "unidades",
         },
         unit_units_ha: "unidades/ha",
+        unit_units_m2: "unidades/m²",
+        unit_net_m2_ha: "m² de malla/ha",
         justification_threshold: "Superación de umbrales",
         justification_monitoring: "Monitorización",
         justification_dss: "Sistema de apoyo a la toma de decisión (DSS)",
@@ -1956,9 +1967,9 @@ static ES: Labels = Labels {
         operation_mowing: "Siega",
         operation_brush_cutting: "Desbroce",
         operation_drainage: "Mantenimiento del drenaje",
-        operation_pruning: "Poda",
+        operation_green_pruning_with_cleaning: "Poda en verde, incluida la limpieza de tallos, chupones y varetas",
         operation_thinning: "Aclareo",
-        operation_staking: "Entutorado",
+        operation_staking: "Entutorado, guiado y atado de tallos",
         operation_grafting: "Injerto",
         operation_pruning_removal: "Eliminación de restos de poda",
         operation_green_pruning: "Poda en verde",
@@ -2599,6 +2610,8 @@ static CA: Labels = Labels {
             other: "unitats",
         },
         unit_units_ha: "unitats/ha",
+        unit_units_m2: "unitats/m²",
+        unit_net_m2_ha: "m² de malla/ha",
         justification_threshold: "Superació de llindars",
         justification_monitoring: "Monitoratge",
         justification_dss: "Sistema de suport a la presa de decisió (DSS)",
@@ -2679,9 +2692,9 @@ static CA: Labels = Labels {
         operation_mowing: "Sega",
         operation_brush_cutting: "Esbrossada",
         operation_drainage: "Manteniment del drenatge",
-        operation_pruning: "Poda",
+        operation_green_pruning_with_cleaning: "Poda en verd, inclosa la neteja de tiges, xucladors i vergues",
         operation_thinning: "Aclarida",
-        operation_staking: "Entutorat",
+        operation_staking: "Entutorat, guiatge i lligat de tiges",
         operation_grafting: "Empelt",
         operation_pruning_removal: "Eliminació de restes de poda",
         operation_green_pruning: "Poda en verd",
@@ -2924,7 +2937,7 @@ mod tests {
             "mowing",
             "brush_cutting",
             "drainage",
-            "pruning",
+            "green_pruning_with_cleaning",
             "thinning",
             "staking",
             "grafting",
@@ -3009,6 +3022,29 @@ mod tests {
         assert_eq!(es.intensity_unit("traps", 1.5), "trampas");
         // A rate is not a counted noun and never inflects.
         assert_eq!(es.intensity_unit("traps_ha", 1.0), "trampas/ha");
+    }
+
+    /// Every unit a measure can be stated in prints as words or a symbol —
+    /// never as its code, which the fallback would otherwise leave in a legal
+    /// document.
+    #[test]
+    fn every_measure_unit_prints_in_every_language() {
+        let conn = terrazgo_core::open_in_memory().unwrap();
+        for unit in terrazgo_core::repository::list_intensity_units(&conn).unwrap() {
+            for language in ReportLanguage::ALL {
+                let printed = language.labels().intensity_unit(&unit.code, 2.0);
+                // A word of its own, or a known symbol — "kg" is both its
+                // code and its symbol, which is not the fallback at work.
+                assert!(
+                    printed != unit.code || crate::unit_symbol(&unit.code) == printed,
+                    "{} in {language:?} prints as its bare code",
+                    unit.code
+                );
+            }
+        }
+        let es = ReportLanguage::Es.labels();
+        assert_eq!(es.intensity_unit("kg_ha", 2.0), "kg/ha");
+        assert_eq!(es.intensity_unit("m2", 2.0), "m²");
     }
 
     /// Excel refuses tab names over 31 characters; the engine truncates, but a

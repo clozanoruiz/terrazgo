@@ -20,6 +20,7 @@
   // Contract mirrors NumberInput's: a string in, a string out, "" for unset.
   import { t } from "../i18n.js";
   import { refusalStore } from "./formRefusal.js";
+  import RequiredMark from "./RequiredMark.svelte";
 
   let {
     value = $bindable(""),
@@ -100,7 +101,7 @@
 
 <div class="tz-field {klass}">
   {#if label}
-    <label class="tz-label" for={uid}>{label}</label>
+    <label class="tz-label" for={uid}>{label}<RequiredMark {required} /></label>
   {/if}
 
   <input
@@ -110,9 +111,11 @@
     {value}
     {name}
     {maxlength}
+    data-tz-label={label}
     {placeholder}
     {disabled}
     class="tz-text"
+    aria-required={required || undefined}
     class:tz-invalid={(showError && !!error) || !!refusal}
     aria-invalid={(showError && !!error) || !!refusal}
     aria-describedby={hint ? `${uid}-hint` : undefined}

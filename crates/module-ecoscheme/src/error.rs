@@ -34,6 +34,30 @@ pub enum EcoschemeError {
     #[error("catalogue data error: {0}")]
     Catalogue(String),
 
+    /// Mirrors `CoreError::Stamp` (a write could not be stamped for the sync
+    /// log — a defect of the connection's opener or of the clock, never input).
+    #[error("change stamp error: {0}")]
+    Stamp(&'static str),
+
+    /// Mirrors `CoreError::ShapeViolation` (a logged row the aggregate map
+    /// refuses — always a code defect).
+    #[error("sync shape violation: {0}")]
+    ShapeViolation(String),
+
+    /// Mirrors `CoreError::PeerClockAhead` (an incoming bundle stamped further
+    /// ahead than the merge may adopt). Nothing in this crate can raise it —
+    /// only the sync transport applies bundles — but the conversion below is
+    /// variant-preserving and total, which is what keeps a new core variant a
+    /// compile error here rather than a silent reshaping.
+    #[error("{peer}'s clock is {ahead_ms} ms ahead of this device")]
+    PeerClockAhead { peer: String, ahead_ms: i64 },
+
+    /// Mirrors `CoreError::SeasonLabelCollision` (an incoming book would take a
+    /// name already in use on this device). Raised only by the sync transport,
+    /// and here for the same reason as `PeerClockAhead`.
+    #[error("{farm}'s book {label} would take a name already in use on this device")]
+    SeasonLabelCollision { farm: String, label: String },
+
     #[error("plot {plot_id} is not on farm {farm_id}")]
     PlotNotOnFarm { plot_id: String, farm_id: String },
 
@@ -45,7 +69,7 @@ pub enum EcoschemeError {
 
 /// Variant-preserving conversion from the core crate's error, so `?` works on
 /// `terrazgo-core` calls (date maths, audit helpers) without changing what
-/// callers and tests match on — the `From<CoreError> for CueError` precedent.
+/// callers and tests match on — the `From<CoreError> for PhytosanitaryError` precedent.
 impl From<terrazgo_core::CoreError> for EcoschemeError {
     fn from(e: terrazgo_core::CoreError) -> Self {
         use terrazgo_core::CoreError;
@@ -58,6 +82,14 @@ impl From<terrazgo_core::CoreError> for EcoschemeError {
             CoreError::InvalidDate(d) => EcoschemeError::InvalidDate(d),
             CoreError::Invalid(msg) => EcoschemeError::Invalid(msg),
             CoreError::Catalogue(msg) => EcoschemeError::Catalogue(msg),
+            CoreError::Stamp(msg) => EcoschemeError::Stamp(msg),
+            CoreError::ShapeViolation(msg) => EcoschemeError::ShapeViolation(msg),
+            CoreError::PeerClockAhead { peer, ahead_ms } => {
+                EcoschemeError::PeerClockAhead { peer, ahead_ms }
+            }
+            CoreError::SeasonLabelCollision { farm, label } => {
+                EcoschemeError::SeasonLabelCollision { farm, label }
+            }
         }
     }
 }
@@ -82,7 +114,21 @@ impl terrazgo_core::Classify for EcoschemeError {
             | EcoschemeError::Migration(_)
             | EcoschemeError::Json(_)
             | EcoschemeError::Io(_)
-            | EcoschemeError::Catalogue(_) => ("internal".into(), json!({})),
+            | EcoschemeError::Catalogue(_)
+            | EcoschemeError::Stamp(_)
+            | EcoschemeError::ShapeViolation(_) => ("internal".into(), json!({})),
+            EcoschemeError::SeasonLabelCollision { farm, label } => (
+                "invalid.season_label_collision".into(),
+                json!({ "farm": farm, "label": label }),
+            ),
+            EcoschemeError::PeerClockAhead { peer, ahead_ms } => (
+                "invalid.peer_clock_ahead".into(),
+                json!({
+                    "peer": peer,
+                    "ahead_ms": ahead_ms,
+                    "hours": ahead_ms / (60 * 60 * 1000),
+                }),
+            ),
         }
     }
 }

@@ -75,14 +75,17 @@ const LINKS: &[(&str, &str)] = &[
     // --- the licences of the libraries the About panel lists
     //
     // SPDX's canonical page rather than each library's own repository: the
-    // panel names 34 libraries under SIX licences, so linking the licence
-    // costs six entries here where linking each project would cost 34 — and
-    // "a link to their licence" is answered better by the licence's own text
-    // than by a repository the reader must then search.
+    // panel lists dozens of libraries under a handful of licences, so linking
+    // the licence costs one entry per licence where linking each project would
+    // cost one per library — and "a link to their licence" is answered better
+    // by the licence's own text than by a repository the reader must then
+    // search.
     //
     // The id is derived from the SPDX identifier by `licenceLinkId` in
-    // `src/lib/thirdParty.js`, and `tests/third_party.rs` checks that every
-    // licence the panel names resolves to an entry here.
+    // `src/lib/thirdParty.js`, and `tests/contracts/third_party.rs` checks
+    // that every licence the panel shows resolves to an entry here. Only the
+    // licences it SHOWS: a dual-licensed library is shown under the one option
+    // taken, so the Unlicense that csv and jiff also offer has no entry.
     ("spdx_mit", "https://spdx.org/licenses/MIT.html"),
     (
         "spdx_apache_2_0",
@@ -97,7 +100,6 @@ const LINKS: &[(&str, &str)] = &[
         "spdx_unicode_3_0",
         "https://spdx.org/licenses/Unicode-3.0.html",
     ),
-    ("spdx_unlicense", "https://spdx.org/licenses/Unlicense.html"),
     // Not package licences: the embedded fonts and the bundled SQLite
     // amalgamation, which ship inside the binary rather than as dependencies.
     ("spdx_ofl_1_1", "https://spdx.org/licenses/OFL-1.1.html"),

@@ -26,6 +26,7 @@
   import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import DateInput from "./DateInput.svelte";
@@ -37,8 +38,9 @@
   import TzWorkspace from "./TzWorkspace.svelte";
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
+  import { shownPractices, togglePractice } from "./practiceSelection.js";
 
-  let { farmId, seasonId, plots, crops } = $props();
+  let { farmId, seasonId, countryCode, plots, crops } = $props();
 
   // Session-wide reference data, read from the module instead of drilled
   // through every parent (lib/lookups.svelte.js).
@@ -48,12 +50,18 @@
 
   let records = $state([]);
   let loading = $state(true);
+  // FEGA's good practices: every one listed, those marked for irrigation
+  // offered (module-fertilisation's `irrigation_practices`).
+  let practiceOptions = $state([]);
 
   load();
 
   function load() {
     run(async () => {
-      records = await invoke("list_irrigation_records", { seasonId, farmId });
+      [records, practiceOptions] = await Promise.all([
+        invoke("list_irrigation_records", { seasonId, farmId }),
+        invoke("list_irrigation_practices", { countryCode }),
+      ]);
     }).finally(() => (loading = false));
   }
 
@@ -93,6 +101,15 @@
   let notes = $state("");
   let plotRows = $state([emptyPlotRow()]);
   let chosenOrigins = $state([]);
+  let chosenPractices = $state([]);
+  // What the list draws: the practices it may offer, plus every one the record
+  // already claims (see shownPractices).
+  const practiceList = $derived(shownPractices(practiceOptions, chosenPractices));
+  const practicesSummary = $derived(
+    chosenPractices.length === 0
+      ? t("irrigation.practices_none")
+      : t("irrigation.practices_selected", { count: chosenPractices.length }),
+  );
 
   function showForm(detail = null) {
     editingId = detail?.record.id ?? null;
@@ -114,6 +131,7 @@
         }))
       : [emptyPlotRow()];
     chosenOrigins = [...(detail?.water_origins ?? [])];
+    chosenPractices = [...(detail?.practices ?? [])];
     formOpen = true;
   }
 
@@ -122,7 +140,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
 
@@ -166,20 +184,25 @@
           irrigated_area_ha: optionalNumber(row.areaHa),
         })),
       water_origins: chosenOrigins,
+      practices: chosenPractices,
     };
 
+    let savedId = editingId;
     if (editingId) {
       await invoke("update_irrigation_record", {
         irrigationRecordId: editingId,
         update: { ...payload, id: editingId },
       });
     } else {
-      await invoke("create_irrigation_record", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_irrigation_record", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideForm();
     load();
+    await checkSaved("irrigation_record", savedId);
   }
 
   function remove(record) {
@@ -345,6 +368,32 @@
             {t("treatment.add_plot")}
           </button>
         </fieldset>
+        <!-- Optional, and on no printed page: closed, with the claim count on
+             the summary — the fertilisation form's disclosure. -->
+        {#if practiceOptions.length > 0}
+          <fieldset class="subsection">
+            <legend>{t("irrigation.practices_section")}</legend>
+            <details class="practices">
+              <summary>{practicesSummary}</summary>
+              <p class="detail">{t("irrigation.practices_hint")}</p>
+              <div class="checkbox-list stacked practices-list">
+                {#each practiceList.shown as practice (practice.code)}
+                  <TzCheckbox
+                    label={practice.name}
+                    checked={chosenPractices.includes(practice.code)}
+                    onchange={(next) =>
+                      (chosenPractices = togglePractice(chosenPractices, practice.code, next))}
+                  />
+                {/each}
+              </div>
+              {#if practiceList.unknown}
+                <p class="detail">
+                  {t("form.catalogue_code_unknown", { settings: t("nav.settings") })}
+                </p>
+              {/if}
+            </details>
+          </fieldset>
+        {/if}
       </TzForm>
     {/snippet}
 
@@ -356,3 +405,21 @@
     {/snippet}
   </TzWorkspace>
 {/if}
+
+<style>
+  /* Capped so an optional section cannot push the save button off the screen;
+     it scrolls inside itself instead (the fertilisation form's rule). */
+  .practices-list {
+    max-height: 18rem;
+    overflow-y: auto;
+    overscroll-behavior-y: none;
+    padding-right: var(--space-2);
+  }
+
+  .practices summary {
+    padding: var(--space-1) 0;
+    color: var(--muted);
+    font-size: 0.875rem;
+    cursor: pointer;
+  }
+</style>

@@ -11,10 +11,11 @@
 //! re-derived offline, so they are user data: `record_change`-logged, synced,
 //! in backups (the 2026-07-05 decision, unlike alerts).
 
-use crate::audit::{log_delete, log_insert};
+use crate::audit::{ChangeStamp, begin, log_delete, log_insert};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{NewZoneFlag, ZoneFlag};
+use crate::sync::{ZONE_FLAG_SLOT, slot_id_of};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
@@ -34,7 +35,7 @@ pub fn replace_zone_flags(
             return Err(CoreError::Invalid("zone_status_invalid"));
         }
     }
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     tx.query_row(
         "SELECT 1 FROM plot WHERE id = ?1 AND deleted_at IS NULL",
         [plot_id],
@@ -44,9 +45,10 @@ pub fn replace_zone_flags(
     .ok_or(CoreError::NotFound)?;
 
     let now = now_utc_iso();
+    // One change set for the whole check, and one register per zone type in it:
+    // the slot is the UNIQUE index's key, so each type is replaced on its own.
     let mut stored = Vec::with_capacity(flags.len());
     for flag in flags {
-        replace_active(&tx, plot_id, &flag.zone_type_code, campaign, source, actor)?;
         let row = ZoneFlag {
             id: Uuid::now_v7().to_string(),
             plot_id: plot_id.to_string(),
@@ -61,6 +63,8 @@ pub fn replace_zone_flags(
             updated_at: now.clone(),
             deleted_at: None,
         };
+        let stamp = tx.register("plot_zone_flag", &slot_id_of(&row, ZONE_FLAG_SLOT)?, None)?;
+        replace_active(&tx, plot_id, &row.zone_type_code, campaign, source, &stamp)?;
         tx.execute(
             "INSERT INTO plot_zone_flag
                (id, plot_id, zone_type_code, campaign, status, coverage_pct, detail,
@@ -80,7 +84,7 @@ pub fn replace_zone_flags(
                 row.updated_at
             ],
         )?;
-        log_insert(&tx, "plot_zone_flag", &row.id, None, actor, &row)?;
+        log_insert(&tx, &stamp, "plot_zone_flag", &row.id, &row)?;
         stored.push(row);
     }
     tx.commit()?;
@@ -162,7 +166,7 @@ fn replace_active(
     zone_type_code: &str,
     campaign: i64,
     source: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let current = tx
         .query_row(
@@ -184,10 +188,9 @@ fn replace_active(
         )?;
         log_delete(
             tx,
+            stamp,
             "plot_zone_flag",
             &before.id,
-            None,
-            actor,
             &before,
             Some(&after),
         )?;

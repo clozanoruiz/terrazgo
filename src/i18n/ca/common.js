@@ -12,25 +12,31 @@ export default {
   "format.hint":
     "Decideix si els nombres i les dates segueixen la configuració regional del dispositiu o l'idioma triat a dalt. El quadern imprès no canvia: s'imprimeix sempre en l'idioma de l'explotació.",
   "app.subtitle": "Gestió de l'explotació",
-  "status.aria": "Estat de l'aplicació",
-  "status.database": "Base de dades",
-  "status.schema_version": "Versió de l'esquema",
-  "status.app_version": "Versió de l'aplicació",
   "status.integrity.failed": "La base de dades està malmesa.",
   "status.integrity.restore":
     "Detectat en la comprovació del {date}. Restaureu una còpia de seguretat des de Configuració → Importa una còpia de seguretat.",
   "actions.aria": "Accions",
-  "actions.refresh": "Actualitza les alertes",
   "actions.seed": "Carrega dades de demostració",
   "actions.ack": "Vist",
   "actions.dismiss": "Descarta",
   "alerts.title": "Alertes actives",
   "alerts.empty": "No hi ha alertes actives.",
+  "alerts.unavailable":
+    "No s'han pogut comprovar algunes alertes ({sources}). La llista pot estar incompleta.",
+  "alerts.unavailable_hint":
+    "Actualitzeu l'aplicació; si l'avís continua, informeu de l'error i incloeu-hi el detall tècnic.",
+  "alerts.unavailable_detail": "Detall tècnic",
+  "alerts.unchecked.title": "No s'ha pogut comprovar: {kind}",
+  "alerts.unchecked.value": "Valor no vàlid «{value}»",
+  "alerts.unchecked.fix": "Corregiu-lo a {place}.",
+  "alerts.unchecked.fix_generic": "Corregiu-lo a la fitxa del registre.",
+  "alert.source.core": "zones de les parcel·les",
+  "alert.source.phytosanitary": "tractaments fitosanitaris",
 
   // Etiquetes dels codis de l'esquema (alert.alert_type_code).
   "alert.type.phi_window": "Termini de seguretat en curs",
-  "alert.type.licence_expiry": "Carnet d'aplicador a punt de caducar",
-  "alert.type.itv_expiry": "ITV de maquinària propera",
+  "alert.type.licence_expiry": "Caducitat del carnet d'aplicador",
+  "alert.type.itv_expiry": "Inspecció (ITV) de la maquinària",
   "alert.type.nitrate_zone":
     "Parcel·la en zona vulnerable als nitrats — registre de fertilització obligatori",
   "alert.type.phyto_zone": "Parcel·la en zona de restricció fitosanitària",
@@ -38,12 +44,49 @@ export default {
   "alert.status.active": "activa",
   "alert.status.acknowledged": "vista",
 
+  // Quan, a la targeta de l'alerta. Una sola frase per a les tres alertes amb
+  // data: diu el límit, i el títol ja diu de quin límit es tracta. Les de zona no
+  // porten data — la seva condició no caduca (alert.standing).
+  "alert.until": "Fins al {date}",
+  "alert.overdue_since": "Va vèncer el {date}",
+  "alert.standing": "Condició permanent",
+
   // Etiquetes dels noms de taula de l'esquema (alert.subject_table).
+  "entity.active_substance": "substància activa",
+  "entity.farm": "explotació",
+  "entity.season": "campanya",
+  "entity.crop": "conreu",
+  "entity.advisor": "assessor",
+  "entity.premises": "local",
+  "entity.product": "producte",
+  "entity.user_profile": "perfil",
+  "entity.sync_peer": "dispositiu",
+  "entity.alert_acknowledgement": "alerta atesa",
+  "entity.duplicate_verdict": "decisió sobre un possible duplicat",
+  "entity.purged_register": "registre esborrat definitivament",
+  "entity.sowing_record": "sembra",
+  "entity.harvest_record": "collita",
+  "entity.non_field_treatment": "tractament fora de parcel·la",
+  "entity.seed_treatment": "tractament de llavor",
+  "entity.analysis_record": "anàlisi",
+  "entity.irrigation_record": "reg",
+  "entity.fertilisation_record": "fertilització",
+  "entity.fertilisation_plan": "pla d'adobat",
+  "entity.fertiliser_material": "material fertilitzant",
+  "entity.grazing_record": "pasturatge",
+  "entity.cultural_operation": "tasca de conreu",
+  "entity.soil_cover": "coberta del sòl",
+  "entity.plot_water_point": "captació d'aigua",
+  "entity.plot_zone_flag": "zona de la parcel·la",
+  "entity.plot_water_declaration": "declaració de captacions",
+  "entity.geo_feature": "geometria",
+  "entity.farm_advisor": "assessor de l'explotació",
+  "entity.register_declaration": "declaració de registre",
+  "entity.export_alias": "referència d'exportació",
   "entity.treatment_record": "tractament",
   "entity.operator": "operador",
   "entity.machinery": "maquinària",
   "entity.plot": "parcel·la",
-  "message.refreshed": "Alertes actualitzades.",
   "message.seeded": "Demostració carregada: campanya {season} ({farm}).",
   "message.already_seeded": "La base de dades ja conté dades; no s'ha carregat res.",
   "notif.aria": "Notificacions",
@@ -58,13 +101,22 @@ export default {
   "nav.record_book": "Quadern",
   "nav.registry": "Catàleg",
   "nav.settings": "Configuració",
+  "nav.back_to": "Tornar a {section}",
   "form.save": "Desa",
   "form.cancel": "Cancel·la",
+  "pagination.aria": "Pàgines",
+  "pagination.previous": "Pàgina anterior",
+  "pagination.next": "Pàgina següent",
+  "pagination.page": "Pàgina {page}",
+  "pagination.range": "{from}–{to} de {total}",
   "form.edit": "Edita",
   "form.close": "Tanca",
   "form.delete": "Suprimeix",
   "form.remove": "Treu",
   "form.required": "Aquest camp és obligatori",
+  "form.catalogue_code_unknown":
+    "Sense nom en aquest dispositiu: actualitzeu els catàlegs a la pàgina «{settings}».",
+  "form.required_legend": "Els camps marcats són obligatoris",
   "form.check_fields.one": "Reviseu 1 camp abans de desar",
   "form.check_fields.other": "Reviseu {count} camps abans de desar",
   "form.save_refused": "No s'ha pogut desar",
@@ -121,6 +173,9 @@ export default {
   "unit.units.one": "unitat",
   "unit.units.other": "unitats",
   "unit.units_ha": "unitats/ha",
+  "unit.units_m2": "unitats/m²",
+  "unit.m2": "m²",
+  "unit.net_m2_ha": "m² de malla/ha",
   "message.db_checked_freed": "Base de dades en bon estat. S'han recuperat {size}.",
   "message.db_checked_clean": "Base de dades en bon estat. No hi havia espai per recuperar.",
   "message.db_check_failed":
@@ -130,6 +185,40 @@ export default {
   // concordarien cadascun amb una xifra diferent.
   "message.catalogues_refreshed":
     "Catàlegs · actualitzats: {updated} · sense canvis: {unchanged} · rebutjats: {refused}.",
+  "actions.export_sync": "Exporta els canvis",
+  "actions.import_sync": "Importa els canvis",
+  "message.sync_exported.one": "Un canvi desat a {path} ({size}).",
+  "message.sync_exported.other": "{count} canvis desats a {path} ({size}).",
+  "message.sync_nothing_to_send":
+    "No hi ha canvis nous per a aquell dispositiu. El fitxer s'ha desat igualment a {path}.",
+  "message.sync_imported.one": "Un canvi aplicat des de {device}.",
+  "message.sync_imported.other": "{count} canvis aplicats des de {device}.",
+  "message.sync_conflicts_waiting.one":
+    "Un registre l'han escrit dos dispositius alhora i espera que decidiu.",
+  "message.sync_conflicts_waiting.other":
+    "{count} registres els han escrit dos dispositius alhora i esperen que decidiu.",
+  "message.sync_duplicates_waiting.one":
+    "Hi ha un possible duplicat per revisar a la pàgina «{status}».",
+  "message.sync_duplicates_waiting.other":
+    "Hi ha {count} possibles duplicats per revisar a la pàgina «{status}».",
+  "message.sync_strays_waiting.one":
+    "Hi ha un registre que cap quadern no mostra, perquè el seu es va suprimir: reviseu-lo a la pàgina «{status}».",
+  "message.sync_strays_waiting.other":
+    "Hi ha {count} registres que cap quadern no mostra, perquè el seu es va suprimir: reviseu-los a la pàgina «{status}».",
+  "message.sync_name_the_device":
+    "Podeu posar-li nom a Configuració, a «Dispositius d'aquesta explotació».",
+  "message.sync_catalogues_may_lag":
+    "Potser cal actualitzar els catàlegs d’aquest dispositiu: arriben codis sense nom. Actualitzeu-los a l’apartat «{catalogues}» de la pàgina «{settings}».",
+  "message.sync_nothing_new": "Aquell fitxer no portava res que aquest dispositiu no tingués ja.",
+  "message.sync_erased": "S'ha esborrat definitivament el que ja no es podia recuperar: {what}.",
+  "message.sync_erased_books.one": "un quadern",
+  "message.sync_erased_books.other": "{count} quaderns",
+  "message.sync_erased_records.one": "un registre",
+  "message.sync_erased_records.other": "{count} registres",
+  "message.sync_discarded.one":
+    "Un canvi fet a {device} en un registre esborrat definitivament no s'ha aplicat.",
+  "message.sync_discarded.other":
+    "{count} canvis fets a {device} en registres esborrats definitivament no s'han aplicat.",
   "actions.export_backup": "Exporta una còpia de seguretat",
   "actions.import_backup": "Importa una còpia de seguretat",
   "message.backup_saved": "Còpia desada a {path} ({size}).",
@@ -216,7 +305,6 @@ export default {
   // The tab bar's overflow button: what it opens is the tabs that did not fit,
   // so it names the remainder rather than an action.
   "tabs.more": "Més",
-  "workspace.resize": "Ajustar l'amplada del plafó",
   "product.no_substances": "Aquest producte no té substàncies actives registrades.",
   "column.composition": "Composició",
   "table.resize_column": "Ajustar l'amplada de la columna {column}",
@@ -276,8 +364,10 @@ export default {
   "column.finding": "Avís",
   "column.detail": "Detall",
   "column.notes": "Notes",
-  "column.status": "Estat",
   "column.campaign": "Campanya",
+  "column.farm": "Explotació",
+  "column.starts": "Inici",
+  "column.ends": "Fi",
 
   // What a register with no rows says. Generic on purpose: a table that is
   // empty because nothing has happened yet is the same statement in every

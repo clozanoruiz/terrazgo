@@ -77,7 +77,7 @@ fn tally(event: TraceEvent<'_>) {
 ///
 /// let mut conn = terrazgo_core::open_in_memory().unwrap();
 /// let (seasons, cost) = query_cost(&mut conn, |conn| {
-///     terrazgo_core::repository::list_seasons(conn).unwrap()
+///     terrazgo_core::repository::list_farms(conn).unwrap()
 /// });
 /// assert!(seasons.is_empty());
 /// assert_eq!(cost.statements, 1, "one list is one statement");

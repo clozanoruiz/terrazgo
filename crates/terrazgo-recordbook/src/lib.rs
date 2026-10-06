@@ -40,18 +40,18 @@ pub mod region;
 use crate::collate::NameCollator;
 use error::Result;
 use labels::Labels;
-use module_cue::crop_groups;
-use module_cue::models::TreatmentRecordWithPlots;
-use module_cue::repository::{
+use module_fertilisation::agronomy::{Accumulator, dose_as_kg_per_ha, nutrient_units};
+use module_phytosanitary::crop_groups;
+use module_phytosanitary::models::TreatmentRecordWithPlots;
+use module_phytosanitary::repository::{
     list_analysis_records, list_non_field_treatments, list_register_declarations,
     list_seed_treatments, list_treatment_records,
 };
-use module_cue::siex;
-use module_fertilisation::agronomy::{Accumulator, dose_as_kg_per_ha, nutrient_units};
-use rusqlite::Connection;
+use module_phytosanitary::siex;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use terrazgo_core::catalogue::CatalogueCode;
 use terrazgo_report::{Cell, Column, RenderedPdf, RenderedWorkbook, Sheet, Workbook};
 
@@ -325,7 +325,14 @@ fn assemble(
         plots,
     )?;
     let harvest = harvest_rows(conn, season_id, farm_id, plots)?;
-    let irrigation = irrigation_rows(conn, season_id, farm_id, plots)?;
+    let irrigation = irrigation_rows(
+        conn,
+        catalogues,
+        season_id,
+        farm_id,
+        &farm.farm.country_code,
+        plots,
+    )?;
     // Read ONCE and used twice: model 9.1's own rows, and model 9.4's Pastoreo
     // column. The two partition the register on `soil_cover_id`, so neither a
     // second read nor a second filter pass is needed.
@@ -1013,6 +1020,16 @@ fn zone_rows(
 /// printed in 1.4 ("tipo de explotación") and again per row in 2.1. Named
 /// `_abbrev` and NOT `gip_code`, which would collide with the schema's
 /// `gip_system_code`, a different value ("organic", not "AE").
+///
+/// **One of the book's three sigla mappers**, with [`irrigation_abbrev`]
+/// (SEC/ASP/LOC/GRA) and [`environment_abbrev`] (AL/M/BP/INV): same shape, same
+/// loop, same test. They print the Spanish official model's own vocabulary and
+/// are deliberately NOT country-scoped, because the document that prints them
+/// is not — this crate renders one layout, and that layout is Spain's. Gating
+/// them per country would put a blank column on an otherwise fully-rendered
+/// Spanish model, replacing an obviously wrong document with a silently wrong
+/// one. A second country needs a second layout; the gate belongs at the
+/// renderer's entry, not at each field. See docs/cuaderno-print.md.
 fn gip_abbrev(code: Option<&str>) -> &'static str {
     match code {
         Some("organic") => "AE",
@@ -1264,7 +1281,7 @@ struct TreatmentRow {
     /// disagree, every stage is carried. Printing the first plot's would assert
     /// something false about the others, and blanking it would throw away what
     /// was recorded.
-    growth_stages: Vec<module_cue::catalogue::GrowthStage>,
+    growth_stages: Vec<module_phytosanitary::catalogue::GrowthStage>,
     surface_ha: f64,
     /// The crop's own surface (model 3.1 bis has a "Superf. cultivada" column
     /// beside the treated one). `None` when the crop states none — blank, not
@@ -1410,15 +1427,25 @@ impl Cuaderno {
 fn growth_stages_of(
     conn: &Connection,
     catalogues: &CatalogueCache,
-    group: &[&module_cue::models::TreatmentPlot],
-) -> Vec<module_cue::catalogue::GrowthStage> {
-    let mut stages: Vec<module_cue::catalogue::GrowthStage> = Vec::new();
+    group: &[&module_phytosanitary::models::TreatmentPlot],
+) -> Vec<module_phytosanitary::catalogue::GrowthStage> {
+    let mut stages: Vec<module_phytosanitary::catalogue::GrowthStage> = Vec::new();
     for plot in group {
         let Some(code) = plot.growth_stage_code.as_deref() else {
             continue;
         };
-        let rows = catalogues.find(conn, module_cue::catalogue::GROWTH_STAGE_CATALOGUE, code);
-        let stage = module_cue::catalogue::growth_stage_from(rows.first(), code);
+        let rows = catalogues.find(
+            conn,
+            module_phytosanitary::catalogue::GROWTH_STAGE_CATALOGUE,
+            code,
+        );
+        if rows.is_empty() {
+            catalogues.unnamed(
+                module_phytosanitary::catalogue::GROWTH_STAGE_CATALOGUE,
+                code,
+            );
+        }
+        let stage = module_phytosanitary::catalogue::growth_stage_from(rows.first(), code);
         if !stage.label.is_empty() && !stages.contains(&stage) {
             stages.push(stage);
         }
@@ -1521,13 +1548,32 @@ fn treatment_rows(
                 measure_intensity_unit_code: record.measure_intensity_unit_code.clone(),
                 measure_registration_number: record.measure_registration_number.clone(),
                 measure_label: match &record.measure_code {
-                    Some(code) => catalogue_label(
-                        conn,
-                        catalogues,
-                        Some("TIPO_MEDIDA_FITOSANITARIA"),
-                        code,
-                        None,
-                    ),
+                    Some(code) => {
+                        let measure = catalogue_label(
+                            conn,
+                            catalogues,
+                            Some("TIPO_MEDIDA_FITOSANITARIA"),
+                            code,
+                            None,
+                        );
+                        // Which basic substance, in the measure's own cell:
+                        // the model has no column for it.
+                        match &record.measure_basic_substance_code {
+                            Some(substance) => format!(
+                                "{measure} — {}",
+                                catalogue_label(
+                                    conn,
+                                    catalogues,
+                                    module_phytosanitary::siex::basic_substance_catalogue(
+                                        &record.country_code,
+                                    ),
+                                    substance,
+                                    None,
+                                )
+                            ),
+                            None => measure,
+                        }
+                    }
                     None => String::new(),
                 },
                 justification_codes: justification_codes.clone(),
@@ -1709,7 +1755,7 @@ fn non_field_rows(
 fn non_field_problem_labels(
     conn: &Connection,
     catalogues: &CatalogueCache,
-    detail: &module_cue::models::NonFieldTreatmentDetail,
+    detail: &module_phytosanitary::models::NonFieldTreatmentDetail,
 ) -> Result<String> {
     let mut labels = Vec::new();
     for problem in &detail.problems {
@@ -1759,7 +1805,7 @@ struct AnalysisRow {
     /// model predates A.3 and has no soil page, so these ride in the findings
     /// cell — and take a workbook tab of their own, where nine figures can be
     /// compared instead of read (the analysis-kinds precedent).
-    soil: module_cue::models::SoilParameters,
+    soil: module_phytosanitary::models::SoilParameters,
     notes: String,
 }
 
@@ -2029,10 +2075,7 @@ fn fertilisation_rows(
                         catalogues,
                         module_fertilisation::siex::good_practice_catalogue(country_code),
                         code,
-                        Some((
-                            module_fertilisation::siex::GOOD_PRACTICE_SCOPE_KEY,
-                            module_fertilisation::siex::FERTILISATION_SCOPE,
-                        )),
+                        None,
                     )
                 })
                 .collect::<Vec<_>>()
@@ -2120,15 +2163,6 @@ fn material_rows(
     Ok(rows)
 }
 
-/// A provider catalogue's label for one code, with the rule every coded field
-/// in this book follows: an unresolvable code prints ITSELF rather than
-/// vanishing, because the code is the regulatory payload and the label is
-/// display sugar (the vendored snapshot rides app releases, a registry does
-/// not wait for one).
-///
-/// `qualifier` picks a row in the catalogues that repeat a code per attribute —
-/// `BUENAS_PRACTICAS_AMBITOS` holds three vocabularies keyed by ámbito, and the
-/// same integer means a different practice in each.
 /// The holding's province as a NAME, for model 1.1's "Provincia" cell.
 ///
 /// `farm_es_extension.province_code` is entered by hand, so it arrives as the
@@ -2205,6 +2239,15 @@ fn municipality_name(
     }
 }
 
+/// A provider catalogue's label for one code, with the rule every coded field
+/// in this book follows: an unresolvable code prints ITSELF rather than
+/// vanishing, because the code is the regulatory payload and the label is
+/// display sugar (the vendored snapshot rides app releases, a registry does
+/// not wait for one).
+///
+/// `qualifier` picks a row in the catalogues that repeat a code per attribute —
+/// `MUNICIPIO_SIGPAC` repeats a municipality code once per province, and each
+/// is a different town.
 fn catalogue_label(
     conn: &Connection,
     catalogues: &CatalogueCache,
@@ -2215,24 +2258,31 @@ fn catalogue_label(
     if code.is_empty() {
         return String::new();
     }
-    catalogue
-        .and_then(|catalogue| {
-            catalogues
-                .find(conn, catalogue, code)
-                .into_iter()
-                .find(|row| match qualifier {
-                    None => true,
-                    Some((key, want)) => {
-                        row.attrs
-                            .as_ref()
-                            .and_then(|attrs| attrs.get(key))
-                            .and_then(Value::as_str)
-                            == Some(want)
-                    }
-                })
-                .map(|row| row.label)
-        })
-        .unwrap_or_else(|| code.to_string())
+    // No catalogue means this country publishes no list for the field, so the
+    // code is all there is — printed as itself, and nothing is missing.
+    let Some(catalogue) = catalogue else {
+        return code.to_string();
+    };
+    let named = catalogues
+        .find(conn, catalogue, code)
+        .into_iter()
+        .find(|row| match qualifier {
+            None => true,
+            Some((key, want)) => {
+                row.attrs
+                    .as_ref()
+                    .and_then(|attrs| attrs.get(key))
+                    .and_then(Value::as_str)
+                    == Some(want)
+            }
+        });
+    match named {
+        Some(row) => row.label,
+        None => {
+            catalogues.unnamed(catalogue, code);
+            code.to_string()
+        }
+    }
 }
 
 /// Catalogue rows resolved once per book instead of once per row.
@@ -2256,6 +2306,13 @@ fn catalogue_label(
 /// A code that resolves to NOTHING is remembered as such: a book written
 /// against a catalogue this installation never imported must not re-ask for
 /// every row.
+///
+/// **It also remembers which codes it printed bare** — named by no row of a
+/// catalogue the book asked, so printed as the code alone. That is the
+/// advisory's `unnamed_codes`: a record written on a device whose catalogues
+/// are newer, or this device never having imported them, read from the one
+/// place every printed code passes through (docs/sync.md → What stays
+/// device-local).
 #[derive(Default)]
 struct CatalogueCache {
     memo: RefCell<Memo>,
@@ -2271,6 +2328,8 @@ struct Memo {
     /// Asks served, hit or miss. The gap against `queries` is what this type is
     /// for, so the tests pin it.
     lookups: usize,
+    /// `(catalogue, code)` pairs the book printed with no name beside them.
+    unnamed: BTreeSet<(String, String)>,
 }
 
 impl CatalogueCache {
@@ -2296,6 +2355,68 @@ impl CatalogueCache {
         memo.rows.insert(key, rows.clone());
         rows
     }
+
+    /// Note a code the book will print with no name beside it.
+    fn unnamed(&self, catalogue: &str, code: &str) {
+        self.memo
+            .borrow_mut()
+            .unnamed
+            .insert((catalogue.to_string(), code.to_string()));
+    }
+}
+
+/// Whether any of `books` prints a code no catalogue on this device names —
+/// what an import asks of the books it wrote into, to say this device's
+/// catalogues may need updating (docs/sync.md → What stays device-local).
+///
+/// A book this device does not hold, holds removed, or holds on a removed farm
+/// prints nothing and is skipped. Stops at the first book that answers yes: the
+/// question is yes or no, and each book read costs an assembly.
+pub fn prints_unnamed_codes(conn: &Connection, books: &[String], today: &str) -> Result<bool> {
+    for book in books {
+        let farm: Option<String> = conn
+            .query_row(
+                "SELECT s.farm_id FROM season s
+                 JOIN farm f ON f.id = s.farm_id AND f.deleted_at IS NULL
+                 WHERE s.id = ?1 AND s.deleted_at IS NULL",
+                [book],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(farm) = farm else {
+            continue;
+        };
+        if unnamed_codes(conn, book, &farm, today)? > 0 {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// How many distinct codes the book prints with no name beside them, because
+/// no catalogue row on this device names them.
+///
+/// It reads the book exactly as printing does — the same assembly, the same
+/// lookups — so it counts what the page will show rather than what a separate
+/// list of coded columns claims, which no schema could keep honest. The
+/// language does not matter: the catalogues carry one label per code.
+pub(crate) fn unnamed_codes(
+    conn: &Connection,
+    season_id: &str,
+    farm_id: &str,
+    today: &str,
+) -> Result<usize> {
+    let catalogues = CatalogueCache::default();
+    assemble(
+        conn,
+        &catalogues,
+        season_id,
+        farm_id,
+        today,
+        ReportLanguage::Es,
+    )?;
+    let count = catalogues.memo.borrow().unnamed.len();
+    Ok(count)
 }
 
 /// One line of model table 7.1: an application of section 6, seen again with
@@ -2468,13 +2589,18 @@ struct IrrigationRow {
     water_soluble_p2o5: Option<f64>,
     /// `water_origin` codes, resolved by the labels at render time.
     origin_codes: Vec<String>,
+    /// `BUENAS_PRACTICAS_AMBITOS` labels. Sheet only, like section 6's: the
+    /// model has no column.
+    practices: String,
     notes: String,
 }
 
 fn irrigation_rows(
     conn: &Connection,
+    catalogues: &CatalogueCache,
     season_id: &str,
     farm_id: &str,
+    country_code: &str,
     plots: &PlotIndex,
 ) -> Result<Vec<IrrigationRow>> {
     let mut rows: Vec<IrrigationRow> = Vec::new();
@@ -2522,6 +2648,20 @@ fn irrigation_rows(
             water_nitric_n: record.water_nitric_n_mg_l,
             water_soluble_p2o5: record.water_soluble_p2o5_mg_l,
             origin_codes: detail.water_origins,
+            practices: detail
+                .practices
+                .iter()
+                .map(|code| {
+                    catalogue_label(
+                        conn,
+                        catalogues,
+                        module_fertilisation::siex::good_practice_catalogue(country_code),
+                        code,
+                        None,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; "),
             notes: record.notes.unwrap_or_default(),
         });
     }
@@ -3141,7 +3281,7 @@ fn format_cover_maintenance(
 /// model's own three in their original relative order.
 ///
 /// The five come from three tables in three crates: the sowing and flooding
-/// dates from core's `sowing_record`, the drying date from module-cue's
+/// dates from core's `sowing_record`, the drying date from module-phytosanitary's
 /// `treatment_record`, and the levelling and ridging dates from
 /// module-ecoscheme's `cultural_operation`. Only this crate can read all three
 /// — it is the consumer above the modules, and modules may not read each other.
@@ -3169,7 +3309,7 @@ struct FloodedRow {
 fn flooded_rows(
     plots: &PlotIndex,
     sowings: &[terrazgo_core::models::SowingRecordDetail],
-    treatments: &[module_cue::models::TreatmentRecordWithPlots],
+    treatments: &[module_phytosanitary::models::TreatmentRecordWithPlots],
     operations: &HashMap<String, FloodedOperations>,
 ) -> Vec<FloodedRow> {
     // The plots that are known to grow a crop under water.
@@ -3357,7 +3497,7 @@ fn activity_text(kind: &str, description: &str) -> String {
 /// reported appears, each with the unit its field is named for, so a reader can
 /// see which figure is missing rather than reading a zero that was never
 /// measured.
-fn soil_cell(soil: &module_cue::models::SoilParameters) -> String {
+fn soil_cell(soil: &module_phytosanitary::models::SoilParameters) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut push = |label: &str, value: Option<f64>, unit: &str| {
         if let Some(value) = value {
@@ -3442,7 +3582,7 @@ fn substance_labels(
     conn: &Connection,
     catalogues: &CatalogueCache,
     country_code: &str,
-    detail: &module_cue::models::AnalysisRecordDetail,
+    detail: &module_phytosanitary::models::AnalysisRecordDetail,
 ) -> Result<String> {
     let catalogue = siex::substance_catalogue(country_code);
     let mut labels: Vec<String> = Vec::new();
@@ -5019,6 +5159,7 @@ impl Cuaderno {
                 Column::new(labels.sheet.water_nitric_n, 16.0),
                 Column::new(labels.sheet.water_soluble_p2o5, 18.0),
                 Column::new(labels.s8.source, 26.0),
+                Column::new(labels.sheet.practices, 40.0),
                 Column::new(labels.s31.notes, 30.0),
             ],
         );
@@ -5049,6 +5190,7 @@ impl Cuaderno {
                         .collect::<Vec<_>>()
                         .join("; "),
                 ),
+                Cell::text(r.practices.as_str()),
                 Cell::text(r.notes.as_str()),
             ]);
         }
@@ -5393,6 +5535,8 @@ fn unit_symbol(code: &str) -> &'static str {
         "l" => "L",
         "t" => "t",
         "m3" => "m³",
+        // An area: what an anti-insect net is stated in (Anexo V field 18).
+        "m2" => "m²",
         _ => "",
     }
 }
@@ -5454,7 +5598,11 @@ mod tests {
     fn demo_book() -> (Connection, String, String) {
         let mut conn = open_in_memory().unwrap();
         terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
-        assert!(module_cue::demo::seed_demo(&mut conn).unwrap().seeded);
+        assert!(
+            module_phytosanitary::demo::seed_demo(&mut conn)
+                .unwrap()
+                .seeded
+        );
         let (season_id, farm_id) = conn
             .query_row(
                 "SELECT season_id, farm_id FROM treatment_record LIMIT 1",

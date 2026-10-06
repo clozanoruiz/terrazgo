@@ -10,18 +10,27 @@ export default {
   // técnico, precedido por internal_intro para orientar al usuario normal.
   "error.internal_intro": "Se ha producido un error interno:",
   "error.not_found": "El registro no existe.",
+  "error.invalid.conflict_version_gone":
+    "Otro dispositivo ya decidió sobre este registro. Vuelva a abrirlo para ver cómo quedó.",
+  "error.invalid.register_not_in_conflict": "Este registro ya no tiene versiones en espera.",
+  "error.invalid.duplicate_pair_one_record": "Un registro no puede ser duplicado de sí mismo.",
+  "error.invalid.duplicate_kept_gone":
+    "El registro que quería conservar ya se ha eliminado, quizá desde otro dispositivo. Vuelva a abrir la lista para ver cómo ha quedado.",
+  "error.invalid.duplicate_restore_refused":
+    "Este registro ya no se puede recuperar desde aquí: se ha recuperado o modificado desde otro dispositivo. Vuelva a abrir la lista para ver cómo ha quedado.",
+  "error.invalid.sync_peer_is_this_device": "No se puede retirar el dispositivo que está usando.",
   "error.invalid.unknown_link": "Ese enlace no está disponible en esta versión.",
   "error.invalid.empty_name": "El nombre no puede estar vacío.",
   "error.invalid.operator_not_found": "El operador seleccionado ya no existe.",
   "error.invalid.empty_authorisation_number": "El número de registro no puede estar vacío.",
-  "error.invalid.no_problems": "Indica al menos una problemática (plaga, enfermedad…).",
-  "error.invalid.no_justifications": "Indica al menos una justificación de la actuación.",
+  "error.invalid.no_problems": "Indique al menos una problemática (plaga, enfermedad…).",
+  "error.invalid.no_justifications": "Indique al menos una justificación de la actuación.",
   "error.invalid.end_date_before_start": "La fecha de fin no puede ser anterior a la de inicio.",
-  "error.invalid.application_time": "Indica la hora en formato HH:MM (por ejemplo 20:30).",
+  "error.invalid.application_time": "Indique la hora en formato HH:MM (por ejemplo 20:30).",
   "error.invalid.growth_stage_unknown":
     "El estado fenológico seleccionado no está en el catálogo oficial.",
   "error.invalid.invalid_total_quantity":
-    "Indica la cantidad total y su unidad (kg o l), con un valor mayor que cero.",
+    "Indique la cantidad total y su unidad (kg o l), con un valor mayor que cero.",
   "error.invalid.unknown_problem_code":
     "La problemática seleccionada no está en el catálogo oficial.",
   "error.invalid.export_precheck_failed":
@@ -33,10 +42,55 @@ export default {
   "error.invalid.unknown_substance_code":
     "La sustancia indicada no está en el catálogo oficial de autorizaciones excepcionales.",
   "error.invalid.nonpositive_area": "La superficie debe ser mayor que cero.",
-  "error.invalid.season_in_use":
-    "No se puede eliminar una campaña con cultivos o tratamientos registrados. Elimina antes su contenido.",
+  "error.invalid.season_name_taken":
+    "Esta explotación ya tiene un cuaderno con ese nombre. Dele otro nombre para distinguirlos.",
+  "error.invalid.season_dates_taken":
+    "Esta explotación ya tiene un cuaderno con esas mismas fechas. Ábralo, o cambie las fechas de este.",
+  "error.invalid.season_restore_name_taken":
+    "Otro cuaderno de esta explotación ya se llama así. Para recuperar este, cambie antes el nombre del otro; o pase a él los registros en lugar de recuperarlo.",
+  "error.invalid.book_merge_same_book": "Un cuaderno no se puede unir consigo mismo.",
+  "error.invalid.book_merge_other_farm":
+    "Los registros solo pueden pasar a otro cuaderno de la misma explotación.",
+  "error.invalid.book_merge_conflicts_waiting":
+    "En este cuaderno hay registros escritos a la vez en dos dispositivos que esperan su decisión. Decídalos en la página «Estado» antes de unirlo con otro: al unirlos se resolverían sin que nadie los viera.",
+  "error.invalid.book_merge_removals_waiting":
+    "En este cuaderno, dos personas eliminaron cada una la copia contraria de un duplicado, y la operación ya no está en el cuaderno. Recupere una de las dos en la página «Estado» antes de unirlo con otro.",
+  "error.invalid.book_delete_conflicts_waiting":
+    "Este cuaderno, o algo de lo que contiene, se escribió a la vez en dos dispositivos y espera su decisión. Decídalo en la página «Estado» antes de eliminarlo: al eliminarlo se resolvería sin que nadie lo viera.",
+  "error.invalid.book_delete_removals_waiting":
+    "En este cuaderno, dos personas eliminaron cada una la copia contraria de un duplicado, y la operación ya no está en el cuaderno. Recupere una de las dos en la página «Estado» antes de eliminarlo.",
+  "error.invalid.book_restore_conflicts_waiting":
+    "Este cuaderno, o algo de lo que contiene, se escribió a la vez en dos dispositivos y espera su decisión. Decídalo en la página «Estado» antes de recuperarlo: al recuperarlo se resolvería sin que nadie lo viera.",
+  "error.invalid.stray_conflicts_waiting":
+    "Alguno de estos registros se escribió a la vez en dos dispositivos y espera su decisión. Decídalo en la página «Estado» antes de moverlos: cada versión puede estar en un cuaderno distinto.",
+  "error.invalid.season_label_collision":
+    "El archivo trae un cuaderno de {farm} llamado «{label}», y en este dispositivo ya hay otro con ese nombre: los dos se crearon en dispositivos distintos antes de sincronizar. Cambie el nombre del cuaderno «{label}» de este dispositivo y vuelva a importar el archivo. Si eran la misma campaña, después únalos desde la página de cualquiera de los dos, con «Unir con otro cuaderno…»: los registros que se repitan aparecerán como posibles duplicados para que decida cuál conservar.",
+  "error.invalid.bundle_incomplete":
+    "El archivo de sincronización está incompleto: se copió a medias o se cortó por el camino. Vuelva a exportarlo en el otro dispositivo y cópielo entero.",
+  "error.invalid.bundle_unreadable":
+    "Este archivo no es una sincronización de Terrazgo, o está dañado.",
+  "error.invalid.bundle_format_unsupported":
+    "Este archivo de sincronización lo escribió una versión más nueva de Terrazgo. Actualice este dispositivo para poder leerlo.",
+  "error.invalid.bundle_schema_mismatch":
+    "Los dos dispositivos no tienen la misma versión de Terrazgo. Actualice el que esté más atrasado: los cambios sueltos no se pueden convertir de una versión a otra, aunque una copia de seguridad completa sí.",
+  "error.invalid.bundle_skips_changes":
+    "Este archivo se preparó para otro dispositivo y deja fuera cambios que este todavía no tiene, así que no se ha aplicado nada. En el dispositivo que lo exportó, importe primero un archivo de este y vuelva a exportar: el archivo nuevo traerá todo lo que falta.",
+  "error.invalid.device_identity_shared":
+    "Dos dispositivos están escribiendo con la misma identidad, y sus anotaciones ya no coinciden. Suele pasar al copiar la carpeta de datos de la aplicación en vez de instalarla. Restaure uno de los dos desde una copia de seguridad: así recibe una identidad nueva.",
+  "error.invalid.peer_clock_ahead":
+    "El reloj del otro dispositivo va más de {hours} h adelantado respecto a este. Corríjalo antes de sincronizar: si va tan desviado, las fechas que ese dispositivo haya anotado también estarán mal, y eso afecta al cuaderno.",
+  "error.invalid.sync_not_paired":
+    "Este dispositivo todavía no está emparejado con el que creó el archivo. Empareje los dos para que compartan cuaderno: después, este mismo archivo se aplicará sin volver a copiarlo.",
+  "error.invalid.sync_group_mismatch":
+    "Este archivo viene de un grupo de dispositivos distinto del de este. Si los dos son suyos, puede unirlos, pero este dispositivo dejará el grupo en el que está ahora.",
+  "error.invalid.sync_group_invalid":
+    "El identificador de grupo del archivo no es válido: el archivo está dañado.",
+  "error.invalid.register_has_no_head":
+    "Dos dispositivos están escribiendo con la misma identidad, porque se copió la carpeta de datos de la aplicación en lugar de instalarla. Hasta que uno de ellos se restaure desde una copia de seguridad —lo que le da una identidad nueva—, sus anotaciones no pueden combinarse.",
+  "error.invalid.season_not_on_farm":
+    "La parcela y la campaña pertenecen a explotaciones distintas.",
   "error.invalid.missing_distance":
-    "Indica la distancia a la parcela: es obligatoria cuando la captación queda fuera de ella.",
+    "Indique la distancia a la parcela: es obligatoria cuando la captación queda fuera de ella.",
   "error.invalid.water_point_distance_inside":
     "Una captación incluida en la parcela no lleva distancia. Desmarca «incluida» o borra la distancia.",
   "error.invalid.water_point_coordinates_invalid":
@@ -85,6 +139,8 @@ export default {
     "La parcela no tiene una referencia SIGPAC completa — rellena antes las siete partes.",
   "error.invalid.zone_status_invalid":
     "El resultado interno de la comprobación de zonas no era utilizable.",
+  "error.invalid.alert_deadline_mismatch":
+    "La alerta no se pudo marcar: la fecha recibida no corresponde a su tipo. Vuelva a abrir la página «Estado».",
   "error.invalid.quantity_unit_mismatch":
     "La unidad no corresponde a lo tratado: toneladas para producto vegetal, m\u00b3 para locales y veh\u00edculos.",
   "error.invalid.invalid_product_quantity":
@@ -159,6 +215,8 @@ export default {
   "error.invalid.unknown_measure_code": "La medida indicada no figura en el catálogo oficial.",
   "error.invalid.invalid_intensity":
     "La intensidad debe indicarse con su unidad (trampas, difusores…) y ser mayor que cero.",
+  "error.invalid.basic_substance_without_its_measure":
+    "La sustancia básica solo se indica con la medida «Usos de sustancias básicas».",
 
   // Ecorrégimenes — 9.1 pastoreo extensivo (RD 1048/2022 art. 30.2 ter).
   "error.invalid.practice_not_grazing":

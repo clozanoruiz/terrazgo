@@ -7,8 +7,6 @@
 export default {
   "treatments.title": "Tratamientos fitosanitarios",
   "treatments.records_title": "Tratamientos",
-  "treatments.farm": "Explotación",
-  "treatments.season": "Campaña",
   "treatments.new": "Nuevo tratamiento",
   "treatments.empty": "Aún no hay tratamientos registrados para esta explotación y campaña.",
   "treatments.no_farms": "Cree primero una explotación con al menos una parcela:",
@@ -35,6 +33,7 @@ export default {
   "treatment.measure_intensity_hint": "Nº de trampas, nº de difusores, etc.",
   "treatment.measure_intensity_unit": "Unidad de intensidad",
   "treatment.measure_registration": "Nº de registro del medio",
+  "treatment.measure_basic_substance": "Sustancia básica",
   "treatment.measure_intensity_detail": "{value} {unit}",
   "treatment.total_quantity_suggest": "Usar {value} {unit} (dosis \u00d7 superficie)",
   "treatment.total_quantity_detail": "{value} {unit} en total",
@@ -67,8 +66,7 @@ export default {
   "treatment.remove": "Quitar",
   "treatment.phi_until": "Plazo de seguridad: cosecha a partir del {date}",
   "treatment.delete": "Eliminar",
-  "treatment.delete_confirm":
-    "¿Eliminar este tratamiento? Se oculta de la aplicación pero se conserva en el registro de auditoría.",
+  "treatment.delete_confirm": "¿Eliminar este tratamiento? Dejará de aparecer en el cuaderno.",
   "advisory.title": "Estado del cuaderno",
   "advisory.hint":
     "Aviso informativo: el cuaderno se imprime igualmente. Se señala lo que un anexo obligatorio pide y el libro imprime en blanco.",
@@ -104,6 +102,11 @@ export default {
     "Pastoreos sin fecha de fin, con la campaña ya cerrada (RD 1048/2022 art. 30.2 ter)",
   "advisory.grazing_records_without_end_hint":
     "El plazo de un mes cuenta desde el fin del pastoreo, así que un registro abierto no va con retraso: simplemente el cuaderno no puede darlo por terminado.",
+  "advisory.unnamed_codes": "Códigos sin nombre en los catálogos de este dispositivo",
+  "advisory.unnamed_codes_hint.one":
+    "El cuaderno imprime 1 código como número, sin su nombre: los catálogos de referencia de este dispositivo no lo tienen, normalmente porque el registro se escribió en otro dispositivo con catálogos más recientes. Actualícelos en la página «{settings}», apartado «{catalogues}».",
+  "advisory.unnamed_codes_hint.other":
+    "El cuaderno imprime {count} códigos como número, sin su nombre: los catálogos de referencia de este dispositivo no los tienen, normalmente porque los registros se escribieron en otro dispositivo con catálogos más recientes. Actualícelos en la página «{settings}», apartado «{catalogues}».",
   "export.pdf_title": "Cuaderno imprimible (PDF)",
   "export.pdf_run": "Generar PDF…",
   "export.pdf_hint":
@@ -113,7 +116,7 @@ export default {
     "El cuaderno sigue el modelo oficial en cualquier caso; puede imprimirlo en cualquiera de las lenguas oficiales de la comunidad donde está la explotación.",
   "export.xlsx_run": "Generar Excel…",
   "export.xlsx_hint":
-    "El mismo cuaderno en hoja de cálculo, una pestaña por apartado del modelo. Las fechas y los números van como tales, así que puedes ordenar, filtrar y sumar, o enviárselo a tu gestoría.",
+    "El mismo cuaderno en hoja de cálculo, una pestaña por apartado del modelo. Las fechas y los números van como tales, así que puede ordenar, filtrar y sumar, o enviárselo a su gestoría.",
   "registry.title": "Catálogo",
   "products.title": "Productos fitosanitarios",
   "products.new": "Nuevo producto",
@@ -204,7 +207,7 @@ export default {
   "non_field.quantity_hint": "Opcional; se imprime en blanco si no se indica.",
   "non_field.product_quantity": "Cantidad de producto utilizada",
   "non_field.product_quantity_unit": "Unidad (kg o l)",
-  "non_field.delete_confirm": "\u00bfEliminar este tratamiento? Se conserva en el historial.",
+  "non_field.delete_confirm": "¿Eliminar este tratamiento? Dejará de aparecer en el cuaderno.",
 
   // Registro 3.2: uso de semilla tratada.
   "seed.title": "Semilla tratada",
@@ -239,7 +242,7 @@ export default {
   "seed.surface": "Superficie sembrada (ha)",
   "seed.lot_detail": "lote {lot}",
   "seed.quantity_detail": "{kg} kg de semilla",
-  "seed.delete_confirm": "\u00bfEliminar esta siembra? Se conserva en el historial.",
+  "seed.delete_confirm": "¿Eliminar esta siembra? Dejará de aparecer en el cuaderno.",
 
   // Registro 4: an\u00e1lisis. Solo metadatos: el bolet\u00edn se conserva aparte.
   "analysis.title": "An\u00e1lisis",
@@ -257,7 +260,7 @@ export default {
   "analysis.keep_hint":
     "El bolet\u00edn de an\u00e1lisis se conserva aparte, con el resto de la documentaci\u00f3n de la explotaci\u00f3n.",
   "analysis.bulletin_detail": "bolet\u00edn {bulletin}",
-  "analysis.delete_confirm": "\u00bfEliminar este an\u00e1lisis? Se conserva en el historial.",
+  "analysis.delete_confirm": "¿Eliminar este análisis? Dejará de aparecer en el cuaderno.",
 
   // Los cuatro valores del cat\u00e1logo MATERIAL_ANALIZADO de FEGA, que
   // distingue el cultivo en pie del producto ya cosechado.

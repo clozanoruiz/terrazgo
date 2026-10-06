@@ -28,9 +28,10 @@ export default {
   "cultural_operation_kind.mowing": "Siega",
   "cultural_operation_kind.brush_cutting": "Desbroce",
   "cultural_operation_kind.drainage": "Mantenimiento del drenaje",
-  "cultural_operation_kind.pruning": "Poda",
+  "cultural_operation_kind.green_pruning_with_cleaning":
+    "Poda en verde, incluida la limpieza de tallos, chupones y varetas",
   "cultural_operation_kind.thinning": "Aclareo",
-  "cultural_operation_kind.staking": "Entutorado",
+  "cultural_operation_kind.staking": "Entutorado, guiado y atado de tallos",
   "cultural_operation_kind.grafting": "Injerto",
   "cultural_operation_kind.pruning_removal": "Eliminación de restos de poda",
   "cultural_operation_kind.green_pruning": "Poda en verde",

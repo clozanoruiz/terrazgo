@@ -16,6 +16,8 @@ describe("activeRoute", () => {
   it("keeps a child route on its parent entry", () => {
     // #/farms/<id> has no nav entry of its own; it belongs to Farms.
     expect(activeRoute("#/farms/01a03d6d-40dd-7272-868b-f239ba740541")).toBe("#/farms");
+    // So does one record book, opened from the list of them.
+    expect(activeRoute("#/record-book/01a090ee-41d0-7000-8000-000000000001")).toBe("#/record-book");
   });
 
   it("keeps a route carrying a query on its entry", () => {

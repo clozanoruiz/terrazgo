@@ -492,9 +492,12 @@ mod tests {
     #[test]
     fn sigpac_zoom_bounds_are_enforced() {
         // The MVT service publishes pbf tiles at z12–15 only (service
-        // description + live probe, 2026-07-11).
+        // description + live probe, 2026-07-11), and the recinto layer is
+        // served from z13: its z12 set is missing tiles wherever recintos are
+        // dense, and a missing tile answers the same 404 as an empty one
+        // (live probe, 2026-09-11).
         let cache = cache();
-        for z in [11, 16] {
+        for z in [11, 12, 16] {
             assert!(matches!(
                 tile(&cache, "sigpac-recintos", z, 0, 0),
                 Err(GeoError::NotFound)

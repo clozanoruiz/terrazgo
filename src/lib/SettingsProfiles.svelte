@@ -103,7 +103,7 @@
     return operators.find((candidate) => candidate.id === profile.operator_id)?.full_name ?? "";
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which profile it is about. Null while creating.
   const editing = $derived(profiles.find((p) => p.id === editingId) ?? null);
 </script>

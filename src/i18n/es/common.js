@@ -12,25 +12,31 @@ export default {
   "format.hint":
     "Decide si los números y las fechas siguen la configuración regional del dispositivo o el idioma elegido arriba. El cuaderno impreso no cambia: se imprime siempre en el idioma de la explotación.",
   "app.subtitle": "Gestión de la explotación",
-  "status.aria": "Estado de la aplicación",
-  "status.database": "Base de datos",
-  "status.schema_version": "Versión del esquema",
-  "status.app_version": "Versión de la aplicación",
   "status.integrity.failed": "La base de datos está dañada.",
   "status.integrity.restore":
     "Detectado en la comprobación del {date}. Restaure una copia de seguridad desde Ajustes → Importar copia de seguridad.",
   "actions.aria": "Acciones",
-  "actions.refresh": "Actualizar alertas",
   "actions.seed": "Cargar datos de demostración",
   "actions.ack": "Visto",
   "actions.dismiss": "Descartar",
   "alerts.title": "Alertas activas",
   "alerts.empty": "No hay alertas activas.",
+  "alerts.unavailable":
+    "Algunas alertas no se han podido comprobar ({sources}). La lista puede estar incompleta.",
+  "alerts.unavailable_hint":
+    "Actualice la aplicación; si el aviso continúa, informe del fallo e incluya el detalle técnico.",
+  "alerts.unavailable_detail": "Detalle técnico",
+  "alerts.unchecked.title": "No se ha podido comprobar: {kind}",
+  "alerts.unchecked.value": "Valor no válido «{value}»",
+  "alerts.unchecked.fix": "Corríjalo en {place}.",
+  "alerts.unchecked.fix_generic": "Corríjalo en la ficha del registro.",
+  "alert.source.core": "zonas de las parcelas",
+  "alert.source.phytosanitary": "tratamientos fitosanitarios",
 
   // Etiquetas de los códigos del esquema (alert.alert_type_code).
   "alert.type.phi_window": "Plazo de seguridad en curso",
-  "alert.type.licence_expiry": "Carné de aplicador a punto de caducar",
-  "alert.type.itv_expiry": "ITV de maquinaria próxima",
+  "alert.type.licence_expiry": "Caducidad del carné de aplicador",
+  "alert.type.itv_expiry": "Inspección (ITV) de la maquinaria",
   "alert.type.nitrate_zone":
     "Parcela en zona vulnerable a nitratos — registro de fertilización obligatorio",
   "alert.type.phyto_zone": "Parcela en zona de restricción fitosanitaria",
@@ -38,12 +44,49 @@ export default {
   "alert.status.active": "activa",
   "alert.status.acknowledged": "vista",
 
+  // Cuándo, en la tarjeta de la alerta. Una sola frase para las tres alertas con
+  // fecha: lo que dice es el límite, y el título ya dice de qué límite se trata.
+  // Las de zona no llevan fecha — su condición no caduca (alert.standing).
+  "alert.until": "Hasta el {date}",
+  "alert.overdue_since": "Venció el {date}",
+  "alert.standing": "Condición permanente",
+
   // Etiquetas de los nombres de tabla del esquema (alert.subject_table).
+  "entity.active_substance": "sustancia activa",
+  "entity.farm": "explotación",
+  "entity.season": "campaña",
+  "entity.crop": "cultivo",
+  "entity.advisor": "asesor",
+  "entity.premises": "local",
+  "entity.product": "producto",
+  "entity.user_profile": "perfil",
+  "entity.sync_peer": "dispositivo",
+  "entity.alert_acknowledgement": "alerta atendida",
+  "entity.duplicate_verdict": "decisión sobre un posible duplicado",
+  "entity.purged_register": "registro borrado definitivamente",
+  "entity.sowing_record": "siembra",
+  "entity.harvest_record": "cosecha",
+  "entity.non_field_treatment": "tratamiento fuera de parcela",
+  "entity.seed_treatment": "tratamiento de semilla",
+  "entity.analysis_record": "análisis",
+  "entity.irrigation_record": "riego",
+  "entity.fertilisation_record": "fertilización",
+  "entity.fertilisation_plan": "plan de abonado",
+  "entity.fertiliser_material": "material fertilizante",
+  "entity.grazing_record": "pastoreo",
+  "entity.cultural_operation": "labor de cultivo",
+  "entity.soil_cover": "cubierta del suelo",
+  "entity.plot_water_point": "captación de agua",
+  "entity.plot_zone_flag": "zona de la parcela",
+  "entity.plot_water_declaration": "declaración de captaciones",
+  "entity.geo_feature": "geometría",
+  "entity.farm_advisor": "asesor de la explotación",
+  "entity.register_declaration": "declaración de registro",
+  "entity.export_alias": "referencia de exportación",
   "entity.treatment_record": "tratamiento",
   "entity.operator": "operador",
   "entity.machinery": "maquinaria",
   "entity.plot": "parcela",
-  "message.refreshed": "Alertas actualizadas.",
   "message.seeded": "Demostración cargada: campaña {season} ({farm}).",
   "message.already_seeded": "La base de datos ya contiene datos; no se ha cargado nada.",
   "notif.aria": "Notificaciones",
@@ -58,13 +101,22 @@ export default {
   "nav.record_book": "Cuaderno",
   "nav.registry": "Catálogo",
   "nav.settings": "Ajustes",
+  "nav.back_to": "Volver a {section}",
   "form.save": "Guardar",
   "form.cancel": "Cancelar",
+  "pagination.aria": "Páginas",
+  "pagination.previous": "Página anterior",
+  "pagination.next": "Página siguiente",
+  "pagination.page": "Página {page}",
+  "pagination.range": "{from}–{to} de {total}",
   "form.edit": "Editar",
   "form.close": "Cerrar",
   "form.delete": "Eliminar",
   "form.remove": "Quitar",
   "form.required": "Este campo es obligatorio",
+  "form.catalogue_code_unknown":
+    "Sin nombre en este dispositivo: actualice los catálogos en la página «{settings}».",
+  "form.required_legend": "Los campos marcados son obligatorios",
   "form.check_fields.one": "Revise 1 campo antes de guardar",
   "form.check_fields.other": "Revise {count} campos antes de guardar",
   "form.save_refused": "No se pudo guardar",
@@ -121,6 +173,9 @@ export default {
   "unit.units.one": "unidad",
   "unit.units.other": "unidades",
   "unit.units_ha": "unidades/ha",
+  "unit.units_m2": "unidades/m²",
+  "unit.m2": "m²",
+  "unit.net_m2_ha": "m² de malla/ha",
   "message.db_checked_freed": "Base de datos en buen estado. Se han recuperado {size}.",
   "message.db_checked_clean": "Base de datos en buen estado. No había espacio que recuperar.",
   "message.db_check_failed":
@@ -130,6 +185,40 @@ export default {
   // concordarían cada uno con una cifra distinta.
   "message.catalogues_refreshed":
     "Catálogos · actualizados: {updated} · sin cambios: {unchanged} · rechazados: {refused}.",
+  "actions.export_sync": "Exportar cambios",
+  "actions.import_sync": "Importar cambios",
+  "message.sync_exported.one": "Un cambio guardado en {path} ({size}).",
+  "message.sync_exported.other": "{count} cambios guardados en {path} ({size}).",
+  "message.sync_nothing_to_send":
+    "No hay cambios nuevos para ese dispositivo. El archivo se ha guardado igualmente en {path}.",
+  "message.sync_imported.one": "Un cambio aplicado desde {device}.",
+  "message.sync_imported.other": "{count} cambios aplicados desde {device}.",
+  "message.sync_conflicts_waiting.one":
+    "Un registro lo han escrito dos dispositivos a la vez y espera su decisión.",
+  "message.sync_conflicts_waiting.other":
+    "{count} registros los han escrito dos dispositivos a la vez y esperan su decisión.",
+  "message.sync_duplicates_waiting.one":
+    "Hay un posible duplicado por revisar en la página «{status}».",
+  "message.sync_duplicates_waiting.other":
+    "Hay {count} posibles duplicados por revisar en la página «{status}».",
+  "message.sync_strays_waiting.one":
+    "Hay un registro que ningún cuaderno muestra, porque el suyo se eliminó: revíselo en la página «{status}».",
+  "message.sync_strays_waiting.other":
+    "Hay {count} registros que ningún cuaderno muestra, porque el suyo se eliminó: revíselos en la página «{status}».",
+  "message.sync_name_the_device":
+    "Puede ponerle nombre en Ajustes, en «Dispositivos de esta explotación».",
+  "message.sync_catalogues_may_lag":
+    "Puede que los catálogos de este dispositivo necesiten actualizarse: llegan códigos sin nombre. Actualícelos en el apartado «{catalogues}» de la página «{settings}».",
+  "message.sync_nothing_new": "Ese archivo no traía nada que este dispositivo no tuviera ya.",
+  "message.sync_erased": "Se ha borrado definitivamente lo que ya no se podía recuperar: {what}.",
+  "message.sync_erased_books.one": "un cuaderno",
+  "message.sync_erased_books.other": "{count} cuadernos",
+  "message.sync_erased_records.one": "un registro",
+  "message.sync_erased_records.other": "{count} registros",
+  "message.sync_discarded.one":
+    "Un cambio hecho en {device} a un registro borrado definitivamente no se ha aplicado.",
+  "message.sync_discarded.other":
+    "{count} cambios hechos en {device} a registros borrados definitivamente no se han aplicado.",
   "actions.export_backup": "Exportar copia de seguridad",
   "actions.import_backup": "Importar copia de seguridad",
   "message.backup_saved": "Copia guardada en {path} ({size}).",
@@ -216,7 +305,6 @@ export default {
   // The tab bar's overflow button: what it opens is the tabs that did not fit,
   // so it names the remainder rather than an action.
   "tabs.more": "Más",
-  "workspace.resize": "Ajustar el ancho del panel",
   "product.no_substances": "Este producto no tiene sustancias activas registradas.",
   "column.composition": "Composición",
   "table.resize_column": "Ajustar el ancho de la columna {column}",
@@ -276,8 +364,10 @@ export default {
   "column.finding": "Aviso",
   "column.detail": "Detalle",
   "column.notes": "Notas",
-  "column.status": "Estado",
   "column.campaign": "Campaña",
+  "column.farm": "Explotación",
+  "column.starts": "Inicio",
+  "column.ends": "Fin",
 
   // What a register with no rows says. Generic on purpose: a table that is
   // empty because nothing has happened yet is the same statement in every

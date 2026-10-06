@@ -16,6 +16,7 @@
   import { formatDate, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import DateInput from "./DateInput.svelte";
@@ -90,7 +91,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
 
@@ -123,18 +124,22 @@
       plot_ids: chosenPlots,
     };
 
+    let savedId = editingId;
     if (editingId) {
       await invoke("update_cultural_operation", {
         culturalOperationId: editingId,
         update: payload,
       });
     } else {
-      await invoke("create_cultural_operation", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_cultural_operation", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideForm();
     load();
+    await checkSaved("cultural_operation", savedId);
   }
 
   function remove(record) {
@@ -241,6 +246,7 @@
               (entry) => entry.name,
               (entry) => entry.code,
             )}
+            catalogue
             bind:value={residueDestinationCode}
           />
           <TextInput label={t("treatment.notes")} bind:value={notes} />

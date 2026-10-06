@@ -13,6 +13,7 @@
   // docs/siex-export.md).
   import { formatDate, formatNumber, t } from "../i18n.js";
   import { invoke } from "./backend.js";
+  import { exportFileName } from "./exportName.js";
   import { notify, run } from "./notifications.svelte.js";
   import TzSelect from "./TzSelect.svelte";
 
@@ -72,7 +73,8 @@
       check.covers_missing_widths.length === 0 &&
       check.inert_covers_established_late.length === 0 &&
       check.covers_missing_maintenance.length === 0 &&
-      check.grazing_records_without_end.length === 0
+      check.grazing_records_without_end.length === 0 &&
+      check.unnamed_codes === 0
     );
   }
 
@@ -91,7 +93,7 @@
     run(async () => {
       const path = await invoke("plugin:dialog|save", {
         options: {
-          defaultPath: exportFileName("cuaderno", "pdf", reportLanguage),
+          defaultPath: bookFileName("cuaderno", "pdf", reportLanguage),
           filters: [{ name: "PDF", extensions: ["pdf"] }],
         },
       });
@@ -114,7 +116,7 @@
     run(async () => {
       const path = await invoke("plugin:dialog|save", {
         options: {
-          defaultPath: exportFileName("cuaderno", "xlsx", reportLanguage),
+          defaultPath: bookFileName("cuaderno", "xlsx", reportLanguage),
           filters: [{ name: "Excel", extensions: ["xlsx"] }],
         },
       });
@@ -131,25 +133,12 @@
 
   /// Suggested name for an export: `<documento>_<campaña>[_<idioma>]_<fecha>`.
   ///
-  /// Underscores separate the fields because the campaign label already
-  /// contains hyphens once sanitised ("2025/2026" → "2025-2026"), and the date
-  /// is compact (YYYYMMDD) so it cannot be misread as a second year range.
   /// The language code rides along whenever the book has one, so the two
-  /// language versions of the same season never look like the same file.
-  ///
-  /// The date is not decoration: re-exporting a season would otherwise always
-  /// propose the same name. On Android that means colliding with the previous
-  /// file, and the SAF picker renames the collision badly — it appends the
-  /// counter AFTER the extension ("cuaderno.pdf (2)"), because
-  /// tauri-plugin-dialog sends `intent.type = "*/*"` and Android then cannot
-  /// tell where the extension starts. Distinct names sidestep it, and telling
-  /// two exports of the same season apart is worth having regardless.
-  function exportFileName(document, extension, language) {
-    // Season labels can carry path-hostile characters ("2025/2026").
-    const label = (seasonLabel || seasonId).replace(/[^\p{L}\p{N}._-]+/gu, "-");
-    const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
-    const parts = [document, label, language, stamp].filter(Boolean);
-    return `${parts.join("_")}.${extension}`;
+  /// language versions of the same season never look like the same file. The
+  /// rest — sanitising, and why the stamp carries the time — lives in
+  /// `exportName.js`, which the backup export shares.
+  function bookFileName(document, extension, language) {
+    return exportFileName([document, seasonLabel || seasonId, language], extension);
   }
 
   // Advisory findings that name a treatment print it as date + product. A
@@ -160,11 +149,11 @@
     return `${formatDate(ref.application_date)} — ${ref.product_name ?? t("treatment.non_chemical")}`;
   }
 
-  /// The advisory as ROWS rather than eleven hand-written blocks: each finding
-  /// is a title and what it is about, in the order the book is read. Built as
-  /// data because the table takes one shape and the list is what varies —
-  /// eleven `{#if}` blocks each spelling out its own markup was how a finding
-  /// came to be worded three different ways.
+  /// The advisory as ROWS rather than a hand-written block per finding: each
+  /// finding is a title and what it is about, in the order the book is read.
+  /// Built as data because the table takes one shape and the list is what
+  /// varies — an `{#if}` block per finding, each spelling out its own markup,
+  /// was how a finding came to be worded three different ways.
   ///
   /// `key` is the field name the backend answered under, so it is stable and
   /// unique without inventing an id.
@@ -225,6 +214,16 @@
         `${t("advisory.grazing_records_without_end_hint")} ${advisory.grazing_records_without_end
           .map((ref) => formatDate(ref.started_on))
           .join("; ")}`,
+    );
+    // A finding about this device rather than the book: codes its catalogues
+    // cannot name, printed bare. A count, because the remedy is the same for
+    // every one of them.
+    add("unnamed_codes", advisory.unnamed_codes > 0 ? advisory.unnamed_codes : null, () =>
+      t("advisory.unnamed_codes_hint", {
+        count: advisory.unnamed_codes,
+        settings: t("nav.settings"),
+        catalogues: t("settings.catalogues"),
+      }),
     );
     return rows;
   });

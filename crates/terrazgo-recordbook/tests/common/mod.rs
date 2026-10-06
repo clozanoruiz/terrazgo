@@ -9,7 +9,7 @@
 //! The "export-ready Spanish farm" fixture is NOT here, and that is a decision
 //! rather than an omission: `terrazgo-siex/tests/export.rs` builds a
 //! field-for-field twin of it, and closing that duplication would mean the
-//! testkit reaching into module-cue — which is precisely the back door the
+//! testkit reaching into module-phytosanitary — which is precisely the back door the
 //! core-only rule exists to keep shut. Roughly sixty duplicated lines is the
 //! cheaper of the two costs, and it is the same trade the crates themselves
 //! make: the book and the descriptor read the same registers and share no code.
@@ -23,8 +23,8 @@
 // auto-allows #[test] fns, so file-level for the shared fixtures/helpers too.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 use serde_json::Value;
 use terrazgo_core::models::{FarmEsFields, NewWaterPoint, PlotEsFields};
@@ -78,18 +78,6 @@ pub struct Fixture {
 }
 
 pub fn fixture(conn: &mut Connection) -> Fixture {
-    let season = repo::insert_season(
-        conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
-
     let farm = repo::insert_farm(
         conn,
         NewFarm {
@@ -103,6 +91,18 @@ pub fn fixture(conn: &mut Connection) -> Fixture {
                 siex_code: None,
                 province_code: Some("47".into()),
             }),
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+    let season = repo::insert_season(
+        conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -269,6 +269,7 @@ pub fn treatment(fx: &Fixture, application_date: &str) -> NewTreatmentRecord {
         measure_intensity_value: None,
         measure_intensity_unit_code: None,
         measure_registration_number: None,
+        measure_basic_substance_code: None,
         phi_days_used: None,
         notes: None,
     }

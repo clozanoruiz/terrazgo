@@ -29,6 +29,7 @@
   import { Check } from "@lucide/svelte";
   import { t } from "../i18n.js";
   import { refusalStore } from "./formRefusal.js";
+  import RequiredMark from "./RequiredMark.svelte";
 
   let {
     /// Single-checkbox form: the checked state itself.
@@ -112,6 +113,7 @@
     {name}
     {disabled}
     data-tz-label={label}
+    aria-required={required || undefined}
     aria-describedby={hint ? `${uid}-hint` : undefined}
     onchange={onChange}
     oninvalid={() => (showError = true)}
@@ -125,7 +127,7 @@
   </span>
 
   <span class="tz-check-text">
-    {label}
+    {label}<RequiredMark {required} />
     {#if hint}<small id="{uid}-hint">{hint}</small>{/if}
     {#if showError && error}
       <small class="tz-field-error">{error}</small>

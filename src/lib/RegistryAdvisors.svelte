@@ -79,7 +79,7 @@
   // The "·"-joined detail string is gone: each value is its own column, which
   // is what lets a reader scan one down the list.
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(advisors.find((a) => a.id === editingId) ?? null);
 </script>

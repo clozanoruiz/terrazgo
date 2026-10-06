@@ -12,11 +12,12 @@
 //! conflict). Soft delete keeps history: fetched geometry cannot be re-derived
 //! offline, so replaced rows stay provable and sync like any user data.
 
-use crate::audit::{log_delete, log_insert};
+use crate::audit::{ChangeStamp, begin, log_delete, log_insert};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::geojson::validate_boundary_geometry;
 use crate::models::{GeoFeature, NewGeoFeature};
+use crate::sync::{GEO_FEATURE_SLOT, slot_id_of};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
@@ -30,9 +31,13 @@ pub fn save_geo_feature(
 ) -> Result<GeoFeature> {
     validate_arc(&new)?;
     validate_boundary_geometry(&new.geometry)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     ensure_subject_exists(&tx, &new)?;
-    replace_active(&tx, &new, actor)?;
+    // The register is the slot, so the row this replaces and the row replacing
+    // it are two versions of one register. Keyed off the input, whose slot
+    // fields the stored row copies verbatim below.
+    let stamp = tx.register("geo_feature", &slot_id_of(&new, GEO_FEATURE_SLOT)?, None)?;
+    replace_active(&tx, &new, &stamp)?;
 
     let now = now_utc_iso();
     let feature = GeoFeature {
@@ -70,7 +75,7 @@ pub fn save_geo_feature(
             feature.updated_at
         ],
     )?;
-    log_insert(&tx, "geo_feature", &feature.id, None, actor, &feature)?;
+    log_insert(&tx, &stamp, "geo_feature", &feature.id, &feature)?;
     tx.commit()?;
     Ok(feature)
 }
@@ -93,7 +98,7 @@ pub fn list_geo_features_for_farm(conn: &Connection, farm_id: &str) -> Result<Ve
 
 /// Soft delete one geometry row (e.g. the user discards a drawn boundary).
 pub fn soft_delete_geo_feature(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM geo_feature WHERE id = ?1 AND deleted_at IS NULL",
@@ -102,7 +107,8 @@ pub fn soft_delete_geo_feature(conn: &mut Connection, id: &str, actor: Option<&s
         )
         .optional()?
         .ok_or(CoreError::NotFound)?;
-    soft_delete_row(&tx, &before, actor)?;
+    let stamp = tx.register("geo_feature", &slot_id_of(&before, GEO_FEATURE_SLOT)?, None)?;
+    soft_delete_row(&tx, &before, &stamp)?;
     tx.commit()?;
     Ok(())
 }
@@ -142,7 +148,7 @@ fn ensure_subject_exists(tx: &Transaction, new: &NewGeoFeature) -> Result<()> {
 }
 
 /// Soft-delete the currently active row for this (subject, role, source), if any.
-fn replace_active(tx: &Transaction, new: &NewGeoFeature, actor: Option<&str>) -> Result<()> {
+fn replace_active(tx: &Transaction, new: &NewGeoFeature, stamp: &ChangeStamp) -> Result<()> {
     let current = tx
         .query_row(
             "SELECT * FROM geo_feature
@@ -153,12 +159,12 @@ fn replace_active(tx: &Transaction, new: &NewGeoFeature, actor: Option<&str>) ->
         )
         .optional()?;
     if let Some(before) = current {
-        soft_delete_row(tx, &before, actor)?;
+        soft_delete_row(tx, &before, stamp)?;
     }
     Ok(())
 }
 
-fn soft_delete_row(tx: &Transaction, before: &GeoFeature, actor: Option<&str>) -> Result<()> {
+fn soft_delete_row(tx: &Transaction, before: &GeoFeature, stamp: &ChangeStamp) -> Result<()> {
     let now = now_utc_iso();
     let mut after = before.clone();
     after.deleted_at = Some(now.clone());
@@ -167,15 +173,7 @@ fn soft_delete_row(tx: &Transaction, before: &GeoFeature, actor: Option<&str>) -
         "UPDATE geo_feature SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![before.id, now],
     )?;
-    log_delete(
-        tx,
-        "geo_feature",
-        &before.id,
-        None,
-        actor,
-        before,
-        Some(&after),
-    )?;
+    log_delete(tx, stamp, "geo_feature", &before.id, before, Some(&after))?;
     Ok(())
 }
 

@@ -1,8 +1,8 @@
 // SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! The land a register test runs on: one season, one farm with two plots, and a
-//! plot belonging to a *second* farm.
+//! The land a register test runs on: one farm with two plots and its season,
+//! and a *second* farm with a plot and a season of its own.
 //!
 //! Extracted from `module-fertilisation/tests/irrigation.rs` and
 //! `module-ecoscheme/tests/grazing.rs`, which held the same sixty lines and
@@ -18,6 +18,8 @@ use terrazgo_core::repository as core_repo;
 /// farm has a rejection test for a plot that belongs to someone else, and the
 /// fixture has to be able to hand it one.
 pub struct CoreFixture {
+    /// The farm's own season. A season belongs to one farm, so this is the
+    /// only one a record on `farm_id` may be filed under.
     pub season_id: String,
     pub farm_id: String,
     pub plot_a: String,
@@ -27,6 +29,10 @@ pub struct CoreFixture {
     pub other_farm_id: String,
     /// A plot on a different farm — the subject of every `PlotNotOnFarm` test.
     pub other_farm_plot: String,
+    /// The second farm's season, same campaign year and label. A test that
+    /// writes a record ON the other farm files it here: filing it under
+    /// `season_id` is refused by the schema before any rule under test runs.
+    pub other_season_id: String,
 }
 
 /// One plot to create: the name a test's assertions read back, and its area.
@@ -65,8 +71,10 @@ impl PlotSpec {
 /// assert_ne!(fx.plot_a, fx.other_farm_plot);
 /// ```
 pub struct FarmWithPlots {
-    pub campaign_year: i64,
-    pub season_label: String,
+    /// Both farms' season bounds. The defaults span the new year, so the
+    /// seasons are named "2025/2026".
+    pub season_starts_on: String,
+    pub season_ends_on: String,
     pub farm_name: String,
     pub other_farm_name: String,
     pub plot_a: PlotSpec,
@@ -77,8 +85,8 @@ pub struct FarmWithPlots {
 impl Default for FarmWithPlots {
     fn default() -> Self {
         Self {
-            campaign_year: 2026,
-            season_label: "2025/2026".into(),
+            season_starts_on: "2025-09-01".into(),
+            season_ends_on: "2026-08-31".into(),
             farm_name: "Finca La Vega".into(),
             other_farm_name: "Finca del Vecino".into(),
             plot_a: PlotSpec::new("El Prado", 4.0),
@@ -88,25 +96,14 @@ impl Default for FarmWithPlots {
     }
 }
 
-/// Insert the season, the two farms and the three plots, and return their ids.
+/// Insert the two farms, a season for each, and the three plots, and return
+/// their ids.
 ///
 /// Writes core rows only, so it runs on any connection whose schema starts with
 /// core's migrations — which is every module's `open_in_memory()`. The audit
 /// actor is `None`: a fixture is not a user, and a test that cares about the
 /// actor stamp is testing its own write, not this one.
 pub fn farm_with_plots(conn: &mut Connection, spec: FarmWithPlots) -> CoreFixture {
-    let season = core_repo::insert_season(
-        conn,
-        NewSeason {
-            campaign_year: spec.campaign_year,
-            label: spec.season_label,
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
-
     let farm = |conn: &mut Connection, name: String| {
         core_repo::insert_farm(
             conn,
@@ -116,6 +113,7 @@ pub fn farm_with_plots(conn: &mut Connection, spec: FarmWithPlots) -> CoreFixtur
                 owner_tax_id: None,
                 country_code: "es".into(),
                 es: None,
+                ..NewFarm::default()
             },
             None,
         )
@@ -124,6 +122,23 @@ pub fn farm_with_plots(conn: &mut Connection, spec: FarmWithPlots) -> CoreFixtur
     };
     let farm_id = farm(conn, spec.farm_name);
     let other_farm_id = farm(conn, spec.other_farm_name);
+
+    let season = |conn: &mut Connection, farm_id: &str| {
+        core_repo::insert_season(
+            conn,
+            NewSeason {
+                farm_id: farm_id.to_string(),
+                starts_on: spec.season_starts_on.clone(),
+                ends_on: spec.season_ends_on.clone(),
+                custom_label: None,
+            },
+            None,
+        )
+        .unwrap()
+        .id
+    };
+    let season_id = season(conn, &farm_id);
+    let other_season_id = season(conn, &other_farm_id);
 
     let plot = |conn: &mut Connection, farm_id: &str, spec: PlotSpec| {
         core_repo::insert_plot(
@@ -144,12 +159,13 @@ pub fn farm_with_plots(conn: &mut Connection, spec: FarmWithPlots) -> CoreFixtur
     let other_farm_plot = plot(conn, &other_farm_id, spec.other_farm_plot);
 
     CoreFixture {
-        season_id: season.id,
+        season_id,
         farm_id,
         plot_a,
         plot_b,
         other_farm_id,
         other_farm_plot,
+        other_season_id,
     }
 }
 
@@ -175,6 +191,26 @@ mod tests {
         assert_eq!(farm_of(&fx.plot_a), fx.farm_id);
         assert_eq!(farm_of(&fx.plot_b), fx.farm_id);
         assert_ne!(farm_of(&fx.other_farm_plot), fx.farm_id);
+    }
+
+    /// The same guard for seasons: each farm's season is its own, and the
+    /// other farm's plot and season agree. A fixture that crossed them would
+    /// turn every cross-farm test into a test of the schema's key instead.
+    #[test]
+    fn each_farm_has_its_own_season() {
+        let mut conn = terrazgo_core::open_in_memory().unwrap();
+        let fx = farm_with_plots(&mut conn, FarmWithPlots::default());
+
+        let farm_of_season = |season_id: &str| {
+            conn.query_row(
+                "SELECT farm_id FROM season WHERE id = ?1",
+                [season_id],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(farm_of_season(&fx.season_id), fx.farm_id);
+        assert_eq!(farm_of_season(&fx.other_season_id), fx.other_farm_id);
     }
 
     #[test]

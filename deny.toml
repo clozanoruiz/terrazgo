@@ -14,10 +14,14 @@ yanked = "deny"
 unmaintained = "workspace"
 ignore = [
   # quick-xml < 0.41 DoS vectors (quadratic dup-attribute check; unbounded
-  # namespace allocation). Transitive via tauri-utils → plist 1.9.0, which pins
-  # quick-xml 0.39.x — no compatible patched version exists (2026-07-02).
-  # Terrazgo parses no untrusted XML; plist is Apple-bundle tooling.
-  # Revisit when plist > 1.9.0 or a Tauri upgrade moves the tree.
+  # namespace allocation). Reached as typst-library → hayagriva 0.10 →
+  # citationberg 0.7, which pins quick-xml 0.38.x, and 0.7.0 is citationberg's
+  # latest release — no compatible patched version exists (2026-09-11). The
+  # other path, tauri-utils → plist, cleared when plist 1.10 moved to 0.42.
+  # Terrazgo parses no untrusted XML: citationberg reads CSL styles, which only
+  # a Typst bibliography touches, and the embedded templates have none.
+  # Revisit when citationberg leaves quick-xml 0.38 or a Typst upgrade moves
+  # the tree.
   "RUSTSEC-2026-0194",
   "RUSTSEC-2026-0195",
 ]

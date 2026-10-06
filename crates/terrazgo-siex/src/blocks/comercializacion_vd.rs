@@ -21,7 +21,7 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::siex;
+use module_phytosanitary::siex;
 use rusqlite::Connection;
 use terrazgo_core::models::HarvestRecord;
 use terrazgo_core::repository::{

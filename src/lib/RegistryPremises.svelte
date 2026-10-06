@@ -30,7 +30,7 @@
   import { opensRow } from "./tableRow.js";
   import TzCombobox from "./TzCombobox.svelte";
   import TzSelect from "./TzSelect.svelte";
-  import { codeItems, nameItems } from "./selectItems.js";
+  import { catalogueItems, codeItems, nameItems } from "./selectItems.js";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
   import TzWorkspace from "./TzWorkspace.svelte";
@@ -166,7 +166,7 @@
   // and a building has an address, instead of leaving the reader to work out
   // which half of the sentence they are looking at.
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(premises.find((d) => d.premises.id === editingId)?.premises ?? null);
 </script>
@@ -278,7 +278,8 @@
             <TzCombobox
               label={t("premises.class")}
               hint={t("premises.class_hint")}
-              items={classes.map((option) => ({ value: option.code, label: option.name }))}
+              items={catalogueItems(classes)}
+              catalogue
               bind:value={classCode}
             />
           {/if}

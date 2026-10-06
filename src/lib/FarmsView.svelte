@@ -12,11 +12,9 @@
   import { sortedBy } from "./collate.js";
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
-  import TzSelect from "./TzSelect.svelte";
-  import { codeItems } from "./selectItems.js";
-  import TextInput from "./TextInput.svelte";
-  import TzForm from "./TzForm.svelte";
   import TzWorkspace from "./TzWorkspace.svelte";
+  import FarmForm from "./FarmForm.svelte";
+  import { emptyFarmDraft, farmPayload } from "./farmDraft.js";
 
   let farms = $state([]);
   // Display order is the client's business: SQL orders by BINARY collation,
@@ -27,49 +25,26 @@
   let creating = $state(false);
   let loading = $state(true);
 
-  let name = $state("");
-  let ownerName = $state("");
-  let ownerTaxId = $state("");
-  let countryCode = $state("");
-  let regaCode = $state("");
-  let reaCode = $state("");
-  let provinceCode = $state("");
+  /// The same shape the farm's own page edits, and the same component draws it
+  /// (lib/farmDraft.js). Creating a holding and correcting one ask the same
+  /// questions now; the only difference is that the country can be chosen here
+  /// and never again.
+  let farmDraft = $state(emptyFarmDraft());
 
   run(async () => {
     await loadLookups();
-    countryCode ||= countries[0]?.code ?? "";
     farms = await invoke("list_farms");
   }).finally(() => (loading = false));
 
   function startCreate() {
-    name = "";
-    ownerName = "";
-    ownerTaxId = "";
-    regaCode = "";
-    reaCode = "";
-    provinceCode = "";
+    // Preselected rather than left blank: one country is the everyday case, and
+    // it is the one field that cannot be corrected afterwards.
+    farmDraft = emptyFarmDraft(countries[0]?.code ?? "");
     creating = true;
   }
 
-  function collectEs() {
-    if (countryCode !== "es") return null;
-    const rega = regaCode.trim() || null;
-    const rea = reaCode.trim() || null;
-    const province = provinceCode.trim() || null;
-    return rega || rea || province
-      ? { rega_code: rega, rea_code: rea, siex_code: null, province_code: province }
-      : null;
-  }
-
   async function submit() {
-    const farm = {
-      name: name.trim(),
-      owner_name: ownerName.trim() || null,
-      owner_tax_id: ownerTaxId.trim() || null,
-      country_code: countryCode,
-      es: collectEs(),
-    };
-    await invoke("create_farm", { farm });
+    await invoke("create_farm", { farm: farmPayload(farmDraft, { create: true }) });
     creating = false;
     farms = await invoke("list_farms");
   }
@@ -103,7 +78,7 @@
             </thead>
             <tbody>
               {#each sortedFarms as farm (farm.id)}
-                <!-- A farm row navigates rather than opening an inspector: the
+                <!-- A farm row navigates rather than opening a panel: the
                      holding has a page of its own. The <a> is still what a
                      keyboard reaches; the row click is the pointer shortcut. -->
                 <tr onclick={(e) => opensRow(e) && (location.hash = "#/farms/" + farm.id)}>
@@ -120,28 +95,7 @@
     {/snippet}
 
     {#snippet inspector(formId)}
-      <TzForm id={formId} onsubmit={submit}>
-        <div class="form-grid">
-          <TextInput label={t("farm.name")} required bind:value={name} />
-          <TextInput label={t("farm.owner")} bind:value={ownerName} />
-          <TextInput label={t("farm.owner_tax_id")} bind:value={ownerTaxId} />
-          <TzSelect
-            label={t("farm.country")}
-            items={codeItems(countries, "country")}
-            bind:value={countryCode}
-          />
-        </div>
-        {#if countryCode === "es"}
-          <fieldset class="es-only">
-            <legend>{t("farm.es_section")}</legend>
-            <div class="form-grid">
-              <TextInput label={t("farm.rea")} bind:value={reaCode} />
-              <TextInput label={t("farm.rega")} bind:value={regaCode} />
-              <TextInput label={t("farm.province")} bind:value={provinceCode} />
-            </div>
-          </fieldset>
-        {/if}
-      </TzForm>
+      <FarmForm bind:draft={farmDraft} {countries} creating onsubmit={submit} {formId} />
     {/snippet}
 
     {#snippet actions(formId)}

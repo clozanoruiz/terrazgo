@@ -14,7 +14,7 @@
 //! asks for and the book prints blank, and it never refuses anything.
 //!
 //! The advisory lives in this crate rather than beside the SIEX precheck
-//! because it reads the whole book — core, module-cue and module-fertilisation
+//! because it reads the whole book — core, module-phytosanitary and module-fertilisation
 //! — and modules may not read each other. Shared presentation belongs in a
 //! consumer crate above them (the placement rule of the recordbook extraction).
 
@@ -147,6 +147,12 @@ pub struct BookAdvisory {
     /// missed deadline — the month runs from the end of grazing, so the honest
     /// statement is that the book cannot show the annotation is finished.
     pub grazing_records_without_end: Vec<GrazingRef>,
+    /// Distinct codes the book prints as the bare code, because no catalogue
+    /// on THIS device names them — a finding about the device, not the book:
+    /// a record written where the catalogues are newer, read where they are
+    /// older. Updating the catalogues is the remedy, so a count is all the
+    /// screen needs (docs/sync.md → What stays device-local).
+    pub unnamed_codes: usize,
 }
 
 impl BookAdvisory {
@@ -164,6 +170,7 @@ impl BookAdvisory {
             && self.inert_covers_established_late.is_empty()
             && self.covers_missing_maintenance.is_empty()
             && self.grazing_records_without_end.is_empty()
+            && self.unnamed_codes == 0
     }
 }
 
@@ -302,17 +309,17 @@ fn inert_cover_is_late(established_on: &str) -> bool {
 /// RD 1048/2022 art. 30.2 ter annotates the grazing dates within a month, and
 /// model 9.1's own footnote counts that month **from the end of grazing**. So an
 /// open record is not late, it is unfinished — and it only becomes worth saying
-/// once the campaign it belongs to has closed. A season with no `ends_on` says
-/// nothing about that, so it produces no finding.
+/// once the campaign it belongs to has closed — which every season states,
+/// its end date being required.
 ///
 /// The dates compare as strings because ISO-8601 `YYYY-MM-DD` sorts
 /// chronologically, which is the whole reason the schema stores that shape.
 fn grazing_annotation_unfinished(
     ended_on: Option<&str>,
-    season_ends_on: Option<&str>,
+    season_ends_on: &str,
     today: &str,
 ) -> bool {
-    ended_on.is_none() && season_ends_on.is_some_and(|closed_on| closed_on < today)
+    ended_on.is_none() && season_ends_on < today
 }
 
 /// The four conditional registers, in the order the book prints them. Each
@@ -328,7 +335,7 @@ const CONDITIONAL_REGISTERS: &[&str] = &[
 /// Read the whole book and report what it is missing.
 ///
 /// `today` is passed in rather than read from the clock, so the one check that
-/// depends on it is testable — the `refresh_alerts` precedent.
+/// depends on it is testable — the alert rules' precedent.
 pub fn book_advisory(
     conn: &Connection,
     season_id: &str,
@@ -362,7 +369,9 @@ pub fn book_advisory(
     let mut treatments_missing_crop = Vec::new();
     let mut treatments_missing_efficacy = Vec::new();
     let mut operator_ids = Vec::new();
-    for record in module_cue::repository::list_treatment_records(conn, season_id, farm_id)? {
+    for record in
+        module_phytosanitary::repository::list_treatment_records(conn, season_id, farm_id)?
+    {
         let reference = || TreatmentRef {
             treatment_record_id: record.record.id.clone(),
             application_date: record.record.application_date.clone(),
@@ -385,7 +394,9 @@ pub fn book_advisory(
             }
         }
     }
-    for record in module_cue::repository::list_non_field_treatments(conn, season_id, farm_id)? {
+    for record in
+        module_phytosanitary::repository::list_non_field_treatments(conn, season_id, farm_id)?
+    {
         if !operator_ids.contains(&record.record.operator_id) {
             operator_ids.push(record.record.operator_id.clone());
         }
@@ -409,12 +420,13 @@ pub fn book_advisory(
     // not. Seed treatments and the three non-field subjects share one list of
     // register codes (`register_kind` is wider than `non_field_subject_kind`).
     let declared: Vec<String> =
-        module_cue::repository::list_register_declarations(conn, farm_id, season_id)?
+        module_phytosanitary::repository::list_register_declarations(conn, farm_id, season_id)?
             .into_iter()
             .map(|d| d.register_code)
             .collect();
-    let sowings = module_cue::repository::list_seed_treatments(conn, season_id, farm_id)?;
-    let non_field = module_cue::repository::list_non_field_treatments(conn, season_id, farm_id)?;
+    let sowings = module_phytosanitary::repository::list_seed_treatments(conn, season_id, farm_id)?;
+    let non_field =
+        module_phytosanitary::repository::list_non_field_treatments(conn, season_id, farm_id)?;
     let registers_undeclared = CONDITIONAL_REGISTERS
         .iter()
         .filter(|register| !declared.iter().any(|d| d == *register))
@@ -499,23 +511,25 @@ pub fn book_advisory(
         }
     }
 
+    // `None` only when the season does not exist, which leaves nothing to report.
     let season_ends_on: Option<String> = conn
         .query_row(
             "SELECT ends_on FROM season WHERE id = ?1",
             [season_id],
             |r| r.get(0),
         )
-        .optional()?
-        .flatten();
+        .optional()?;
     let grazing_records_without_end =
         module_ecoscheme::repository::list_grazing_records(conn, season_id, farm_id)?
             .into_iter()
             .filter(|detail| {
-                grazing_annotation_unfinished(
-                    detail.record.ended_on.as_deref(),
-                    season_ends_on.as_deref(),
-                    today,
-                )
+                season_ends_on.as_deref().is_some_and(|season_ends_on| {
+                    grazing_annotation_unfinished(
+                        detail.record.ended_on.as_deref(),
+                        season_ends_on,
+                        today,
+                    )
+                })
             })
             .map(|detail| GrazingRef {
                 grazing_record_id: detail.record.id,
@@ -535,6 +549,7 @@ pub fn book_advisory(
         inert_covers_established_late,
         covers_missing_maintenance,
         grazing_records_without_end,
+        unnamed_codes: crate::unnamed_codes(conn, season_id, farm_id, today)?,
     })
 }
 
@@ -720,19 +735,19 @@ mod tests {
         // cannot state the annotation complete once the campaign has closed.
         assert!(grazing_annotation_unfinished(
             None,
-            Some("2026-09-30"),
+            "2026-09-30",
             "2026-10-01"
         ));
         // Still inside the campaign: the animals may simply still be out.
         assert!(!grazing_annotation_unfinished(
             None,
-            Some("2026-09-30"),
+            "2026-09-30",
             "2026-06-01"
         ));
         // The last day of the campaign is not past it.
         assert!(!grazing_annotation_unfinished(
             None,
-            Some("2026-09-30"),
+            "2026-09-30",
             "2026-09-30"
         ));
     }
@@ -741,17 +756,9 @@ mod tests {
     fn a_closed_grazing_is_never_reported() {
         assert!(!grazing_annotation_unfinished(
             Some("2026-06-15"),
-            Some("2026-09-30"),
+            "2026-09-30",
             "2027-01-01"
         ));
-    }
-
-    #[test]
-    fn a_season_with_no_end_date_says_nothing_about_open_grazings() {
-        // `ends_on` is nullable. Without one, nothing in the book says the
-        // campaign is over, so claiming the annotation is overdue would be an
-        // invention rather than a finding.
-        assert!(!grazing_annotation_unfinished(None, None, "2030-01-01"));
     }
 
     #[test]

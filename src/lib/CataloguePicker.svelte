@@ -26,7 +26,9 @@
   let {
     name = $bindable(""),
     code = $bindable(null),
-    /// [{ code, name }] — whatever list the caller loaded.
+    /// [{ code, name, offered? }] — whatever list the caller loaded. A code not
+    /// offered is never suggested: the record stores the name beside the code,
+    /// so this field never needs the list to show what it carries.
     options = [],
     required = false,
     placeholder = t("crop.species_search"),
@@ -57,11 +59,13 @@
   // Fold once per list rather than once per keystroke: normalize() is not cheap
   // and the catalogues behind these fields run to thousands of rows.
   const items = $derived(
-    options.map((option) => ({
-      value: option.code,
-      label: option.name,
-      folded: fold(option.name),
-    })),
+    options
+      .filter((option) => option.offered !== false)
+      .map((option) => ({
+        value: option.code,
+        label: option.name,
+        folded: fold(option.name),
+      })),
   );
 
   // The typed name IS the query — that is the whole point of this control, and
@@ -135,6 +139,7 @@
     <Combobox.Input
       bind:ref={input}
       {placeholder}
+      aria-required={required || undefined}
       autocomplete="off"
       oninput={onInput}
       onkeydown={onKeydown}

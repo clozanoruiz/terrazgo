@@ -157,7 +157,7 @@
   // hint sends the user to the catalogue view to create them.
   const missingRefs = $derived(products.length === 0 || operators.length === 0);
 
-  /// The row the inspector is editing, so the delete button beside the form —
+  /// The row the panel is editing, so the delete button beside the form —
   /// and the efficacy control above it — know which record they are about.
   /// Null while entering a new one.
   const editing = $derived(treatments.find(({ record }) => record.id === draft.editingId) ?? null);
@@ -166,7 +166,7 @@
 <div class="view-head">
   <h3>{t("treatments.records_title")}</h3>
   <!-- Always opens a blank form, never toggles the pane shut: with the entry
-       form in an inspector, "new" beside a record being corrected means a new
+       form in a panel, "new" beside a record being corrected means a new
        record, and the pane has a close button of its own. -->
   <button type="button" onclick={() => showForm()} disabled={missingRefs || plots.length === 0}>
     {t("treatments.new")}
@@ -245,7 +245,7 @@
   {#snippet inspector(formId)}
     <!-- Efficacy is observed AFTER the application, so a correction never
          carries it: it has its own audited setter and saves on change. It used
-         to sit on every row for want of anywhere else; the inspector names the
+         to sit on every row for want of anywhere else; the panel names the
          record it is about, which is where it belonged. -->
     {#if editing}
       <div class="form-grid">

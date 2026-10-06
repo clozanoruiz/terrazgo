@@ -2,17 +2,26 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script>
-  // The record book (cuaderno) shell: pick a farm and a season, then work
-  // through the registers the official model is made of, one tab per register.
-  // This component owns only what every tab shares — the selectors, the
-  // campaign itself and the catalogue data the forms reference; each register
-  // lives in its own Book* child (the RegistryView pattern).
+  // One record book (cuaderno): a holding's campaign, opened from the record
+  // book list, worked through one tab per register of the official model. This
+  // component owns only what every tab shares — the campaign itself and the
+  // catalogue data the forms reference; each register lives in its own Book*
+  // child (the RegistryView pattern).
+  //
+  // It used to pick its farm and campaign from two selectors at the top. A
+  // season now belongs to one farm, so a book is a season and the page is
+  // opened on one: the farm comes from the season, and the way to another book
+  // is back to the list.
   import { locale, t } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { deleteConfirm } from "./bookRemoval.js";
   import { loadLookups } from "./lookups.svelte.js";
-  import { run } from "./notifications.svelte.js";
-  import NumberInput from "./NumberInput.svelte";
+  import { notify, run } from "./notifications.svelte.js";
+  import { setPageTitle } from "./pageTitle.svelte.js";
   import BookCrops from "./BookCrops.svelte";
+  import BookMerge from "./BookMerge.svelte";
+  import DuplicateSuspects from "./DuplicateSuspects.svelte";
+  import RemovedWithBook from "./RemovedWithBook.svelte";
   import BookExport from "./BookExport.svelte";
   import BookEcoschemes from "./BookEcoschemes.svelte";
   import BookSowing from "./BookSowing.svelte";
@@ -21,27 +30,25 @@
   import BookIrrigation from "./BookIrrigation.svelte";
   import BookOtherTreatments from "./BookOtherTreatments.svelte";
   import BookTreatments from "./BookTreatments.svelte";
-  import DateInput from "./DateInput.svelte";
   import Skeleton from "./Skeleton.svelte";
-  import TzSelect from "./TzSelect.svelte";
   import TzTabs from "./TzTabs.svelte";
-  import { nameItems } from "./selectItems.js";
-  import TextInput from "./TextInput.svelte";
-  import TzForm from "./TzForm.svelte";
+  import TzFormDialog from "./TzFormDialog.svelte";
+  import SeasonForm from "./SeasonForm.svelte";
+  import { emptySeasonDraft, seasonDraftFrom, seasonPayload } from "./seasonDraft.js";
+
+  let { seasonId } = $props();
 
   let loading = $state(true);
 
-  // Farm-independent data, loaded once.
-  let farms = $state([]);
-  let seasons = $state([]);
-  let operators = $state([]);
-  // Counts, for model 3.1 bis's "intensidad de la medida" — a third list
-  // because a number of traps is neither a rate nor an amount of product.
-  let advisors = $state([]);
-  // Section 8's own vocabularies (module-fertilisation).
+  /// The book: its season, and the holding that season belongs to.
+  let season = $state(null);
+  let farm = $state(null);
+  const farmId = $derived(season?.farm_id ?? "");
+  const countryCode = $derived(farm?.country_code);
 
-  let farmId = $state("");
-  let seasonId = $state("");
+  // Farm-independent data.
+  let operators = $state([]);
+  let advisors = $state([]);
 
   // Farm-scoped data (plots, machines, premises, products authorised in its
   // country).
@@ -50,19 +57,9 @@
   let premises = $state([]);
   let products = $state([]);
 
-  // (farm, season)-scoped data: the record book itself.
+  // Season-scoped data: the record book itself.
   let crops = $state([]);
   let treatments = $state([]);
-
-  let seasonFormOpen = $state(false);
-
-  // Season form (defaults to the current campaign year).
-  // null editingSeasonId = the form creates, an id = it edits.
-  let editingSeasonId = $state(null);
-  let campaignYear = $state(new Date().getFullYear());
-  let seasonLabel = $state(String(new Date().getFullYear()));
-  let startsOn = $state("");
-  let endsOn = $state("");
 
   // Which register is open. Component-local on purpose: nothing links into a
   // book tab, so there is nothing for the hash to carry.
@@ -83,29 +80,31 @@
   const tabItems = $derived(TABS.map((name) => ({ value: name, label: t(`book.tab_${name}`) })));
 
   run(async () => {
-    [farms, seasons, operators, advisors] = await Promise.all([
-      invoke("list_farms"),
-      invoke("list_seasons"),
+    const opened = await invoke("get_season", { seasonId });
+    const [detail, operatorList, advisorList] = await Promise.all([
+      invoke("get_farm", { farmId: opened.farm_id }),
       invoke("list_operators"),
       invoke("list_advisors"),
+      // The session-wide reference lists come from lib/lookups.svelte.js, which
+      // fetches them once for the whole app; the children read them from there
+      // rather than being handed twenty props.
+      loadLookups(),
     ]);
-    // The session-wide reference lists come from lib/lookups.svelte.js, which
-    // fetches them once for the whole app; the children read them from there
-    // rather than being handed twenty props.
-    await loadLookups();
-    // Preselect the first farm and the newest season — the everyday case is
-    // one farm, current campaign.
-    if (farms.length > 0) farmId = farms[0].id;
-    if (seasons.length > 0) seasonId = seasons[0].id;
+    [operators, advisors] = [operatorList, advisorList];
+    farm = detail.farm;
+    season = opened;
+    nameThePage();
     await loadFarmScope();
     await loadBook();
   }).finally(() => (loading = false));
 
+  /// The shell's band names the book by its holding and campaign; the section
+  /// name stays in the sidebar.
+  function nameThePage() {
+    setPageTitle(`${farm.name} · ${season.label}`);
+  }
+
   async function loadFarmScope() {
-    if (!farmId) {
-      [plots, machinery, premises, products, reportLanguages] = [[], [], [], [], []];
-      return;
-    }
     [plots, machinery, premises, products] = await Promise.all([
       invoke("list_plots", { farmId }),
       invoke("list_machinery", { farmId }),
@@ -116,74 +115,86 @@
   }
 
   async function loadBook() {
-    if (!farmId || !seasonId) {
-      [crops, treatments] = [[], []];
-      return;
-    }
     [crops, treatments] = await Promise.all([
       invoke("list_crops", { seasonId, farmId }),
       invoke("list_treatment_records", { seasonId, farmId }),
     ]);
   }
 
-  function selectFarm() {
-    run(async () => {
-      await loadFarmScope();
-      await loadBook();
-    });
-  }
+  // Bumped when a record changed underneath the open register — a decision
+  // about a possible duplicate removed one copy or restored it — so the tab is
+  // remounted and reads its register afresh. Each register loads its own list
+  // on mount, so this is the one reload that reaches all of them.
+  let revision = $state(0);
 
-  function selectSeason() {
+  function bookChanged() {
+    revision += 1;
     run(loadBook);
   }
 
-  // --- seasons ---------------------------------------------------------------
+  /// Records came back into this book: its registers list them again, and
+  /// they may pair with what is there.
+  function recordsBack() {
+    bookChanged();
+    run(() => duplicates?.reload());
+  }
 
-  function showSeasonForm(season = null) {
-    editingSeasonId = season?.id ?? null;
-    campaignYear = season?.campaign_year ?? new Date().getFullYear();
-    seasonLabel = season?.label ?? String(new Date().getFullYear());
-    startsOn = season?.starts_on ?? "";
-    endsOn = season?.ends_on ?? "";
+  // --- the campaign ------------------------------------------------------------
+
+  let seasonFormOpen = $state(false);
+  let seasonDraft = $state(emptySeasonDraft());
+
+  function showSeasonForm() {
+    seasonDraft = seasonDraftFrom(season);
     seasonFormOpen = true;
   }
 
-  function hideSeasonForm() {
-    seasonFormOpen = false;
-    editingSeasonId = null;
-  }
-
   async function submitSeason() {
-    const payload = {
-      campaign_year: Number(campaignYear),
-      label: seasonLabel.trim(),
-      starts_on: startsOn || null,
-      ends_on: endsOn || null,
-    };
-    if (editingSeasonId) {
-      await invoke("update_season", { seasonId: editingSeasonId, update: payload });
-    } else {
-      const saved = await invoke("create_season", { season: payload });
-      seasonId = saved.id;
-    }
-    hideSeasonForm();
-    seasons = await invoke("list_seasons");
-    await loadBook();
+    season = await invoke("update_season", { seasonId, update: seasonPayload(seasonDraft) });
+    seasonFormOpen = false;
+    nameThePage();
   }
 
-  /// Only an empty season can go; the backend answers `season_in_use` otherwise,
-  /// and the notification bell renders that as a plain explanation.
-  function deleteSeason() {
-    const season = seasons.find((s) => s.id === seasonId);
-    if (!season) return;
+  /// The book goes with everything in it (docs/sync.md → Deleting a book with
+  /// its records), so the confirmation says how many records go and until when
+  /// the book can be brought back — and where from: the foot of the list this
+  /// page returns to. Beside Edit in the band rather than inside its panel:
+  /// this page IS the book, as the farm's page is the farm, and both put what
+  /// can be done to the record in the band that names it.
+  /// Whether the deletion is under way: it takes every record of the book in
+  /// one write, seconds on a large one, and a second press must not follow.
+  let deleting = $state(false);
+
+  function deleteBook() {
     run(async () => {
-      if (!(await confirmDialog(t("season.delete_confirm", { label: season.label })))) return;
-      await invoke("delete_season", { seasonId: season.id });
-      hideSeasonForm();
-      seasons = await invoke("list_seasons");
-      seasonId = seasons[0]?.id ?? "";
-      await loadBook();
+      const preview = await invoke("book_deletion_preview", { seasonId });
+      if (!(await confirmDialog(deleteConfirm(season, farm.name, preview)))) return;
+      deleting = true;
+      try {
+        await invoke("delete_season", { seasonId });
+      } finally {
+        deleting = false;
+      }
+      notify(t("season.deleted", { label: season.label }));
+      location.hash = "#/record-book";
     });
+  }
+
+  // The page's duplicates line sits outside the remounted tabs, so a change
+  // that can make pairs is told to it directly.
+  let duplicates = $state(null);
+
+  /// This book and another are one now. When this one went, its records are
+  /// in the other, and that is the page to be on; when this one stayed, it
+  /// holds the other's records too — and records typed in both books are pairs
+  /// of ONE book now, so the duplicates line is read again.
+  function merged(kept, absorbedId) {
+    if (absorbedId === seasonId) {
+      location.hash = `#/record-book/${kept.id}`;
+      return;
+    }
+    bookChanged();
+    run(() => duplicates?.reload());
   }
 
   // --- the book's language --------------------------------------------------
@@ -195,98 +206,75 @@
   let defaultLanguage = $state("es");
 
   async function loadReportLanguages() {
-    if (!farmId) return;
     const info = await invoke("report_languages", { farmId, uiLocale: locale() });
     reportLanguages = info.languages;
     defaultLanguage = info.default;
   }
-
-  const countryCode = $derived(farms.find((f) => f.id === farmId)?.country_code);
-  const currentSeasonLabel = $derived(seasons.find((s) => s.id === seasonId)?.label ?? "");
 </script>
 
 <section class="view framed">
   {#if loading}
     <Skeleton />
-  {:else if farms.length === 0}
-    <p>{t("treatments.no_farms")} <a href="#/farms">{t("nav.farms")}</a></p>
+  {:else if !season}
+    <p class="table-empty">
+      {t("record_book.not_found")} <a href="#/record-book">{t("nav.record_book")}</a>
+    </p>
   {:else}
-    <!-- The book's chrome: which holding, which campaign, and what can be done
-         to the campaign. A fixed band rather than a block that scrolls with the
-         register, because the answer to "which book am I writing in" must not
-         be something you scroll back up to check. -->
+    <!-- What can be done to the book, in a fixed band rather than a block that
+         scrolls with the register. Which book this is — the holding and the
+         campaign — is the shell band's title above, so this band labels the
+         section like every other band does. -->
     <div class="view-head">
-      <div class="form-grid">
-        <TzSelect
-          label={t("treatments.farm")}
-          items={nameItems(farms)}
-          bind:value={farmId}
-          onchange={selectFarm}
-        />
-        <!-- Not nameItems: campaigns arrive in the backend's own order, which is
-             chronological and is the order a farmer expects. -->
-        <TzSelect
-          label={t("treatments.season")}
-          items={seasons.map((season) => ({ value: season.id, label: season.label }))}
-          disabled={seasons.length === 0}
-          bind:value={seasonId}
-          onchange={selectSeason}
-        />
-      </div>
-      <div class="selector-buttons">
-        <button type="button" onclick={() => showSeasonForm()}>{t("seasons.new")}</button>
-        {#if seasonId}
-          <button
-            type="button"
-            onclick={() => showSeasonForm(seasons.find((s) => s.id === seasonId))}
-          >
-            {t("form.edit")}
-          </button>
-          <button type="button" class="btn-danger" onclick={deleteSeason}>
-            {t("form.delete")}
-          </button>
-        {/if}
+      <h2>{t("record_book.section")}</h2>
+      <div class="head-actions">
+        <button type="button" onclick={showSeasonForm}>{t("form.edit")}</button>
+        <!-- Drawn only while another book of the farm shares days with this
+             one: a twin, not last year's book. -->
+        <BookMerge {season} onmerged={merged} />
+        <button type="button" class="btn-danger" disabled={deleting} onclick={deleteBook}>
+          {t("record_book.delete")}
+        </button>
       </div>
     </div>
 
-    {#if seasonFormOpen || seasons.length === 0}
-      <!-- A block between two fixed bands, so it states its own height rather
-           than being squeezed by the register below it. -->
-      <div class="season-form">
-        {#if seasons.length === 0}
-          <p>{t("seasons.empty")}</p>
-        {/if}
-        <TzForm onsubmit={submitSeason}>
-          <div class="form-grid">
-            <NumberInput
-              label={t("season.campaign_year")}
-              min={2000}
-              max={2100}
-              required
-              bind:value={campaignYear}
-            />
-            <TextInput label={t("season.label")} required bind:value={seasonLabel} />
-            <DateInput label={t("season.starts")} bind:value={startsOn} />
-            <DateInput label={t("season.ends")} bind:value={endsOn} />
-          </div>
-          <div class="form-actions">
-            <button type="submit">{t("form.save")}</button>
-            {#if seasons.length > 0}
-              <button type="button" class="btn-cancel" onclick={hideSeasonForm}>
-                {t("form.cancel")}
-              </button>
-            {/if}
-          </div>
-        </TzForm>
+    <TzFormDialog
+      open={seasonFormOpen}
+      title={season.label}
+      onclose={() => (seasonFormOpen = false)}
+      body={seasonFields}
+      actions={seasonActions}
+    />
+
+    {#snippet seasonFields(formId)}
+      <SeasonForm bind:draft={seasonDraft} onsubmit={submitSeason} {formId} />
+    {/snippet}
+
+    {#snippet seasonActions(formId)}
+      <div class="form-actions">
+        <button type="submit" form={formId}>{t("form.save")}</button>
+        <button type="button" class="btn-cancel" onclick={() => (seasonFormOpen = false)}>
+          {t("form.cancel")}
+        </button>
       </div>
-    {/if}
+    {/snippet}
+
+    <!-- Records deleted with this book that it came back without — renamed
+         elsewhere while it was deleted, or opened again: one line when there
+         are any, nothing otherwise. -->
+    <RemovedWithBook {seasonId} onchanged={recordsBack} />
+
+    <!-- The book's own possible duplicates, whatever its age: one line when
+         there are any, nothing when there are none. -->
+    <DuplicateSuspects bind:this={duplicates} {seasonId} onchanged={bookChanged} />
 
     {#if farmId && seasonId}
       <TzTabs items={tabItems} bind:value={tab} framed>
         {#snippet panel()}
           <!-- Remounted when the book changes: every register's open form and
-               draft state belongs to one (farm, season), never to the next. -->
-          {#key `${farmId}:${seasonId}`}
+               draft state belongs to one book, never to the next. And when a
+               decision about a pair removed or restored a record, since the
+               open register is listing it. -->
+          {#key `${seasonId}|${revision}`}
             {#if tab === "crops"}
               <!-- Stacked rather than given a tab each: a sowing is how the
                    crop above it began, and the two read together. A stack
@@ -296,7 +284,8 @@
                 <BookCrops
                   {farmId}
                   {seasonId}
-                  seasonLabel={currentSeasonLabel}
+                  seasonLabel={season.label}
+                  {countryCode}
                   {plots}
                   {crops}
                   onChanged={loadBook}
@@ -341,7 +330,7 @@
                 <BookFertilisation {farmId} {seasonId} {countryCode} {plots} {crops} {machinery} />
               </div>
             {:else if tab === "irrigation"}
-              <BookIrrigation {farmId} {seasonId} {plots} {crops} />
+              <BookIrrigation {farmId} {seasonId} {countryCode} {plots} {crops} />
             {:else if tab === "ecoschemes"}
               <BookEcoschemes {farmId} {seasonId} {countryCode} {plots} />
             {:else}
@@ -351,7 +340,7 @@
                 <BookExport
                   {farmId}
                   {seasonId}
-                  seasonLabel={currentSeasonLabel}
+                  seasonLabel={season.label}
                   {reportLanguages}
                   {defaultLanguage}
                 />
@@ -363,19 +352,3 @@
     {/if}
   {/if}
 </section>
-
-<style>
-  /* Between two fixed bands of the frame, so it states its own height instead
-     of being squeezed by the register below it. The inset is the frame's only:
-     below the breakpoint .view already supplies one and a second would double
-     it. */
-  .season-form {
-    flex: none;
-  }
-
-  @media (min-width: 701px) {
-    .season-form {
-      padding-inline: var(--space-3);
-    }
-  }
-</style>

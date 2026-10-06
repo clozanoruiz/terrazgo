@@ -14,13 +14,15 @@
 //! minted at first export and frozen forever — re-exporting must reuse it, or
 //! the authority sees a new activity instead of an update. Aliases are synced
 //! user data (they cannot be re-derived and must survive backups), so inserts
-//! are logged to `record_change`. Known limit, recorded in the design doc:
-//! two devices exporting independently before syncing could mint colliding
-//! integers — a sync-stage-2 design item; today one device exports.
+//! are logged to `record_change`. Two devices exporting independently before
+//! syncing could mint colliding integers; the design that prevents it is one
+//! submitting device per farm, built with the exporter (docs/sync.md →
+//! `export_alias` collisions).
 
-use crate::audit::log_insert;
+use crate::audit::{begin, log_insert};
 use crate::error::Result;
 use crate::models::ExportAlias;
+use crate::sync::{EXPORT_ALIAS_SLOT, slot_id_of};
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
@@ -58,7 +60,7 @@ pub fn ensure_export_alias(
     split_key: &str,
     actor: Option<&str>,
 ) -> Result<i64> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let existing: Option<i64> = tx
         .query_row(
             "SELECT alias FROM export_alias
@@ -98,7 +100,8 @@ pub fn ensure_export_alias(
             row.created_at
         ],
     )?;
-    log_insert(&tx, "export_alias", &row.id, None, actor, &row)?;
+    let stamp = tx.register("export_alias", &slot_id_of(&row, EXPORT_ALIAS_SLOT)?, None)?;
+    log_insert(&tx, &stamp, "export_alias", &row.id, &row)?;
     tx.commit()?;
     Ok(next)
 }

@@ -14,10 +14,10 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::siex as cue_siex;
 use module_ecoscheme::models::CulturalOperationDetail;
 use module_ecoscheme::repository::list_cultural_operations_for_export;
 use module_ecoscheme::siex;
+use module_phytosanitary::siex as cue_siex;
 use rusqlite::Connection;
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 

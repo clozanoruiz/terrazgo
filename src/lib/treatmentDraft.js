@@ -59,6 +59,8 @@ export function emptyDraft() {
     measureIntensity: "",
     measureIntensityUnit: "traps",
     measureRegistration: "",
+    // Which basic substance, when the measure is "Usos de sustancias básicas".
+    measureBasicSubstance: "",
     efficacyCode: "",
     rows: [emptyRow()],
     // The coded problems treated (≥1) and IPM justifications (≥1) — required by
@@ -93,6 +95,7 @@ export function draftFrom(entry) {
     measureIntensity: entry.record.measure_intensity_value ?? "",
     measureIntensityUnit: entry.record.measure_intensity_unit_code ?? "traps",
     measureRegistration: entry.record.measure_registration_number ?? "",
+    measureBasicSubstance: entry.record.measure_basic_substance_code ?? "",
     efficacyCode: entry.record.efficacy_code ?? "",
     rows: entry.plots.map((plot) => ({
       plotId: plot.plot_id,

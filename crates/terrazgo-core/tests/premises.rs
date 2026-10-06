@@ -23,6 +23,7 @@ fn farm(conn: &mut Connection, name: &str) -> String {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )

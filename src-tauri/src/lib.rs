@@ -5,24 +5,28 @@
 //! Modules are public so the integration tests can exercise the registry and
 //! the composed migration runner directly.
 
+pub mod alerts;
 pub mod catalogues;
 pub mod commands;
 pub mod db;
+pub mod duplicates;
 pub mod external_links;
 pub mod geo_protocol;
+// Desktop only: Android already runs an app as one process, so there is no
+// second copy for the lock to stop.
+#[cfg(desktop)]
+pub mod instance_lock;
+pub mod machine;
 pub mod registry;
 pub mod state;
 pub mod user_files;
 
-use module_cue::alerts::AlertConfig;
 use std::sync::Mutex;
 use tauri::Manager;
-use terrazgo_core::date::today_utc;
 
 /// Build and run the app. The setup hook deliberately does almost nothing so
 /// the event loop starts at once; the real startup work — open + migrate the
-/// database, refresh alerts against today, hand the connection to Tauri's
-/// managed state — happens in `initialise` on a worker, and `app_ready` stays
+/// database, hand the connection to Tauri's managed state — happens in `initialise` on a worker, and `app_ready` stays
 /// false until it finishes. A failure there no longer aborts the process (the
 /// window already exists by then): it is logged, and the frontend's readiness
 /// gate fails open so the problem surfaces as ordinary command errors.
@@ -56,18 +60,35 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("geo", geo_protocol::handle)
         // Startup work does NOT happen here — it is moved onto a worker so
         // this hook returns in microseconds and `run()` (the event loop) is
-        // reached immediately. That ordering is load-bearing on Android:
-        // there, the webview comes up in parallel with setup and can invoke
-        // commands before the loop is running, and a reply queued before
-        // `event_loop.run()` is not delivered when the loop starts — it waits
-        // for some later message to flush it. Measured in a standalone tao
-        // reproduction (no wry, no Tauri): an event sent before `run()` sat
-        // undelivered until an unrelated event arrived 5 s later, on tao
-        // 0.35.3 and 0.36.0 alike. Returning from setup at once puts the loop
-        // up before the webview exists, so nothing can be queued into that
-        // window and the defect is unreachable rather than worked around.
+        // reached immediately: the window appears at once, with the spinner,
+        // and nothing waits on the database to show it. On Android the webview
+        // comes up in parallel with setup and can invoke commands before the
+        // loop is running; before tao 0.37 a reply queued then waited for some
+        // later message to flush it, and this ordering was what kept that
+        // window closed. tao 0.37 fixes it at the source (tao#1304).
         // See docs/architecture.md → "On Android the webview starts first".
         .setup(|app| {
+            // First, before the window: a second copy leaving here has shown
+            // nothing. A file open and a lock, so the hook still returns in
+            // microseconds.
+            #[cfg(desktop)]
+            hold_data_folder(app.handle());
+            // The main window, built here rather than by Tauri. tauri.conf.json
+            // declares it with `create: false` because Tauri builds its
+            // windows BEFORE calling this hook — measured, a second copy's
+            // window was on screen for 0.19 s before the lock sent it away.
+            // On Android nothing runs between the two places, so the window
+            // comes up at the moment it always did. By label, not by the flag:
+            // `create: false` also means "opened later from code", and a
+            // window declared for that must not open here.
+            let main_window = app
+                .config()
+                .app
+                .windows
+                .iter()
+                .find(|w| w.label == "main")
+                .ok_or("tauri.conf.json declares no \"main\" window")?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), main_window)?.build()?;
             let handle = app.handle().clone();
             tauri::async_runtime::spawn_blocking(move || {
                 if let Err(err) = initialise(&handle) {
@@ -100,8 +121,37 @@ pub fn run() {
             commands::catalogue_status,
             commands::refresh_catalogues,
             commands::export_backup,
+            commands::inspect_backup,
             commands::import_backup,
-            // --- core — the farm registry: farms, plots, seasons, crops, people, machines, premises
+            // --- sync: the bundle two devices hand each other (docs/sync.md)
+            commands::export_sync_bundle,
+            commands::inspect_sync_bundle,
+            commands::import_sync_bundle,
+            commands::join_sync_group,
+            commands::list_sync_conflicts,
+            commands::review_sync_conflict,
+            commands::resolve_sync_conflict,
+            commands::list_duplicates,
+            commands::list_saved_duplicates,
+            commands::review_duplicate_pair,
+            commands::mark_duplicates_distinct,
+            commands::keep_duplicate,
+            commands::restore_removed_duplicate,
+            commands::merge_books,
+            commands::list_merge_candidates,
+            commands::kept_book_by_default,
+            commands::list_stray_records,
+            commands::move_stray_records,
+            commands::restore_season,
+            commands::list_removed_books,
+            commands::removed_with_book,
+            commands::list_sync_peers,
+            commands::rename_sync_peer,
+            commands::retire_sync_peer,
+            // --- core — the farm registry: farms, plots, seasons, crops, people, machines, premises; and the alert list every alert crate feeds
+            commands::list_alerts,
+            commands::acknowledge_alert,
+            commands::dismiss_alert,
             commands::list_user_profiles,
             commands::create_user_profile,
             commands::update_user_profile,
@@ -117,9 +167,12 @@ pub fn run() {
             commands::update_plot,
             commands::delete_plot,
             commands::list_seasons,
+            commands::list_farm_seasons,
+            commands::get_season,
             commands::create_season,
             commands::update_season,
             commands::delete_season,
+            commands::book_deletion_preview,
             commands::list_crops,
             commands::create_crop,
             commands::update_crop,
@@ -176,11 +229,7 @@ pub fn run() {
             commands::delete_harvest_record,
             commands::list_irrigation_volume_units,
             commands::list_fertiliser_dose_units,
-            // --- cue — the treatment domain (module-cue): products, every register RD 1311/2012 governs, alerts
-            commands::list_alerts,
-            commands::refresh_alerts,
-            commands::acknowledge_alert,
-            commands::dismiss_alert,
+            // --- phytosanitary — the treatment domain (module-phytosanitary): products, every register RD 1311/2012 governs
             commands::get_treatment_record,
             commands::list_reason_categories,
             commands::list_efficacies,
@@ -188,6 +237,7 @@ pub fn run() {
             commands::list_problem_codes,
             commands::list_measures,
             commands::list_growth_stages,
+            commands::list_basic_substances,
             commands::list_products,
             commands::list_formulation_types,
             commands::list_authorisation_kinds,
@@ -248,9 +298,10 @@ pub fn run() {
             commands::list_nutrient_kinds,
             commands::list_fertiliser_material_kinds,
             commands::list_fertiliser_material_details,
-            commands::fertiliser_material_composition,
+            commands::fertiliser_material_proposal,
             commands::list_nutrient_codes,
             commands::list_fertilisation_practices,
+            commands::list_irrigation_practices,
             commands::list_fertiliser_materials,
             commands::create_fertiliser_material,
             commands::update_fertiliser_material,
@@ -348,8 +399,47 @@ fn close_databases(app: &tauri::AppHandle) {
     }
 }
 
+/// Hold the data folder for this copy of the app, or leave if another copy
+/// already holds it (`instance_lock.rs` says why two must not share it). The
+/// lock is managed state, which Tauri never drops, so it is held until the
+/// process ends.
+///
+/// A folder that cannot be resolved or created is not decided here: that is
+/// `initialise`'s to report, with the window up. This only answers whether this
+/// copy may go on.
+#[cfg(desktop)]
+fn hold_data_folder(app: &tauri::AppHandle) {
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return;
+    };
+    // A failure here reaches `claim` as a file it cannot open, which it reports.
+    let _ = std::fs::create_dir_all(&data_dir);
+    match instance_lock::claim(&data_dir) {
+        instance_lock::Claim::Held(lock) => {
+            app.manage(lock);
+        }
+        instance_lock::Claim::HeldElsewhere => {
+            // No window and no database yet, so there is nothing to close —
+            // the same exit a second launch makes in
+            // `tauri-plugin-single-instance`.
+            eprintln!(
+                "Terrazgo is already open on {}; not starting a second copy",
+                data_dir.display()
+            );
+            app.cleanup_before_exit();
+            std::process::exit(0);
+        }
+        instance_lock::Claim::Unavailable(err) => {
+            eprintln!(
+                "warning: could not lock the data folder, so a second copy would not be stopped: {err}"
+            );
+        }
+    }
+}
+
 /// Everything the app needs before any command can run: the databases, the
-/// reference catalogues, the derived alerts and the device-local settings.
+/// reference catalogues and the device-local settings. Alerts are not among
+/// them — the list is worked out when read, so there is nothing to prepare.
 ///
 /// Runs on a worker rather than in the setup hook (see the comment there), and
 /// manages `SetupComplete` last so `app_ready` only answers `true` once every
@@ -361,31 +451,34 @@ fn initialise(app: &tauri::AppHandle) -> anyhow::Result<()> {
     std::fs::create_dir_all(&data_dir)?;
     let db_path = data_dir.join("terrazgo.db");
 
-    let mut conn = db::open_app_db(&db_path)?;
+    // Device-local settings, a plain JSON file beside the databases.
+    // A missing or unreadable file just means defaults (tolerant
+    // read), so loading can never abort startup.
+    //
+    // Loaded BEFORE the database is opened, which is load-bearing: the
+    // connection needs this device's id before it can log a change.
+    let settings_path = data_dir.join("settings.json");
+    let mut settings = terrazgo_core::settings::load_settings(&settings_path);
+    let (device_id, minted) = settings.ensure_device_id();
+    if minted && let Err(err) = terrazgo_core::settings::save_settings(&settings_path, &settings) {
+        // Saved before anything is written under it, and a failure is told but
+        // does not stop the app, as with every other settings write at startup.
+        // What it costs is bounded: this launch writes under the new id and the
+        // next mints another, exactly as a restored backup does — two replica
+        // names, never one name for two sets of changes. Refusing to start over
+        // a settings file would lock the farmer out of their records.
+        eprintln!("warning: could not save the new device id: {err}");
+    }
+
+    let mut conn = db::open_app_db(&db_path, &device_id)?;
     let schema_version = db::schema_version(&conn)?;
 
     // Reference catalogues (vendored FEGA snapshot). Idempotent and
     // upsert-only; after first run this is a handful of date probes.
     terrazgo_core::catalogue::ensure_catalogues(&mut conn)?;
-
-    // Device-local settings, a plain JSON file beside the databases.
-    // A missing or unreadable file just means defaults (tolerant
-    // read), so loading can never abort startup.
-    //
-    // Loaded BEFORE the first alert refresh below, which is load-bearing: the
-    // refresh needs this device's lead times, and reading them afterwards would
-    // give every launch one reconciliation at the wrong lead time.
-    let settings_path = data_dir.join("settings.json");
-    let settings = terrazgo_core::settings::load_settings(&settings_path);
     let tile_cache_cap = settings
         .tile_cache_max_bytes
         .unwrap_or(terrazgo_geo::db::TILE_CACHE_MAX_BYTES);
-    let alert_config =
-        AlertConfig::from_overrides(settings.licence_lead_days, settings.itv_lead_days);
-
-    // Idempotent reconciliation — over-calling is sanctioned by the
-    // repository docs; a dismissal is never resurrected.
-    module_cue::repository::refresh_alerts(&mut conn, &today_utc(), &alert_config)?;
 
     app.manage(state::AppState {
         db: terrazgo_core::db::Database::new(conn)?,
@@ -399,13 +492,17 @@ fn initialise(app: &tauri::AppHandle) -> anyhow::Result<()> {
 
     // The geo cache is a separate database with its own lifecycle:
     // derived, re-fetchable, never in backups or record_change.
-    let geo_cache = terrazgo_geo::db::open_cache(&data_dir.join("geo-cache.db"))?;
-    app.manage(state::GeoState { cache: geo_cache });
+    let cache_path = data_dir.join("geo-cache.db");
+    let geo_cache = terrazgo_geo::db::open_cache(&cache_path)?;
+    app.manage(state::GeoState {
+        cache: geo_cache,
+        cache_path,
+    });
 
     // Corruption check, off the readiness path for the same reason as the tile
     // cap below: measured at ~1.7 ms/MB, so ~10 ms on a smallholder's book but
     // approaching a second on a cooperative-scale one after a decade
-    // (src-tauri/tests/quick_check_cost.rs re-runs the measurement).
+    // (src-tauri/tests/contracts/quick_check_cost.rs re-runs the measurement).
     //
     // It opens its OWN read-only connection rather than borrowing the app's.
     // Holding the shared lock for that long would freeze every command at
@@ -439,6 +536,20 @@ fn initialise(app: &tauri::AppHandle) -> anyhow::Result<()> {
             Ok(0) => {}
             Ok(evicted) => eprintln!("geo-cache cap: evicted {evicted} tiles"),
             Err(err) => eprintln!("geo-cache cap enforcement failed: {err}"),
+        }
+    });
+
+    // The purge: what was deleted from a book goes for good once it is due
+    // (docs/sync.md → The purge, as settled → When it runs). Off the readiness
+    // path and a few seconds after it, so the first screen is up before it
+    // takes the database — it holds the one connection while it erases.
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        std::thread::sleep(db::PURGE_AFTER_START);
+        match db::run_due_purge(&handle) {
+            Ok(0) => {}
+            Ok(erased) => eprintln!("purge: {erased} registers erased for good"),
+            Err(err) => eprintln!("purge could not run: {err}"),
         }
     });
 

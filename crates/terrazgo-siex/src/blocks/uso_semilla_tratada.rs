@@ -21,9 +21,9 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::models::SeedTreatment;
-use module_cue::repository::list_seed_treatments_for_export;
-use module_cue::siex;
+use module_phytosanitary::models::SeedTreatment;
+use module_phytosanitary::repository::list_seed_treatments_for_export;
+use module_phytosanitary::siex;
 use rusqlite::Connection;
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 

@@ -32,8 +32,8 @@ pub mod uso_semilla_tratada;
 use crate::SIEX_TARGET;
 use crate::descriptor::{Cubierta, DgcActividad, DgcCubierta, DgcSuperficie};
 use crate::error::{Result, SiexError};
-use module_cue::repository::find_product_authorisation;
 use module_ecoscheme::repository::get_soil_cover_for_export;
+use module_phytosanitary::repository::find_product_authorisation;
 use rusqlite::Connection;
 use terrazgo_core::repository::{
     crops_on_plot, ensure_export_alias, find_crop_for_export, find_export_alias,
@@ -125,8 +125,8 @@ pub(crate) fn authorisation_product_kind(
         Some(auth) => (auth.kind_code, auth.exceptional_substance_code),
         None => (DEFAULT_AUTHORISATION_KIND.to_string(), None),
     };
-    let tipo_producto =
-        module_cue::siex::authorisation_kind_to_siex(&kind_code).ok_or_else(unmappable)?;
+    let tipo_producto = module_phytosanitary::siex::authorisation_kind_to_siex(&kind_code)
+        .ok_or_else(unmappable)?;
     let materia_activa = if kind_code == "exceptional" {
         let code = exceptional_substance.ok_or_else(unmappable)?;
         Some(code.trim().parse::<i64>().map_err(|_| unmappable())?)

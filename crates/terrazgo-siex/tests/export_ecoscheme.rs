@@ -11,9 +11,9 @@
 mod common;
 
 use common::*;
-use module_cue::repository as repo;
 use module_fertilisation::models::NewFertilisationRecord;
 use module_fertilisation::repository as fert;
+use module_phytosanitary::repository as repo;
 use terrazgo_siex::{SiexError, build_cuaderno, export_precheck};
 
 // ---------------------------------------------------------------------------
@@ -422,7 +422,7 @@ fn residue_left_on_the_ground_sets_the_flag_its_kind_names() {
 
     let mut pruned = operation(&fx);
     pruned.performed_on = "2026-06-02".into();
-    pruned.operation_kind_code = "pruning".into();
+    pruned.operation_kind_code = "green_pruning_with_cleaning".into();
     pruned.residue_destination_code = Some("9".into());
     eco::insert_cultural_operation(&mut conn, pruned, None).unwrap();
 

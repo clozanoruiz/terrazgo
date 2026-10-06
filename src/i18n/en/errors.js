@@ -10,6 +10,15 @@ export default {
   // preceded by the internal_intro line so regular users get some orientation.
   "error.internal_intro": "An internal error occurred:",
   "error.not_found": "Record not found.",
+  "error.invalid.conflict_version_gone":
+    "Another device has already decided about this record. Open it again to see how it stands.",
+  "error.invalid.register_not_in_conflict": "This record has no versions waiting any more.",
+  "error.invalid.duplicate_pair_one_record": "A record cannot be a duplicate of itself.",
+  "error.invalid.duplicate_kept_gone":
+    "The record you chose to keep has already been deleted, perhaps on another device. Open the list again to see how it stands.",
+  "error.invalid.duplicate_restore_refused":
+    "This record can no longer be restored from here: it has been restored or changed on another device. Open the list again to see how it stands.",
+  "error.invalid.sync_peer_is_this_device": "The device you are using cannot be retired.",
   "error.invalid.unknown_link": "That link is not available in this version.",
   "error.invalid.empty_name": "The name must not be empty.",
   "error.invalid.operator_not_found": "The selected operator no longer exists.",
@@ -32,8 +41,51 @@ export default {
   "error.invalid.unknown_substance_code":
     "The substance is not in the official exceptional-authorisations catalogue.",
   "error.invalid.nonpositive_area": "The area must be greater than zero.",
-  "error.invalid.season_in_use":
-    "A season with crops or treatments recorded cannot be deleted. Remove its contents first.",
+  "error.invalid.season_name_taken":
+    "This farm already has a record book with that name. Give this one its own name to tell them apart.",
+  "error.invalid.season_dates_taken":
+    "This farm already has a record book with exactly these dates. Open that one, or change these dates.",
+  "error.invalid.season_restore_name_taken":
+    "Another record book of this farm already has that name. To bring this one back, rename the other one first — or move the records into it instead.",
+  "error.invalid.book_merge_same_book": "A record book cannot be merged with itself.",
+  "error.invalid.book_merge_other_farm":
+    "Records can only move to another record book of the same farm.",
+  "error.invalid.book_merge_conflicts_waiting":
+    "This record book has records written at once on two devices, waiting for your decision. Decide them on the “Status” page before merging it with another: merging would settle them without anyone seeing them.",
+  "error.invalid.book_merge_removals_waiting":
+    "In this record book, two people each removed the opposite copy of a duplicate, so the operation is no longer in the book. Restore one of the two on the “Status” page before merging it with another.",
+  "error.invalid.book_delete_conflicts_waiting":
+    "This record book, or something in it, was written at once on two devices and is waiting for your decision. Decide it on the “Status” page before deleting it: deleting it would settle it without anyone seeing it.",
+  "error.invalid.book_delete_removals_waiting":
+    "In this record book, two people each removed the opposite copy of a duplicate, so the operation is no longer in the book. Restore one of the two on the “Status” page before deleting it.",
+  "error.invalid.book_restore_conflicts_waiting":
+    "This record book, or something in it, was written at once on two devices and is waiting for your decision. Decide it on the “Status” page before bringing it back: bringing it back would settle it without anyone seeing it.",
+  "error.invalid.stray_conflicts_waiting":
+    "One of these records was written at once on two devices and is waiting for your decision. Decide it on the “Status” page before moving them: each version may be in a different record book.",
+  "error.invalid.season_label_collision":
+    "The file brings a record book of {farm} called “{label}”, and this device already has another by that name: the two were created on different devices before syncing. Rename this device's “{label}” record book and import the file again. If they were one campaign, then merge them from either one's page, with “Merge with another record book…”: any records repeated between the two will be listed as possible duplicates, for you to decide which to keep.",
+  "error.invalid.bundle_incomplete":
+    "The sync file is incomplete — it was copied half-way, or cut short on the way. Export it again on the other device and copy the whole file.",
+  "error.invalid.bundle_unreadable": "This is not a Terrazgo sync file, or it is damaged.",
+  "error.invalid.bundle_format_unsupported":
+    "This sync file was written by a newer version of Terrazgo. Update this device to read it.",
+  "error.invalid.bundle_schema_mismatch":
+    "The two devices are not on the same version of Terrazgo. Update whichever is behind: individual changes cannot be converted between versions, although a whole backup can.",
+  "error.invalid.bundle_skips_changes":
+    "This file was made for another device and leaves out changes this one does not have yet, so nothing was applied. On the device that exported it, first import a file from this one, then export again: the new file will bring everything that is missing.",
+  "error.invalid.device_identity_shared":
+    "Two devices are writing under the same identity, and their entries no longer agree. This usually follows copying the app's data folder instead of installing the app. Restore one of them from a backup, which gives it a new identity.",
+  "error.invalid.peer_clock_ahead":
+    "The other device's clock is more than {hours} h ahead of this one. Fix it before syncing: a clock that far out means the dates that device recorded are wrong too, and those are in the record book.",
+  "error.invalid.sync_not_paired":
+    "This device is not paired yet with the one that made the file. Pair them so they share a record book: the same file will then apply, with nothing to copy again.",
+  "error.invalid.sync_group_mismatch":
+    "This file comes from a different group of devices than this one. If both are yours you can join them, but this device will leave the group it is in now.",
+  "error.invalid.sync_group_invalid":
+    "The file's group identifier is not valid: the file is damaged.",
+  "error.invalid.register_has_no_head":
+    "Two devices are writing under the same identity, because the app's data folder was copied instead of the app being installed. Until one of them is restored from a backup — which gives it a new identity — their entries cannot be merged.",
+  "error.invalid.season_not_on_farm": "The plot and the season belong to different farms.",
   "error.invalid.missing_distance":
     "State the distance to the plot: it is required when the abstraction point lies outside it.",
   "error.invalid.water_point_distance_inside":
@@ -78,6 +130,8 @@ export default {
   "error.invalid.sigpac_ref_missing":
     "The plot has no complete SIGPAC reference — fill in the seven parts first.",
   "error.invalid.zone_status_invalid": "Internal zone-check result was not usable.",
+  "error.invalid.alert_deadline_mismatch":
+    "The alert could not be marked: the date received does not match its kind. Open the “Status” page again.",
   "error.invalid.quantity_unit_mismatch":
     "The unit does not match what was treated: tonnes for plant produce, m\u00b3 for premises and vehicles.",
   "error.invalid.invalid_product_quantity":
@@ -153,6 +207,8 @@ export default {
   "error.invalid.unknown_measure_code": "That measure is not in the official catalogue.",
   "error.invalid.invalid_intensity":
     "The intensity needs its unit (traps, diffusers…) and must be greater than zero.",
+  "error.invalid.basic_substance_without_its_measure":
+    "A basic substance can only be named on the measure “Usos de sustancias básicas”.",
 
   // Eco-schemes — 9.1 extensive grazing (RD 1048/2022 art. 30.2 ter).
   "error.invalid.practice_not_grazing":

@@ -98,12 +98,20 @@ pub const TILE_SOURCES: &[TileSource] = &[
     // EPSG:3857; single source-layer "recinto", inspected 2026-07-11). The
     // fixed URL always serves the current campaign — hence campaign_keyed —
     // and tiles with no recintos answer 404 — hence empty_on_404.
+    //
+    // Served from z13, not the service's z12 (2026-09-11): the z12 set is
+    // missing tiles wherever recintos are dense (a block around Tábara,
+    // Zamora, in the current and the previous campaign alike), and a missing
+    // tile answers the same 404 an empty one does, so it was cached and drawn
+    // as empty — parcels on one side of a tile edge and none on the other.
+    // z13 has holes too, far fewer (2 of the 24 tiles under that block); FEGA's
+    // own visor draws recintos only from its level 16, MapLibre's z15.
     TileSource {
         id: "sigpac-recintos",
         url_template: Some("https://sigpac-hubcloud.es/mvt/recinto@3857@pbf/{z}/{x}/{y}.pbf"),
         tilejson_url: None,
         content_type: "application/x-protobuf",
-        min_zoom: 12,
+        min_zoom: 13,
         max_zoom: 15,
         attribution: "SIGPAC © FEGA (CC BY 4.0)",
         campaign_keyed: true,
@@ -217,7 +225,9 @@ mod tests {
     /// Every Nube de SIGPAC MVT source shares one live-service contract
     /// (inspected 2026-07-11/12): pbf z12–15, current-campaign fixed URL
     /// (→ campaign-keyed cache rows), empty tiles answered as HTTP 404
-    /// (→ cached as empty payloads), CC BY 4.0 attribution.
+    /// (→ cached as empty payloads), CC BY 4.0 attribution. One exception:
+    /// the recinto layer starts at z13, because its z12 set has holes (see
+    /// its entry).
     #[test]
     fn sigpac_mvt_sources_share_the_service_contract() {
         let sigpac: Vec<_> = TILE_SOURCES
@@ -229,7 +239,8 @@ mod tests {
             assert!(s.campaign_keyed, "{} must be campaign-keyed", s.id);
             assert!(s.empty_on_404, "{} must treat 404 as empty", s.id);
             assert_eq!(s.content_type, "application/x-protobuf", "{}", s.id);
-            assert_eq!((s.min_zoom, s.max_zoom), (12, 15), "{}", s.id);
+            let min_zoom = if s.id == "sigpac-recintos" { 13 } else { 12 };
+            assert_eq!((s.min_zoom, s.max_zoom), (min_zoom, 15), "{}", s.id);
             assert!(s.attribution.contains("CC BY 4.0"), "{}", s.id);
             let url = s.url_template.expect("sigpac sources use fixed templates");
             assert!(

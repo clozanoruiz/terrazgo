@@ -31,7 +31,7 @@
 //!
 //! **Fully correctable**, like every register in this module.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update, write_change};
 use super::no_rows_to_not_found;
 use super::{cultural_operation, grazing};
 use crate::error::{EcoschemeError, Result};
@@ -49,7 +49,7 @@ use uuid::Uuid;
 
 /// The two duties a cover can evidence. Nothing else establishes one: P1 is a
 /// grazing, P2 a mown plot, P5 a flooded crop, and anexo IV a comunal pasture.
-const COVER_PRACTICES: [&str; 2] = ["plant_cover", "inert_cover"];
+pub const COVER_PRACTICES: [&str; 2] = ["plant_cover", "inert_cover"];
 
 /// The kinds model 9.4 prints as its three maintenance columns.
 ///
@@ -72,7 +72,7 @@ pub fn insert_soil_cover(
     )?;
     validate_maintenance(&new.practice_code, &new.maintenance)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let plot_ids = validated_plots(&tx, &new.farm_id, &new.plot_ids)?;
 
     let now = now_utc_iso();
@@ -113,29 +113,17 @@ pub fn insert_soil_cover(
     )?;
 
     let mut plot_rows = Vec::new();
+    let stamp = tx.register("soil_cover", &record.id, Some(&record.season_id))?;
     for plot_id in &plot_ids {
-        plot_rows.push(insert_plot_row(
-            &tx,
-            &record.id,
-            &record.season_id,
-            plot_id,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(&tx, &record.id, plot_id, &stamp)?);
     }
 
-    log_insert(
-        &tx,
-        "soil_cover",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(&tx, &stamp, "soil_cover", &record.id, &record)?;
 
     // The maintenance lands in the SAME transaction as the cover it maintains,
     // so a book never holds a cover whose third annotation half-saved.
     for line in &new.maintenance {
-        insert_maintenance_line(&tx, &record, &plot_ids, line, actor)?;
+        insert_maintenance_line(&tx, &record, &plot_ids, line)?;
     }
 
     let maintenance = maintenance_of_tx(&tx, &record.id)?;
@@ -163,7 +151,7 @@ pub fn update_soil_cover(
     )?;
     validate_maintenance(&update.practice_code, &update.maintenance)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM soil_cover WHERE id = ?1 AND deleted_at IS NULL",
@@ -202,18 +190,11 @@ pub fn update_soil_cover(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "soil_cover",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    let stamp = tx.register("soil_cover", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "soil_cover", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(&tx, &after, &plot_ids, actor)?;
-    reconcile_maintenance(&tx, &after, &plot_ids, &update.maintenance, actor)?;
+    let plot_rows = reconcile_plots(&tx, &after, &plot_ids, &stamp)?;
+    reconcile_maintenance(&tx, &after, &plot_ids, &update.maintenance)?;
 
     let maintenance = maintenance_of_tx(&tx, id)?;
     tx.commit()?;
@@ -232,7 +213,16 @@ pub fn update_soil_cover(
 /// audited soft delete, so nothing is lost: the history of every line survives
 /// exactly as it would have if it had been withdrawn on its own.
 pub fn soft_delete_soil_cover(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_soil_cover_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_soil_cover_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM soil_cover WHERE id = ?1 AND deleted_at IS NULL",
@@ -241,9 +231,10 @@ pub fn soft_delete_soil_cover(conn: &mut Connection, id: &str, actor: Option<&st
         )
         .optional()?
         .ok_or(EcoschemeError::NotFound)?;
+    let stamp = tx.register("soil_cover", id, Some(&before.season_id))?;
 
-    for line in maintenance_of_tx(&tx, id)? {
-        withdraw_maintenance_line(&tx, &line, actor)?;
+    for line in maintenance_of_tx(tx, id)? {
+        withdraw_maintenance_line(tx, &line)?;
     }
 
     let now = now_utc_iso();
@@ -255,15 +246,13 @@ pub fn soft_delete_soil_cover(conn: &mut Connection, id: &str, actor: Option<&st
         params![id, now],
     )?;
     write_change(
-        &tx,
+        tx,
+        &stamp,
         "soil_cover",
         id,
-        Some(&before.season_id),
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -343,18 +332,6 @@ pub fn list_soil_covers_for_export(
     all_with_details(conn, records)
 }
 
-/// Whether any cover hangs off this season — the third arm of the module's
-/// season guard. Soft-deleted rows count: their audit history is only reachable
-/// through the season.
-pub(super) fn season_has_covers(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM soil_cover WHERE season_id = ?1)",
-        [season_id],
-        |r| r.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- maintenance -----------------------------------------------------------
 
 /// Write one maintenance line through the register that owns it.
@@ -365,11 +342,10 @@ pub(super) fn season_has_covers(conn: &Connection, season_id: &str) -> Result<bo
 /// a line cannot name a plot the cover was never established over, and cannot
 /// claim a different duty from the one it maintains.
 fn insert_maintenance_line(
-    tx: &Transaction,
+    tx: &WriteTx,
     cover: &SoilCover,
     plot_ids: &[String],
     line: &CoverMaintenanceLine,
-    actor: Option<&str>,
 ) -> Result<()> {
     if line.kind_code == GRAZING_MAINTENANCE {
         grazing::insert_grazing_record_tx(
@@ -386,7 +362,6 @@ fn insert_maintenance_line(
                 plot_ids: plot_ids.to_vec(),
                 animals: line.animals.clone(),
             },
-            actor,
         )?;
     } else {
         cultural_operation::insert_cultural_operation_tx(
@@ -404,7 +379,6 @@ fn insert_maintenance_line(
                 notes: None,
                 plot_ids: plot_ids.to_vec(),
             },
-            actor,
         )?;
     }
     Ok(())
@@ -414,11 +388,10 @@ fn insert_maintenance_line(
 /// `reconcile_animals` rule: a correction must read as a correction, never as a
 /// withdrawal plus a new record.
 fn update_maintenance_line(
-    tx: &Transaction,
+    tx: &WriteTx,
     cover: &SoilCover,
     plot_ids: &[String],
     line: &CoverMaintenanceLine,
-    actor: Option<&str>,
 ) -> Result<()> {
     if line.kind_code == GRAZING_MAINTENANCE {
         grazing::update_grazing_record_tx(
@@ -434,7 +407,6 @@ fn update_maintenance_line(
                 plot_ids: plot_ids.to_vec(),
                 animals: line.animals.clone(),
             },
-            actor,
         )?;
     } else {
         cultural_operation::update_cultural_operation_tx(
@@ -451,21 +423,16 @@ fn update_maintenance_line(
                 notes: None,
                 plot_ids: plot_ids.to_vec(),
             },
-            actor,
         )?;
     }
     Ok(())
 }
 
-fn withdraw_maintenance_line(
-    tx: &Transaction,
-    line: &CoverMaintenanceLine,
-    actor: Option<&str>,
-) -> Result<()> {
+fn withdraw_maintenance_line(tx: &WriteTx, line: &CoverMaintenanceLine) -> Result<()> {
     if line.kind_code == GRAZING_MAINTENANCE {
-        grazing::soft_delete_grazing_record_tx(tx, &line.id, actor)
+        grazing::soft_delete_grazing_record_tx(tx, &line.id)
     } else {
-        cultural_operation::soft_delete_cultural_operation_tx(tx, &line.id, actor)
+        cultural_operation::soft_delete_cultural_operation_tx(tx, &line.id)
     }
 }
 
@@ -478,11 +445,10 @@ fn withdraw_maintenance_line(
 /// That is the honest audit trail for it: the annotation said one activity and
 /// now says another.
 fn reconcile_maintenance(
-    tx: &Transaction,
+    tx: &WriteTx,
     cover: &SoilCover,
     plot_ids: &[String],
     desired: &[CoverMaintenanceLine],
-    actor: Option<&str>,
 ) -> Result<()> {
     let current = maintenance_of_tx(tx, &cover.id)?;
 
@@ -491,7 +457,7 @@ fn reconcile_maintenance(
             .iter()
             .any(|line| line.id == existing.id && is_grazing(line) == is_grazing(existing));
         if !kept {
-            withdraw_maintenance_line(tx, existing, actor)?;
+            withdraw_maintenance_line(tx, existing)?;
         }
     }
 
@@ -500,9 +466,9 @@ fn reconcile_maintenance(
             .iter()
             .any(|existing| existing.id == line.id && is_grazing(existing) == is_grazing(line));
         if matched {
-            update_maintenance_line(tx, cover, plot_ids, line, actor)?;
+            update_maintenance_line(tx, cover, plot_ids, line)?;
         } else {
-            insert_maintenance_line(tx, cover, plot_ids, line, actor)?;
+            insert_maintenance_line(tx, cover, plot_ids, line)?;
         }
     }
     Ok(())
@@ -604,7 +570,7 @@ fn reconcile_plots(
     tx: &Transaction,
     record: &SoilCover,
     desired: &[String],
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<SoilCoverPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -613,10 +579,9 @@ fn reconcile_plots(
             tx.execute("DELETE FROM soil_cover_plot WHERE id = ?1", [&existing.id])?;
             log_delete(
                 tx,
+                stamp,
                 "soil_cover_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&SoilCoverPlot>,
             )?;
@@ -627,13 +592,7 @@ fn reconcile_plots(
     for plot_id in desired {
         match current.iter().find(|c| &c.plot_id == plot_id) {
             Some(existing) => rows.push(existing.clone()),
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                plot_id,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, plot_id, stamp)?),
         }
     }
     Ok(rows)
@@ -642,9 +601,8 @@ fn reconcile_plots(
 fn insert_plot_row(
     tx: &Transaction,
     soil_cover_id: &str,
-    season_id: &str,
     plot_id: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<SoilCoverPlot> {
     let row = SoilCoverPlot {
         id: Uuid::now_v7().to_string(),
@@ -655,7 +613,7 @@ fn insert_plot_row(
         "INSERT INTO soil_cover_plot (id, soil_cover_id, plot_id) VALUES (?1, ?2, ?3)",
         params![row.id, row.soil_cover_id, row.plot_id],
     )?;
-    log_insert(tx, "soil_cover_plot", &row.id, Some(season_id), actor, &row)?;
+    log_insert(tx, stamp, "soil_cover_plot", &row.id, &row)?;
     Ok(row)
 }
 

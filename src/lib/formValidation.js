@@ -25,8 +25,24 @@ function fieldLabel(el) {
   const stated = el.dataset?.tzLabel;
   if (stated) return stated.trim();
   // `labels` is a NodeList on real elements and undefined on a plain object.
-  const first = el.labels?.[0];
-  return first?.textContent?.trim() ?? "";
+  return visibleText(el.labels?.[0]);
+}
+
+/// A label's text WITHOUT anything marked `aria-hidden`, which is how an
+/// accessible name is computed and, here, how the required mark stays out of
+/// the summary. Measured 2026-09-15 before this existed: the summary named the
+/// field "Nombre completo*", asterisk and all, because the fallback read the
+/// whole label.
+///
+/// Cloned rather than string-subtracted so nested and repeated marks behave,
+/// and guarded so the plain-object fakes this module is tested with — which
+/// have a `textContent` and no `cloneNode` — still work.
+function visibleText(label) {
+  if (!label) return "";
+  if (typeof label.cloneNode !== "function") return label.textContent?.trim() ?? "";
+  const copy = label.cloneNode(true);
+  for (const hidden of copy.querySelectorAll?.('[aria-hidden="true"]') ?? []) hidden.remove();
+  return copy.textContent?.trim() ?? "";
 }
 
 /// Every control in `elements` the browser considers invalid, in DOM order —

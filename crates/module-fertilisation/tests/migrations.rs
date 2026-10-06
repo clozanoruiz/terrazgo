@@ -62,7 +62,7 @@ fn applies_cleanly_on_top_of_previous_version() {
 fn the_module_runs_on_core_alone() {
     // This crate depends on terrazgo-core and on no other module. Its test
     // migration set is core + itself, so the day some code here starts
-    // relying on a module-cue table, this fails instead of passing quietly
+    // relying on a module-phytosanitary table, this fails instead of passing quietly
     // because the app happens to register both.
     let mut conn = Connection::open_in_memory().unwrap();
     migrations().to_latest(&mut conn).unwrap();
@@ -77,7 +77,7 @@ fn the_module_runs_on_core_alone() {
         .unwrap();
     assert_eq!(
         treatment_tables, 0,
-        "module-fertilisation must not depend on module-cue's schema"
+        "module-fertilisation must not depend on module-phytosanitary's schema"
     );
 }
 

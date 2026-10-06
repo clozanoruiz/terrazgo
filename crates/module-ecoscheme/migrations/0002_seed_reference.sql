@@ -54,9 +54,9 @@ INSERT INTO cultural_operation_kind (code, i18n_key) VALUES
     ('mowing',          'cultural_operation_kind.mowing'),           -- 5 Desbroce y siega
     ('brush_cutting',   'cultural_operation_kind.brush_cutting'),    -- 5 Desbroce y siega
     ('drainage',        'cultural_operation_kind.drainage'),         -- 6 Mantenimiento del drenaje
-    ('pruning',         'cultural_operation_kind.pruning'),          -- 7 Poda
+    ('green_pruning_with_cleaning', 'cultural_operation_kind.green_pruning_with_cleaning'), -- 7 Poda en verde, incluida la limpieza de tallos, chupones y varetas
     ('thinning',        'cultural_operation_kind.thinning'),         -- 8 Aclareo
-    ('staking',         'cultural_operation_kind.staking'),          -- 9 Entutorado
+    ('staking',         'cultural_operation_kind.staking'),          -- 9 Entutorado, guiado y atado de tallos
     ('grafting',        'cultural_operation_kind.grafting'),         -- 10 Injerto
     ('pruning_removal', 'cultural_operation_kind.pruning_removal'),  -- 11 Eliminación de restos de poda
     ('green_pruning',   'cultural_operation_kind.green_pruning'),    -- 12 Poda en verde

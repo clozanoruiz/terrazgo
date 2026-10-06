@@ -27,8 +27,9 @@ window.addEventListener("contextmenu", (event) => {
 
 // On Android the webview loads in parallel with the Rust setup hook, so an
 // invoke fired at mount can land before managed state exists and fail with a
-// raw "state not managed" error (desktop never races: its window is created
-// after setup). Poll the stateless app_ready probe until setup has finished.
+// raw "state not managed" error (desktop too: its window is up while the
+// database work still runs on a worker). Poll the stateless app_ready probe
+// until setup has finished.
 // A rejection is a retry, not a mount: on Android the first invokes can fail
 // while the IPC bridge itself is still coming up, and mounting on that error
 // reintroduces the exact race this gate exists to prevent (seen in the field
@@ -37,28 +38,18 @@ window.addEventListener("contextmenu", (event) => {
 // Only the deadline is fail-open: mounting and surfacing real command errors
 // beats an unexplained blank screen when the backend is genuinely broken.
 //
-// The timeout-and-retry below is now a BELT, not the fix. The blank first
-// launch it was written for is addressed at the source: the Rust setup hook
-// returns immediately and does its work on a worker, so the event loop is
-// running before the webview exists (src-tauri/src/lib.rs). Keeping the retry
-// costs one timer and covers the case the loop could not: a reply that is
-// queued before the loop starts is not delivered when the loop starts, only
-// when a later message flushes it — so posting the next probe unconditionally
-// is what makes the previous answer arrive.
+// Each probe has its own timeout so the deadline can fire: an answer that never
+// arrives would otherwise hold the loop past it, and the screen would stay
+// blank instead of mounting.
 //
-// The underlying defect is in tao, not in this app and not in wry. Reproduced
-// standalone with no wry and no Tauri: a user event sent through
-// EventLoopProxy before event_loop.run() sat undelivered until an unrelated
-// event arrived 5 s later, on tao 0.35.3 and 0.36.0 alike, while the same
-// pattern delivers on desktop. It needs concurrent ndk_glue traffic to bite,
-// which an activity starting up always produces.
-//
-// Measured on-device before the fix (Galaxy A22, Android 13, WebView 151,
-// fresh data dir): Rust executed the first `app_ready` at +0.000s and returned
-// false; the setup hook finished at +0.670s; the webview did not receive that
-// first answer until +6.069s — 10 ms after the SECOND probe was posted.
-// Widening this constant from 2s to 6s moved the first answer from +2.07s to
-// +6.07s in step, which is what identified the trigger.
+// It was written for a defect in tao's Android event loop: a reply queued
+// before `event_loop.run()` was delivered only when a later message flushed
+// it, so posting the next probe was what made the previous answer arrive
+// (Galaxy A22, Android 13, fresh data dir: the first answer reached the webview
+// at +6.069s, 10 ms after the SECOND probe was posted). tao 0.37 fixes it at
+// the source — the loop drains user events on every poll (tao#1304) — and the
+// setup hook returning at once had already put the loop up before the webview
+// exists (src-tauri/src/lib.rs).
 const PROBE_TIMEOUT_MS = 2000;
 
 function probeReady() {

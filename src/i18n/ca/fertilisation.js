@@ -43,6 +43,11 @@ export default {
   "irrigation.water_section": "Aigua de reg",
   "irrigation.water_hint":
     "El contingut en nitrogen i fòsfor de l'aigua només s'anota quan el facilita l'organisme de conca o la comunitat de regants; amb analítiques pròpies és voluntari.",
+  "irrigation.practices_section": "Bones pràctiques",
+  "irrigation.practices_hint": "El model imprès no les recull; el quadern digital les admet.",
+  "irrigation.practices_none": "Cap de seleccionada",
+  "irrigation.practices_selected.one": "1 de seleccionada",
+  "irrigation.practices_selected.other": "{count} de seleccionades",
   "irrigation.nitric_n": "N nítric (mg/l)",
   "irrigation.soluble_p2o5": "P₂O₅ soluble (mg/l)",
   "irrigation.plots_section": "Parcel·les regades",
@@ -107,9 +112,10 @@ export default {
   "material.add_nutrient": "Afegeix un nutrient",
   "material.fill": "Emplena des del catàleg",
   "material.fill_hint":
-    "Pren la composició que el catàleg publica per al producte triat, sense tocar les línies que ja hàgiu anotat. Comproveu-la amb l'etiqueta: els metalls pesants no s'emplenen mai, perquè el catàleg barreja percentatges i mg/kg a les mateixes columnes.",
+    "Pren la composició que el catàleg publica per al producte triat i, si és líquid, la seva densitat, sense tocar el que ja hàgiu anotat. Comproveu-ho amb l'etiqueta: els metalls pesants no s'emplenen mai, perquè el catàleg barreja percentatges i mg/kg a les mateixes columnes.",
   "material.filled.one": "S'ha afegit una línia de composició.",
   "material.filled.other": "S'han afegit {count} línies de composició.",
+  "material.filled_density": "S'ha pres la densitat del catàleg: {density} kg/L.",
   "material.filled_none": "El catàleg no afegeix res que no estigués ja anotat.",
   "material.supplier_registry": "Registre",
   "material.supplier_number": "Núm. d'identificació",

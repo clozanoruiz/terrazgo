@@ -51,7 +51,7 @@ pub struct AppSettings {
     /// `None` means never checked, which is the normal state on first run.
     pub last_integrity_check: Option<IntegrityCheck>,
     /// How many days before an operator licence expires its alert opens.
-    /// `None` follows module-cue's own default (`AlertConfig::defaults`).
+    /// `None` follows module-phytosanitary's own default (`AlertConfig::defaults`).
     ///
     /// A setting rather than a constant because the right answer is something
     /// the farmer knows and the app cannot: renewing a carné de aplicador means
@@ -63,11 +63,60 @@ pub struct AppSettings {
     /// is not booking a course.
     pub itv_lead_days: Option<i64>,
     /// How far back the map's PHI tint keeps showing a plot as treated-and-clear.
-    /// `None` follows module-cue's default (`default_phi_horizon_days`).
+    /// `None` follows module-phytosanitary's default (`default_phi_horizon_days`).
     ///
     /// Bounds a display and not a duty: the restricted state is unaffected, and
     /// stays date-scoped across every campaign whatever this says.
     pub phi_recent_days: Option<i64>,
+    /// This installation's device id: which replica wrote each row of the
+    /// change log (docs/sync.md → Device identity). Not the active profile —
+    /// that is a person, this is a copy of the database.
+    ///
+    /// Here rather than in the database *because* this file is excluded from
+    /// backups: a snapshot restored on another machine must not let that
+    /// machine write under this one's name. For the same reason the shell mints
+    /// a fresh id whenever a backup is imported, even on this device.
+    ///
+    /// `None`, or a value that is not a canonical UUID, is a first launch or a
+    /// lost file, and [`AppSettings::ensure_device_id`] mints a new one. The
+    /// device then looks like a new peer and needs naming again — a cost, never
+    /// a corruption.
+    pub device_id: Option<String>,
+}
+
+impl AppSettings {
+    /// What a Settings form submitted, applied over these settings: the form's
+    /// choices, with the fields the MACHINE owns carried over from `self`.
+    ///
+    /// The form sends the whole struct back, so it also sends whatever it last
+    /// read — and it may have read it before something else changed it. Two
+    /// fields no person sets: `device_id`, which a backup import replaces while
+    /// a Settings view can still hold the old one (saving that snapshot back
+    /// would put this device's change-set numbers back under an identity the
+    /// restored database already left — docs/sync.md → Device identity), and
+    /// `last_integrity_check`, the verdict the weekly check writes. Everything
+    /// else is a preference and the form's to decide.
+    pub fn apply_form(&self, form: AppSettings) -> AppSettings {
+        AppSettings {
+            device_id: self.device_id.clone(),
+            last_integrity_check: self.last_integrity_check.clone(),
+            ..form
+        }
+    }
+
+    /// The id this device writes as, minting one when there is none or the
+    /// stored value is unusable. Returns the id and whether it was minted just
+    /// now, so the caller knows the file needs saving.
+    pub fn ensure_device_id(&mut self) -> (String, bool) {
+        match &self.device_id {
+            Some(id) if crate::sync::is_device_id(id) => (id.clone(), false),
+            _ => {
+                let id = crate::sync::mint_device_id();
+                self.device_id = Some(id.clone());
+                (id, true)
+            }
+        }
+    }
 }
 
 /// The outcome of one corruption check. One struct rather than two parallel
@@ -162,6 +211,7 @@ mod tests {
             licence_lead_days: Some(90),
             itv_lead_days: Some(45),
             phi_recent_days: Some(180),
+            device_id: Some("0198b7a0-0000-7000-8000-00000000000d".into()),
         };
         save_settings(&path, &settings).unwrap();
         assert_eq!(load_settings(&path), settings);
@@ -211,6 +261,75 @@ mod tests {
         assert!(check.ok);
         assert!(!check.thorough, "an old verdict was the quick check");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_form_sets_preferences_and_never_what_the_machine_owns() {
+        // The case that matters: a Settings view read the settings, a backup
+        // import then gave this device a new id, and the view saves a lead
+        // time from its stale copy. The lead time lands; the old id does not.
+        let current = AppSettings {
+            device_id: Some("0198b7a0-0000-7000-8000-0000000000b2".into()),
+            last_integrity_check: Some(IntegrityCheck {
+                at: "2026-09-18T09:00:00Z".into(),
+                ok: true,
+                thorough: false,
+            }),
+            licence_lead_days: Some(30),
+            ..AppSettings::default()
+        };
+        let stale_form = AppSettings {
+            device_id: Some("0198b7a0-0000-7000-8000-0000000000a1".into()),
+            last_integrity_check: None,
+            licence_lead_days: Some(90),
+            active_user_id: Some("profile-1".into()),
+            ..AppSettings::default()
+        };
+
+        let saved = current.apply_form(stale_form);
+        assert_eq!(saved.device_id, current.device_id);
+        assert_eq!(saved.last_integrity_check, current.last_integrity_check);
+        assert_eq!(saved.licence_lead_days, Some(90));
+        assert_eq!(saved.active_user_id.as_deref(), Some("profile-1"));
+    }
+
+    #[test]
+    fn a_first_launch_mints_a_device_id_and_says_so() {
+        let mut settings = AppSettings::default();
+        let (id, minted) = settings.ensure_device_id();
+        assert!(minted);
+        assert!(crate::sync::is_device_id(&id));
+        assert_eq!(settings.device_id.as_deref(), Some(id.as_str()));
+    }
+
+    #[test]
+    fn a_stored_device_id_is_kept() {
+        // Minting on every launch would make each launch a stranger to the
+        // changes the last one wrote.
+        let mut settings = AppSettings {
+            device_id: Some("0198b7a0-0000-7000-8000-00000000000d".into()),
+            ..AppSettings::default()
+        };
+        assert_eq!(
+            settings.ensure_device_id(),
+            ("0198b7a0-0000-7000-8000-00000000000d".to_string(), false)
+        );
+    }
+
+    #[test]
+    fn a_hand_mangled_device_id_is_replaced_not_used() {
+        // The file is plain text a person can edit, and the id goes into every
+        // log row forever after; an upper-case spelling of one UUID would name
+        // the same device two ways.
+        for mangled in ["laptop", "0198B7A0-0000-7000-8000-00000000000D", ""] {
+            let mut settings = AppSettings {
+                device_id: Some(mangled.into()),
+                ..AppSettings::default()
+            };
+            let (id, minted) = settings.ensure_device_id();
+            assert!(minted, "{mangled:?}");
+            assert_ne!(id, mangled);
+        }
     }
 
     #[test]

@@ -772,8 +772,17 @@
   .map-side {
     width: 15rem;
     flex: none;
-    overflow-y: auto;
     padding-right: 0.2rem;
+  }
+  /* A scroller only beside the map. Under it, on a phone, the panel is ordinary
+     content in <main>'s column, and a scroll container there — even one with
+     nothing to scroll — would keep a swipe that starts on it from reaching
+     <main> (see the overscroll note in styles.css). */
+  @media (min-width: 701px) {
+    .map-side {
+      overflow-y: auto;
+      overscroll-behavior-y: none;
+    }
   }
   .map-side h3 {
     margin-top: 0;

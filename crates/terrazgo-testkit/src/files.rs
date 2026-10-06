@@ -56,9 +56,63 @@ impl Drop for TempFile {
     }
 }
 
+/// A directory in the system temp directory, removed with its contents when
+/// the guard drops. The sibling of [`TempFile`], for producers whose subject is
+/// a whole directory rather than one file — pruning a directory of backups
+/// cannot be tested against a single path.
+pub struct TempDir(PathBuf);
+
+impl TempDir {
+    /// Create an empty directory, clearing any leftover from an earlier run.
+    pub fn create(name: &str) -> Self {
+        let path =
+            std::env::temp_dir().join(format!("terrazgo-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        Self(path)
+    }
+
+    /// Write a file inside the directory.
+    pub fn write(&self, name: &str, contents: impl AsRef<[u8]>) {
+        std::fs::write(self.0.join(name), contents).unwrap();
+    }
+
+    /// The file names it currently holds, sorted so assertions are stable —
+    /// `read_dir` order is whatever the filesystem returns.
+    pub fn names(&self) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(&self.0)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_directory_and_its_contents_are_gone_after_the_guard_drops() {
+        let path = {
+            let dir = TempDir::create("guarded-dir");
+            dir.write("inside.db", b"payload");
+            assert_eq!(dir.names(), vec!["inside.db"]);
+            dir.path().to_path_buf()
+        };
+        assert!(!path.exists());
+    }
 
     #[test]
     fn the_file_and_its_wal_sidecars_are_gone_after_the_guard_drops() {

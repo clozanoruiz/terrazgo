@@ -7,14 +7,13 @@
 //! Split out of `commands.rs` (2026-08-13); the boundary machinery and the
 //! re-exports stay in the parent file.
 
-use super::{CmdResult, active_actor, alert_config};
+use super::{CmdResult, active_actor};
 use crate::state;
 use crate::state::AppState;
-use module_cue::repository;
+use module_phytosanitary::repository;
 use serde::Deserialize;
 use serde::Serialize;
 use tauri::State;
-use terrazgo_core::date::today_utc;
 use terrazgo_core::models::NewCrop;
 use terrazgo_core::models::UpdateCrop;
 use terrazgo_core::repository as core_repo;
@@ -61,8 +60,8 @@ pub async fn sigpac_lookup_point(
 /// row) plus the zone checks (nitrate/phyto/Natura, folded in — decision
 /// 2026-07-08). `None` = reference unknown to SIGPAC; nothing stored.
 /// `refresh` bypasses the response cache (re-verification at rollover).
-/// Zone flags feed the alert engine, so a refresh follows the write — the
-/// shell chains the two modules (they never call each other).
+/// The zone flags it stores are what core's zone alerts are worked out from,
+/// the next time the alert list is read.
 #[tauri::command]
 pub async fn sigpac_verify_plot(
     state: State<'_, AppState>,
@@ -73,18 +72,15 @@ pub async fn sigpac_verify_plot(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Option<module_sigpac::service::PlotVerification>> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    let verification =
-        module_sigpac::service::verify_plot(conn, &geo.cache, &plot_id, refresh, actor.as_deref())?;
-    if verification
-        .as_ref()
-        .is_some_and(|v| v.zone_flags.is_some())
-    {
-        repository::refresh_alerts(conn, &today_utc(), &config)?;
-    }
-    Ok(verification)
+    Ok(module_sigpac::service::verify_plot(
+        conn,
+        &geo.cache,
+        &plot_id,
+        refresh,
+        actor.as_deref(),
+    )?)
 }
 
 /// What the PAC declaration says grows on this farm's plots, diffed against
@@ -92,7 +88,7 @@ pub async fn sigpac_verify_plot(
 /// the farmer confirms rows through `sigpac_accept_crop_proposals`.
 ///
 /// The shell supplies the guard input — which crops this season's treatments
-/// already point at — because it comes from the CUE module and the two modules
+/// already point at — because it comes from the phytosanitary module and the two modules
 /// never call each other (the `sigpac_verify_plot` precedent).
 #[tauri::command]
 pub async fn sigpac_propose_crops(
@@ -207,12 +203,14 @@ pub fn sigpac_accept_crop_proposals(
 #[tauri::command]
 pub fn list_crop_species(
     state: State<'_, AppState>,
+    country_code: String,
     plot_id: Option<String>,
 ) -> CmdResult<module_sigpac::service::SpeciesCatalogue> {
     let db = state.db.lock()?;
     let conn = db.conn()?;
     Ok(module_sigpac::service::crop_species(
         conn,
+        &country_code,
         plot_id.as_deref(),
     )?)
 }

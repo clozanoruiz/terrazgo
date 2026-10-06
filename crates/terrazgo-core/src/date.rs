@@ -5,14 +5,14 @@
 //!
 //! Compliance-critical date arithmetic lives on a battle-tested crate rather than bespoke
 //! code; the public surface (`add_days`, `now_utc_iso`) is unchanged from the earlier
-//! hand-rolled implementation. Moved here from module-cue (2026-06-12) — the maths was
-//! never CUE-specific.
+//! hand-rolled implementation. Moved here from module-phytosanitary (2026-06-12) — the maths was
+//! never phytosanitary-specific.
 
 use crate::error::{CoreError, Result};
 use jiff::{Timestamp, ToSpan, civil::Date};
 
 /// Parse a `YYYY-MM-DD` string into a calendar date, mapping failure to `InvalidDate`.
-/// Public because module crates build their own date rules on it (e.g. CUE's alert rules).
+/// Public because module crates build their own date rules on it (e.g. the phytosanitary module's alert rules).
 ///
 /// ```
 /// use terrazgo_core::date::parse_date;
@@ -26,6 +26,27 @@ use jiff::{Timestamp, ToSpan, civil::Date};
 pub fn parse_date(date: &str) -> Result<Date> {
     date.parse()
         .map_err(|_| CoreError::InvalidDate(date.to_string()))
+}
+
+/// Refuse any recorded date that is not `YYYY-MM-DD` — the write-side guard for
+/// a date some rule reads later. A date not recorded (`None`) always passes.
+///
+/// **At the write, not only where a rule reads it**: a date nobody checked on
+/// the way in is found by the first rule that reads it — the alert list, days
+/// later, on a screen that is not the form holding the mistake. Refused here,
+/// the farmer sees "Fecha no válida" on the form they are filling.
+///
+/// ```
+/// use terrazgo_core::date::validate_dates;
+///
+/// assert!(validate_dates(&[Some("2026-08-15"), None]).is_ok());
+/// assert!(validate_dates(&[None, Some("15/08/2026")]).is_err());
+/// ```
+pub fn validate_dates(dates: &[Option<&str>]) -> Result<()> {
+    for date in dates.iter().flatten() {
+        parse_date(date)?;
+    }
+    Ok(())
 }
 
 /// Add `days` to a `YYYY-MM-DD` date, returning a `YYYY-MM-DD` date.
@@ -59,7 +80,21 @@ pub fn now_utc_iso() -> String {
     Timestamp::now().strftime("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-/// Current UTC date as `YYYY-MM-DD` — the "today" that alert refresh compares
+/// Current instant in milliseconds since the Unix epoch — the reading the
+/// hybrid logical clock is built from, and the one an import measures an
+/// incoming stamp against.
+///
+/// **Not a timestamp to store or show.** Everything a person or an inspection
+/// reads is [`now_utc_iso`]; this is for the two places that do arithmetic on
+/// instants, and it is a function here rather than a `Timestamp::now()` at each
+/// of them so that "what time is it" has one answer in this crate. The callers
+/// that compare against it take it as a parameter, which is what lets a wrong
+/// clock be tested without one.
+pub fn now_ms() -> i64 {
+    Timestamp::now().as_millisecond()
+}
+
+/// Current UTC date as `YYYY-MM-DD` — the "today" the alert rules compare
 /// date-only fields against. Date-only, UTC: a treatment recorded at 23:30 local
 /// must not flip alert state depending on the device's timezone.
 pub fn today_utc() -> String {

@@ -42,19 +42,29 @@ pub(crate) fn ensure_platform_verifier() -> Result<(), String> {
     }
     let ctx = tao::platform::android::prelude::main_android_context()
         .ok_or_else(|| "Android activity context not available yet".to_string())?;
+    // `JavaVM::from_raw` asserts a non-null pointer, and a panic here is the
+    // silent blank map this module exists to prevent — so null is refused as
+    // an ordinary error first, and retried on the next fetch like any other.
+    if ctx.java_vm.is_null() {
+        return Err("JavaVM handle: null pointer".to_string());
+    }
     // SAFETY: both raw pointers come from tao's ndk_glue, which captured them
     // at activity creation — the JavaVM pointer is process-global and the
     // context is a JNI global ref tao keeps alive with the activity.
-    let vm = unsafe { jni::JavaVM::from_raw(ctx.java_vm.cast()) }
-        .map_err(|e| format!("JavaVM handle: {e}"))?;
-    let mut env = vm
-        .attach_current_thread_as_daemon()
-        .map_err(|e| format!("JNI attach: {e}"))?;
-    // SAFETY: see above — tao's global ref outlives this borrow, and JObject
-    // does not delete the reference on drop.
-    let context = unsafe { jni::objects::JObject::from_raw(ctx.context_jobject.cast()) };
-    rustls_platform_verifier::android::init_with_env(&mut env, context)
-        .map_err(|e| format!("platform verifier init: {e}"))?;
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.java_vm.cast()) };
+    // The attachment runs a closure: `env` is borrowed only for the JNI stack
+    // frame the call pushes, and the context `JObject` is made inside it so its
+    // `'local` lifetime is tied to that frame and cannot escape it. The
+    // attachment itself is permanent (jni has no daemon attachments since
+    // 0.22), which is the cheap case — this worker thread stays attached until
+    // it exits.
+    vm.attach_current_thread(|env| -> jni::errors::Result<()> {
+        // SAFETY: see above — tao's global ref outlives this borrow, and
+        // JObject does not delete the reference on drop.
+        let context = unsafe { jni::objects::JObject::from_raw(env, ctx.context_jobject.cast()) };
+        rustls_platform_verifier::android::init_with_env(env, context)
+    })
+    .map_err(|e| format!("JNI attach or platform verifier init: {e}"))?;
     let _ = VERIFIER_READY.set(());
     Ok(())
 }

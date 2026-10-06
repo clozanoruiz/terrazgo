@@ -25,7 +25,7 @@ workspace = true
 terrazgo-core = { workspace = true }
 # The treatment domain: TratamFito and the three non-field blocks, plus
 # Analitica. Also the SIEX code mappings for its own lookups.
-module-cue = { workspace = true }
+module-phytosanitary = { workspace = true }
 # Fertilizacion, PlanAbonado and Riego.
 module-fertilisation = { workspace = true }
 # Pastoreo, LaboresCulturales and DatosCubierta.

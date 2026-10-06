@@ -9,8 +9,8 @@
 //! farm/plot extensions).
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
-use crate::date::now_utc_iso;
+use crate::audit::{ChangeStamp, begin, log_delete, log_insert, log_update};
+use crate::date::{now_utc_iso, validate_dates};
 use crate::error::{CoreError, Result};
 use crate::models::{
     Machinery, MachineryDetail, MachineryEsExtension, NewMachinery, UpdateMachinery,
@@ -28,7 +28,12 @@ pub fn insert_machinery(
     actor: Option<&str>,
 ) -> Result<Machinery> {
     validate_name(&new.name)?;
-    let tx = conn.transaction()?;
+    validate_dates(&[
+        new.acquired_on.as_deref(),
+        new.last_inspection_date.as_deref(),
+        new.next_inspection_due_date.as_deref(),
+    ])?;
+    let tx = begin(conn, actor)?;
     let now = now_utc_iso();
     let machinery = Machinery {
         id: Uuid::now_v7().to_string(),
@@ -59,7 +64,8 @@ pub fn insert_machinery(
             machinery.updated_at
         ],
     )?;
-    log_insert(&tx, "machinery", &machinery.id, None, actor, &machinery)?;
+    let stamp = tx.register("machinery", &machinery.id, None)?;
+    log_insert(&tx, &stamp, "machinery", &machinery.id, &machinery)?;
 
     if new.roma_number.is_some() || new.reganip_number.is_some() {
         insert_extension(
@@ -67,7 +73,7 @@ pub fn insert_machinery(
             &machinery.id,
             new.roma_number,
             new.reganip_number,
-            actor,
+            &stamp,
         )?;
     }
 
@@ -119,7 +125,12 @@ pub fn update_machinery(
     actor: Option<&str>,
 ) -> Result<MachineryDetail> {
     validate_name(&update.name)?;
-    let tx = conn.transaction()?;
+    validate_dates(&[
+        update.acquired_on.as_deref(),
+        update.last_inspection_date.as_deref(),
+        update.next_inspection_due_date.as_deref(),
+    ])?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM machinery WHERE id = ?1 AND deleted_at IS NULL",
@@ -152,9 +163,10 @@ pub fn update_machinery(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "machinery", id, None, actor, &before, &after)?;
+    let stamp = tx.register("machinery", id, None)?;
+    log_update(&tx, &stamp, "machinery", id, &before, &after)?;
 
-    let es = reconcile_extension(&tx, id, update.roma_number, update.reganip_number, actor)?;
+    let es = reconcile_extension(&tx, id, update.roma_number, update.reganip_number, &stamp)?;
     tx.commit()?;
     Ok(MachineryDetail {
         machinery: after,
@@ -163,10 +175,10 @@ pub fn update_machinery(
 }
 
 /// Soft delete: the row stays (treatment history must keep resolving), it just
-/// leaves every list and picker. The ITV alert lapses on the next
-/// `refresh_alerts` — the reconciler skips soft-deleted subjects.
+/// leaves every list and picker. Its ITV alert goes with it: the alert rules
+/// skip soft-deleted subjects, and the list is worked out when read.
 pub fn soft_delete_machinery(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM machinery WHERE id = ?1 AND deleted_at IS NULL",
@@ -183,7 +195,8 @@ pub fn soft_delete_machinery(conn: &mut Connection, id: &str, actor: Option<&str
         "UPDATE machinery SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "machinery", id, None, actor, &before, Some(&after))?;
+    let stamp = tx.register("machinery", id, None)?;
+    log_delete(&tx, &stamp, "machinery", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -197,7 +210,7 @@ fn insert_extension(
     machinery_id: &str,
     roma_number: Option<String>,
     reganip_number: Option<String>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<MachineryEsExtension> {
     let ext = MachineryEsExtension {
         machinery_id: machinery_id.to_string(),
@@ -209,14 +222,7 @@ fn insert_extension(
          VALUES (?1, ?2, ?3)",
         params![ext.machinery_id, ext.roma_number, ext.reganip_number],
     )?;
-    log_insert(
-        tx,
-        "machinery_es_extension",
-        machinery_id,
-        None,
-        actor,
-        &ext,
-    )?;
+    log_insert(tx, stamp, "machinery_es_extension", machinery_id, &ext)?;
     Ok(ext)
 }
 
@@ -252,7 +258,7 @@ fn reconcile_extension(
     machinery_id: &str,
     roma_number: Option<String>,
     reganip_number: Option<String>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Option<MachineryEsExtension>> {
     let current = tx
         .query_row(
@@ -270,7 +276,7 @@ fn reconcile_extension(
             machinery_id,
             roma_number,
             reganip_number,
-            actor,
+            stamp,
         )?)),
         (Some(before), false) => {
             tx.execute(
@@ -279,10 +285,9 @@ fn reconcile_extension(
             )?;
             log_delete(
                 tx,
+                stamp,
                 "machinery_es_extension",
                 machinery_id,
-                None,
-                actor,
                 &before,
                 None,
             )?;
@@ -301,10 +306,9 @@ fn reconcile_extension(
             )?;
             log_update(
                 tx,
+                stamp,
                 "machinery_es_extension",
                 machinery_id,
-                None,
-                actor,
                 &before,
                 &after,
             )?;

@@ -10,6 +10,7 @@
   import { lookups } from "./lookups.svelte.js";
   import { sortedBy } from "./collate.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { notify, run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
@@ -22,14 +23,24 @@
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
 
-  let { farmId, seasonId, seasonLabel, plots, crops, onChanged } = $props();
+  let { farmId, seasonId, seasonLabel, countryCode, plots, crops, onChanged } = $props();
 
   // Session-wide reference data, read from the module instead of drilled
   // through every parent (lib/lookups.svelte.js).
   const productionSystems = $derived(lookups.productionSystems);
   const irrigationSystems = $derived(lookups.irrigationSystems);
   const growingEnvironments = $derived(lookups.growingEnvironments);
-  const gipSystems = $derived(lookups.gipSystems);
+
+  // NOT session-wide: the GIP frameworks are one country's scheme (`atria` is
+  // a Spanish institution), so they follow the holding's country.
+  let gipSystems = $state([]);
+
+  $effect(() => {
+    const country = countryCode;
+    run(async () => {
+      gipSystems = country ? await invoke("list_gip_systems", { countryCode: country }) : [];
+    });
+  });
 
   let cropFormOpen = $state(false);
 
@@ -75,7 +86,7 @@
     editingCropId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which crop it is about. Null while creating.
   const editingCrop = $derived(crops.find((crop) => crop.id === editingCropId) ?? null);
 
@@ -96,15 +107,19 @@
       // detach the species from the catalogue on every unrelated correction.
       crop_code: cropCode,
     };
+    let savedId = editingCropId;
     if (editingCropId) {
       await invoke("update_crop", { cropId: editingCropId, update: payload });
     } else {
-      await invoke("create_crop", {
-        crop: { ...payload, plot_id: cropPlotId, season_id: seasonId },
-      });
+      savedId = (
+        await invoke("create_crop", {
+          crop: { ...payload, plot_id: cropPlotId, season_id: seasonId },
+        })
+      ).id;
     }
     hideCropForm();
     await onChanged();
+    await checkSaved("crop", savedId);
   }
 
   function deleteCrop(crop) {
@@ -366,14 +381,14 @@
     {#if proposalOpen !== null && proposals.rows[proposalOpen]}
       {@const row = proposals.rows[proposalOpen]}
       <div class="subpanel">
-        <div class="inspector-head">
+        <div class="subpanel-head">
           <span>{row.plot_name}</span>
           <TzTooltip label={t("form.close")}>
             {#snippet trigger(props)}
               <button
                 {...props}
                 type="button"
-                class="inspector-close"
+                class="subpanel-close"
                 onclick={(event) => {
                   props.onclick?.(event);
                   proposalOpen = null;
@@ -528,7 +543,13 @@
         />
         <label>
           <span>{t("crop.species")}</span>
-          <SpeciesPicker bind:name={species} bind:code={cropCode} plotId={cropPlotId} required />
+          <SpeciesPicker
+            bind:name={species}
+            bind:code={cropCode}
+            {countryCode}
+            plotId={cropPlotId}
+            required
+          />
         </label>
         <TextInput label={t("crop.variety")} bind:value={variety} />
         <TzSelect

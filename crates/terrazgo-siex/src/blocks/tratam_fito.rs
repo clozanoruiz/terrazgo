@@ -10,7 +10,7 @@
 //!
 //! Its own peculiarity is the split: the 3.11.4 descriptor constrains all DGCs
 //! in one entry to share the crop, so a multi-crop record becomes several
-//! entries — the same split `module_cue::crop_groups` gives the printed book,
+//! entries — the same split `module_phytosanitary::crop_groups` gives the printed book,
 //! which is why that function lives in the module both documents read.
 //!
 //! It is also the only block whose two halves are alternatives. `ProductosFito`
@@ -22,12 +22,12 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::crop_groups;
-use module_cue::models::{
+use module_phytosanitary::crop_groups;
+use module_phytosanitary::models::{
     TreatmentPlot, TreatmentProblem, TreatmentRecord, TreatmentRecordWithPlots,
 };
-use module_cue::repository::list_treatment_records_for_export;
-use module_cue::siex;
+use module_phytosanitary::repository::list_treatment_records_for_export;
+use module_phytosanitary::siex;
 use rusqlite::Connection;
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 

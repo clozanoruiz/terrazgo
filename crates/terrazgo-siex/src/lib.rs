@@ -12,7 +12,7 @@
 //! frozen aliases, a precheck and schema validation — so they share their
 //! *sources* and nothing else.
 //!
-//! It lived in `module_cue::export` until 2026-08-20. That was tenable while
+//! It lived in `module_phytosanitary::export` until 2026-08-20. That was tenable while
 //! `TratamFito` was the only block; it stopped being tenable at the point ten
 //! of the format's fifteen activity blocks came from `module-fertilisation` and
 //! `module-ecoscheme`, which a module may never depend on. The same wall that
@@ -28,7 +28,7 @@
 //! Serialization rules (each pinned by the tests against the vendored schema):
 //! a multi-crop treatment splits into one `TratamFito` per crop snapshot
 //! (3.11.4 descriptor rule, and the same split the printed book makes — see
-//! `module_cue::crop_groups`), every entry carries a frozen integer alias
+//! `module_phytosanitary::crop_groups`), every entry carries a frozen integer alias
 //! (`export_alias` — SIEX keys edits and deletes on it), dates render
 //! dd/mm/yyyy, and all codes map through each module's own `siex` module.
 //! Soft-deleted records emit `Borrar` entries under their existing aliases;
@@ -86,7 +86,7 @@ pub fn build_cuaderno(
         .to_string();
     let es = farm.es.ok_or_else(missing)?;
     let autonomous_community =
-        module_cue::siex::province_to_ccaa(es.province_code.as_deref().unwrap_or(""))
+        module_phytosanitary::siex::province_to_ccaa(es.province_code.as_deref().unwrap_or(""))
             .ok_or_else(missing)?
             .to_string();
     let rea_code = es.rea_code.ok_or_else(missing)?.trim().to_string();
@@ -99,7 +99,7 @@ pub fn build_cuaderno(
     let analitica = blocks::analitica::build(conn, season_id, farm_id, actor)?;
     let comercializacion_vd = blocks::comercializacion_vd::build(conn, season_id, farm_id, actor)?;
     // Reads TWO registers: core's sowing record for the dates, plots and
-    // amount, and module-cue's treated seed for the provenance members the
+    // amount, and module-phytosanitary's treated seed for the provenance members the
     // format hangs off the sowing.
     let siembra_plantacion = blocks::siembra_plantacion::build(conn, season_id, farm_id, actor)?;
     // module-fertilisation's three. `Fertilizacion` reads the irrigation

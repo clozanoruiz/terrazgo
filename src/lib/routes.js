@@ -18,6 +18,12 @@
 // a view stating its own name twice — once in the band, once as an <h2> in its
 // own canvas — is how the two came to disagree. They are the `nav.*` keys on
 // purpose: the band must say what the entry the user just clicked said.
+//
+// `parent` marks a detail page: the band then opens with a back button to that
+// route, and names the page by the record it shows (lib/pageTitle.svelte.js)
+// instead of by its section — the sidebar already highlights the section. A
+// breadcrumb trail was the alternative, and no page nests deep enough to need
+// one.
 
 import FarmsView from "./FarmsView.svelte";
 import FarmView from "./FarmView.svelte";
@@ -26,6 +32,7 @@ import RegistryView from "./RegistryView.svelte";
 import SettingsView from "./SettingsView.svelte";
 import StatusView from "./StatusView.svelte";
 import RecordBookView from "./RecordBookView.svelte";
+import RecordBooksView from "./RecordBooksView.svelte";
 
 /// `match` returns the view's props when the hash is its route, or null.
 const exact = (route) => (hash) => (hash === route ? {} : null);
@@ -41,23 +48,42 @@ export const ROUTES = [
     },
     component: FarmView,
     titleKey: "nav.farms",
+    parent: "#/farms",
   },
   { match: exact("#/farms"), component: FarmsView, titleKey: "nav.farms" },
   // Prefix, not exact: #/map?farm=…&plot=… deep links (the query is parsed
   // inside the view).
   { match: prefix("#/map"), component: MapView, titleKey: "nav.map" },
-  { match: exact("#/record-book"), component: RecordBookView, titleKey: "nav.record_book" },
+  {
+    // One record book, opened from the list: a book is a season, and a season
+    // belongs to one farm, so its id is all the route needs.
+    match: (hash) => {
+      const found = /^#\/record-book\/(.+)$/.exec(hash);
+      return found ? { seasonId: found[1] } : null;
+    },
+    component: RecordBookView,
+    titleKey: "nav.record_book",
+    parent: "#/record-book",
+  },
+  { match: exact("#/record-book"), component: RecordBooksView, titleKey: "nav.record_book" },
   { match: exact("#/registry"), component: RegistryView, titleKey: "nav.registry" },
   { match: exact("#/settings"), component: SettingsView, titleKey: "nav.settings" },
 ];
 
-/// The view for a hash, with its props and the key naming it. Anything
-/// unmatched is the status view: a bad hash shows the app's home rather than a
-/// blank frame.
+/// The view for a hash, with its props, the key naming it and the route its
+/// back button returns to (null on a top-level screen). Anything unmatched is
+/// the status view: a bad hash shows the app's home rather than a blank frame.
 export function resolveRoute(hash) {
   for (const route of ROUTES) {
     const props = route.match(hash);
-    if (props) return { component: route.component, props, titleKey: route.titleKey };
+    if (props) {
+      return {
+        component: route.component,
+        props,
+        titleKey: route.titleKey,
+        parent: route.parent ?? null,
+      };
+    }
   }
-  return { component: StatusView, props: {}, titleKey: "nav.status" };
+  return { component: StatusView, props: {}, titleKey: "nav.status", parent: null };
 }

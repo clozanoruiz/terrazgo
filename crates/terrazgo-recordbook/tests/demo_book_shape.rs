@@ -36,7 +36,11 @@ const GENERATED_ON: &str = "2026-08-09";
 fn the_demo_book_is_the_same_size_in_every_language() {
     let mut conn = terrazgo_recordbook::open_in_memory().unwrap();
     terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
-    assert!(module_cue::demo::seed_demo(&mut conn).unwrap().seeded);
+    assert!(
+        module_phytosanitary::demo::seed_demo(&mut conn)
+            .unwrap()
+            .seeded
+    );
 
     let (season_id, farm_id): (String, String) = conn
         .query_row(
@@ -83,4 +87,29 @@ fn the_demo_book_is_the_same_size_in_every_language() {
             xlsx.sheet_count
         );
     }
+}
+
+#[test]
+fn the_demo_book_names_every_code_it_prints() {
+    // Every lookup the book makes, held to the vendored catalogues: a code
+    // counted here as unnamed would tell a farmer to update catalogues that
+    // are already up to date.
+    let mut conn = terrazgo_recordbook::open_in_memory().unwrap();
+    terrazgo_core::catalogue::ensure_catalogues(&mut conn).unwrap();
+    assert!(
+        module_phytosanitary::demo::seed_demo(&mut conn)
+            .unwrap()
+            .seeded
+    );
+    let (season_id, farm_id): (String, String) = conn
+        .query_row(
+            "SELECT season_id, farm_id FROM treatment_record LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+
+    let advisory =
+        terrazgo_recordbook::book_advisory(&conn, &season_id, &farm_id, GENERATED_ON).unwrap();
+    assert_eq!(advisory.unnamed_codes, 0);
 }

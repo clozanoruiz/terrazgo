@@ -14,7 +14,8 @@
 //! later edit elsewhere could rewrite underneath it — exactly the condition
 //! `seed_treatment` established.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update, write_change};
+use super::fertilisation::validated_practices;
 use super::no_rows_to_not_found;
 use crate::error::{FertilisationError, Result};
 use crate::models::{
@@ -43,10 +44,11 @@ pub fn insert_irrigation_record(
     validate_volume(new.volume_value, &new.volume_unit_code)?;
     validate_water_quality(new.water_nitric_n_mg_l, new.water_soluble_p2o5_mg_l)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_method(&tx, &new.irrigation_method_code)?;
     let plots = validated_plots(&tx, &new.farm_id, &new.plots)?;
     let origins = validated_origins(&tx, &new.water_origins)?;
+    let practices = validated_practices(&new.practices)?;
 
     let now = now_utc_iso();
     let record = IrrigationRecord {
@@ -96,32 +98,24 @@ pub fn insert_irrigation_record(
     )?;
 
     let mut plot_rows = Vec::new();
+    let stamp = tx.register("irrigation_record", &record.id, Some(&record.season_id))?;
     for plot in plots {
-        plot_rows.push(insert_plot_row(
-            &tx,
-            &record.id,
-            &record.season_id,
-            plot,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(&tx, &record.id, plot, &stamp)?);
     }
     for origin in &origins {
-        insert_origin_row(&tx, &record.id, &record.season_id, origin, actor)?;
+        insert_origin_row(&tx, &record.id, origin, &stamp)?;
+    }
+    for practice in &practices {
+        insert_practice_row(&tx, &record.id, practice, &stamp)?;
     }
 
-    log_insert(
-        &tx,
-        "irrigation_record",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(&tx, &stamp, "irrigation_record", &record.id, &record)?;
     tx.commit()?;
     Ok(IrrigationRecordDetail {
         record,
         plots: plot_rows,
         water_origins: origins,
+        practices,
     })
 }
 
@@ -139,7 +133,7 @@ pub fn update_irrigation_record(
     validate_volume(update.volume_value, &update.volume_unit_code)?;
     validate_water_quality(update.water_nitric_n_mg_l, update.water_soluble_p2o5_mg_l)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_method(&tx, &update.irrigation_method_code)?;
     let before = tx
         .query_row(
@@ -151,6 +145,7 @@ pub fn update_irrigation_record(
         .ok_or(FertilisationError::NotFound)?;
     let plots = validated_plots(&tx, &before.farm_id, &update.plots)?;
     let origins = validated_origins(&tx, &update.water_origins)?;
+    let practices = validated_practices(&update.practices)?;
 
     let mut after = before.clone();
     after.irrigated_on = update.irrigated_on;
@@ -187,23 +182,18 @@ pub fn update_irrigation_record(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "irrigation_record",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    let stamp = tx.register("irrigation_record", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "irrigation_record", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(&tx, &after, plots, actor)?;
-    reconcile_origins(&tx, &after, &origins, actor)?;
+    let plot_rows = reconcile_plots(&tx, &after, plots, &stamp)?;
+    reconcile_origins(&tx, &after, &origins, &stamp)?;
+    reconcile_practices(&tx, &after, &practices, &stamp)?;
     tx.commit()?;
     Ok(IrrigationRecordDetail {
         record: after,
         plots: plot_rows,
         water_origins: origins,
+        practices,
     })
 }
 
@@ -212,7 +202,16 @@ pub fn soft_delete_irrigation_record(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_irrigation_record_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_irrigation_record_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM irrigation_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -229,16 +228,15 @@ pub fn soft_delete_irrigation_record(
         "UPDATE irrigation_record SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
+    let stamp = tx.register("irrigation_record", id, Some(&before.season_id))?;
     write_change(
-        &tx,
+        tx,
+        &stamp,
         "irrigation_record",
         id,
-        Some(&before.season_id),
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
-    tx.commit()?;
     Ok(())
 }
 
@@ -252,10 +250,12 @@ pub fn get_irrigation_record(conn: &Connection, id: &str) -> Result<IrrigationRe
         .map_err(no_rows_to_not_found)?;
     let plots = plots_of(conn, &record.id)?;
     let water_origins = origins_of(conn, &record.id)?;
+    let practices = practices_of(conn, &record.id)?;
     Ok(IrrigationRecordDetail {
         record,
         plots,
         water_origins,
+        practices,
     })
 }
 
@@ -296,27 +296,13 @@ pub fn list_irrigation_records(
     all_with_details(conn, records)
 }
 
-/// Whether any irrigation hangs off this season — half of the module's arm of
-/// the guard the shell chains before deleting a season (see
-/// `repository::season_has_records`). Soft-deleted records count, as they do in
-/// module-cue: their audit history is only reachable through the season they
-/// belong to.
-pub(super) fn season_has_irrigation(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM irrigation_record WHERE season_id = ?1)",
-        [season_id],
-        |r| r.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- reconciliation --------------------------------------------------------
 
 fn reconcile_plots(
     tx: &Transaction,
     record: &IrrigationRecord,
     desired: Vec<NewIrrigationPlot>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<IrrigationPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -328,10 +314,9 @@ fn reconcile_plots(
             tx.execute("DELETE FROM irrigation_plot WHERE id = ?1", [&existing.id])?;
             log_delete(
                 tx,
+                stamp,
                 "irrigation_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&IrrigationPlot>,
             )?;
@@ -354,27 +339,13 @@ fn reconcile_plots(
                          WHERE id = ?1",
                         params![existing.id, after.crop_id, after.irrigated_area_ha],
                     )?;
-                    log_update(
-                        tx,
-                        "irrigation_plot",
-                        &existing.id,
-                        Some(&record.season_id),
-                        actor,
-                        existing,
-                        &after,
-                    )?;
+                    log_update(tx, stamp, "irrigation_plot", &existing.id, existing, &after)?;
                     rows.push(after);
                 } else {
                     rows.push(existing.clone());
                 }
             }
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                want,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, want, stamp)?),
         }
     }
     Ok(rows)
@@ -388,7 +359,7 @@ fn reconcile_origins(
     tx: &Transaction,
     record: &IrrigationRecord,
     desired: &[String],
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let current = origin_rows_tx(tx, &record.id)?;
     for (row_id, code) in &current {
@@ -400,10 +371,9 @@ fn reconcile_origins(
             let gone = origin_image(row_id, &record.id, code);
             log_delete(
                 tx,
+                stamp,
                 "irrigation_water_origin",
                 row_id,
-                Some(&record.season_id),
-                actor,
                 &gone,
                 None::<&serde_json::Value>,
             )?;
@@ -411,7 +381,38 @@ fn reconcile_origins(
     }
     for code in desired {
         if !current.iter().any(|(_, existing)| existing == code) {
-            insert_origin_row(tx, &record.id, &record.season_id, code, actor)?;
+            insert_origin_row(tx, &record.id, code, stamp)?;
+        }
+    }
+    Ok(())
+}
+
+/// Practices, like origins, carry nothing to correct in place: a code is claimed
+/// or it is not, and both a removal and an addition are logged.
+fn reconcile_practices(
+    tx: &Transaction,
+    record: &IrrigationRecord,
+    desired: &[String],
+    stamp: &ChangeStamp,
+) -> Result<()> {
+    let current = practice_rows_tx(tx, &record.id)?;
+    for (row_id, code) in &current {
+        if !desired.iter().any(|d| d == code) {
+            tx.execute("DELETE FROM irrigation_practice WHERE id = ?1", [row_id])?;
+            let gone = practice_image(row_id, &record.id, code);
+            log_delete(
+                tx,
+                stamp,
+                "irrigation_practice",
+                row_id,
+                &gone,
+                None::<&serde_json::Value>,
+            )?;
+        }
+    }
+    for code in desired {
+        if !current.iter().any(|(_, existing)| existing == code) {
+            insert_practice_row(tx, &record.id, code, stamp)?;
         }
     }
     Ok(())
@@ -420,9 +421,8 @@ fn reconcile_origins(
 fn insert_plot_row(
     tx: &Transaction,
     irrigation_record_id: &str,
-    season_id: &str,
     plot: NewIrrigationPlot,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<IrrigationPlot> {
     let row = IrrigationPlot {
         id: Uuid::now_v7().to_string(),
@@ -443,16 +443,15 @@ fn insert_plot_row(
             row.irrigated_area_ha
         ],
     )?;
-    log_insert(tx, "irrigation_plot", &row.id, Some(season_id), actor, &row)?;
+    log_insert(tx, stamp, "irrigation_plot", &row.id, &row)?;
     Ok(row)
 }
 
 fn insert_origin_row(
     tx: &Transaction,
     irrigation_record_id: &str,
-    season_id: &str,
     origin_code: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<()> {
     let id = Uuid::now_v7().to_string();
     tx.execute(
@@ -462,13 +461,42 @@ fn insert_origin_row(
     )?;
     log_insert(
         tx,
+        stamp,
         "irrigation_water_origin",
         &id,
-        Some(season_id),
-        actor,
         &origin_image(&id, irrigation_record_id, origin_code),
     )?;
     Ok(())
+}
+
+fn insert_practice_row(
+    tx: &Transaction,
+    irrigation_record_id: &str,
+    practice_code: &str,
+    stamp: &ChangeStamp,
+) -> Result<()> {
+    let id = Uuid::now_v7().to_string();
+    tx.execute(
+        "INSERT INTO irrigation_practice (id, irrigation_record_id, practice_code)
+         VALUES (?1, ?2, ?3)",
+        params![id, irrigation_record_id, practice_code],
+    )?;
+    log_insert(
+        tx,
+        stamp,
+        "irrigation_practice",
+        &id,
+        &practice_image(&id, irrigation_record_id, practice_code),
+    )?;
+    Ok(())
+}
+
+fn practice_image(id: &str, irrigation_record_id: &str, practice_code: &str) -> serde_json::Value {
+    json!({
+        "id": id,
+        "irrigation_record_id": irrigation_record_id,
+        "practice_code": practice_code,
+    })
 }
 
 /// The complete row image `record_change` requires — the junction has no model
@@ -620,7 +648,7 @@ fn blank_to_none(value: Option<String>) -> Option<String> {
 
 // --- mapping ---------------------------------------------------------------
 
-/// Hydration for a whole list, in two child statements rather than two per
+/// Hydration for a whole list, in three child statements rather than three per
 /// record. The single-record paths keep their point queries.
 ///
 /// The origins query keeps its join to `water_origin` and its `w.rowid`
@@ -654,11 +682,31 @@ fn all_with_details(
         },
         |(record_id, _)| record_id.clone(),
     )?;
+    let mut practices = children_by_parent(
+        conn,
+        "SELECT irrigation_record_id, practice_code FROM irrigation_practice
+         WHERE irrigation_record_id IN ({ids})
+         ORDER BY irrigation_record_id, CAST(practice_code AS INTEGER), practice_code",
+        &ids,
+        |row| {
+            Ok((
+                row.get::<_, String>("irrigation_record_id")?,
+                row.get::<_, String>("practice_code")?,
+            ))
+        },
+        |(record_id, _)| record_id.clone(),
+    )?;
     Ok(records
         .into_iter()
         .map(|record| IrrigationRecordDetail {
             plots: plots.remove(&record.id).unwrap_or_default(),
             water_origins: origins
+                .remove(&record.id)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(_, code)| code)
+                .collect(),
+            practices: practices
                 .remove(&record.id)
                 .unwrap_or_default()
                 .into_iter()
@@ -699,6 +747,30 @@ fn origins_of(conn: &Connection, record_id: &str) -> Result<Vec<String>> {
     let rows = stmt
         .query_map([record_id], |r| r.get(0))?
         .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(rows)
+}
+
+/// Numerically, the order `validated_practices` writes them in.
+fn practices_of(conn: &Connection, record_id: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT practice_code FROM irrigation_practice
+         WHERE irrigation_record_id = ?1
+         ORDER BY CAST(practice_code AS INTEGER), practice_code",
+    )?;
+    let rows = stmt
+        .query_map([record_id], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<String>>>()?;
+    Ok(rows)
+}
+
+fn practice_rows_tx(tx: &Transaction, record_id: &str) -> Result<Vec<(String, String)>> {
+    let mut stmt = tx.prepare(
+        "SELECT id, practice_code FROM irrigation_practice
+         WHERE irrigation_record_id = ?1 ORDER BY id",
+    )?;
+    let rows = stmt
+        .query_map([record_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }
 

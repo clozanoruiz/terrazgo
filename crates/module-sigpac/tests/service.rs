@@ -58,6 +58,7 @@ fn plot_with_reference(conn: &mut Connection, parts: [&str; 7]) -> String {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )
@@ -227,6 +228,7 @@ fn verify_plot_needs_an_existing_plot_with_a_complete_reference() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )

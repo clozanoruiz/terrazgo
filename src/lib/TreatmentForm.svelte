@@ -2,12 +2,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-or-later -->
 
 <script>
-  // Treatment entry form — the CUE module's central input (RD 1311/2012
+  // Treatment entry form — the phytosanitary module's central input (RD 1311/2012
   // mandatory fields). Multi-plot rows are dynamic; the legal snapshots, the
   // country and the PHI end date are derived in Rust at insert time, not here.
   import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { notify, run } from "./notifications.svelte.js";
   import { emptyProblemRow, emptyRow } from "./treatmentDraft.js";
   import TzCheckbox from "./TzCheckbox.svelte";
@@ -15,7 +16,7 @@
   import DateInput from "./DateInput.svelte";
   import TimeInput from "./TimeInput.svelte";
   import TzSelect from "./TzSelect.svelte";
-  import { codeItems, nameItems } from "./selectItems.js";
+  import { catalogueItems, codeItems, nameItems } from "./selectItems.js";
   import TzCombobox from "./TzCombobox.svelte";
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
@@ -53,6 +54,11 @@
 
   let measures = $state([]);
   let growthStages = $state([]);
+  // FEGA's basic substances, and the one measure they are named on.
+  let basicSubstances = $state({ measure_code: null, substances: [] });
+  const namesBasicSubstance = $derived(
+    basicSubstances.measure_code !== null && draft.measureCode === basicSubstances.measure_code,
+  );
 
   // Official problem catalogues per category, fetched once per category used
   // (600-entry lists — never re-fetched while the form is open). A category
@@ -109,6 +115,14 @@
     }
   })();
 
+  (async () => {
+    try {
+      basicSubstances = await invoke("list_basic_substances", { countryCode });
+    } catch (err) {
+      console.error(err);
+    }
+  })();
+
   /// A new category invalidates the problem chosen under the old one; the
   /// effect above fetches whatever catalogue the new one needs.
   function onCategoryChosen(row) {
@@ -134,10 +148,7 @@
   // lib/collate.js), so this only shapes the category's codes into items —
   // the hand-rolled filter it replaces lived in a second input.
   function problemItems(row) {
-    return (problemCatalogues[row.category] ?? []).map((code) => ({
-      value: code.code,
-      label: code.label,
-    }));
+    return catalogueItems(problemCatalogues[row.category] ?? [], (code) => code.label);
   }
 
   function addProblemRow() {
@@ -239,6 +250,10 @@
       measure_intensity_unit_code:
         draft.measureIntensity === "" ? null : draft.measureIntensityUnit,
       measure_registration_number: draft.measureRegistration.trim() || null,
+      // Only on its own measure; a measure changed since takes it away.
+      measure_basic_substance_code: namesBasicSubstance
+        ? draft.measureBasicSubstance || null
+        : null,
       notes: draft.notes.trim() || null,
     };
     const treatedPlots = draft.rows.map((row) => ({
@@ -247,6 +262,7 @@
       surface_treated_ha: Number(row.surface),
       growth_stage_code: row.growthStage || null,
     }));
+    let savedId = draft.editingId;
     if (draft.editingId) {
       // A correction carries neither campaign nor holding (a treatment never
       // moves either) and no efficacy — that keeps its own control in the
@@ -266,9 +282,11 @@
         },
         plots: treatedPlots,
       });
+      savedId = saved.id;
       notify(t("message.treatment_saved", { date: formatDate(saved.phi_end_date) }));
     }
     await onSaved();
+    await checkSaved("treatment_record", savedId);
   }
 </script>
 
@@ -413,11 +431,22 @@
       <TzSelect
         label={t("treatment.measure")}
         hint={t("treatment.measure_hint")}
-        items={measures.map((measure) => ({ value: measure.code, label: measure.name }))}
+        items={catalogueItems(measures)}
+        catalogue
         nullable
         nullLabel=""
         bind:value={draft.measureCode}
       />
+      {#if namesBasicSubstance}
+        <TzSelect
+          label={t("treatment.measure_basic_substance")}
+          items={catalogueItems(basicSubstances.substances)}
+          catalogue
+          nullable
+          nullLabel=""
+          bind:value={draft.measureBasicSubstance}
+        />
+      {/if}
       <NumberInput
         label={t("treatment.measure_intensity")}
         hint={t("treatment.measure_intensity_hint")}
@@ -455,6 +484,7 @@
         <TzCombobox
           label={t("treatment.problem")}
           items={problemItems(row)}
+          catalogue
           placeholder={t("treatment.problem_filter_hint")}
           required
           disabled={!row.category}
@@ -509,7 +539,8 @@
         <!-- EST_FENOLOGICO: BBCH order, 0-9. Never alphabetical. -->
         <TzSelect
           label={t("treatment.growth_stage")}
-          items={growthStages.map((stage) => ({ value: stage.code, label: stage.name }))}
+          items={catalogueItems(growthStages)}
+          catalogue
           nullable
           nullLabel=""
           bind:value={row.growthStage}

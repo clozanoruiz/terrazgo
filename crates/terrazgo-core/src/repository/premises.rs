@@ -7,7 +7,7 @@
 //! a store must keep resolving it, and the audit history has to survive.
 //!
 //! This layer knows nothing about the register that uses it. Which kind of
-//! premises a `non_field_treatment` may name is module-cue's rule, because only
+//! premises a `non_field_treatment` may name is module-phytosanitary's rule, because only
 //! that crate holds the register's own vocabulary; core owns the thing, not the
 //! use.
 //!
@@ -17,7 +17,7 @@
 //! contract.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{ChangeStamp, begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{NewPremises, Premises, PremisesDetail, PremisesEsExtension, UpdatePremises};
@@ -32,7 +32,7 @@ pub fn insert_premises(
 ) -> Result<PremisesDetail> {
     validate_name(&new.name)?;
     validate_volume(new.volume_m3)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let now = now_utc_iso();
     let premises = Premises {
         id: Uuid::now_v7().to_string(),
@@ -69,7 +69,8 @@ pub fn insert_premises(
             premises.updated_at
         ],
     )?;
-    log_insert(&tx, "premises", &premises.id, None, actor, &premises)?;
+    let stamp = tx.register("premises", &premises.id, None)?;
+    log_insert(&tx, &stamp, "premises", &premises.id, &premises)?;
 
     let cadastral_reference = normalise_reference(new.cadastral_reference);
     let rea_installation_code = blank_to_none(new.rea_installation_code);
@@ -79,7 +80,7 @@ pub fn insert_premises(
             &premises.id,
             cadastral_reference,
             rea_installation_code,
-            actor,
+            &stamp,
         )?)
     } else {
         None
@@ -100,7 +101,7 @@ pub fn update_premises(
 ) -> Result<PremisesDetail> {
     validate_name(&update.name)?;
     validate_volume(update.volume_m3)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM premises WHERE id = ?1 AND deleted_at IS NULL",
@@ -140,14 +141,15 @@ pub fn update_premises(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "premises", id, None, actor, &before, &after)?;
+    let stamp = tx.register("premises", id, None)?;
+    log_update(&tx, &stamp, "premises", id, &before, &after)?;
 
     let es = reconcile_extension(
         &tx,
         id,
         normalise_reference(update.cadastral_reference),
         blank_to_none(update.rea_installation_code),
-        actor,
+        &stamp,
     )?;
     tx.commit()?;
     Ok(PremisesDetail {
@@ -157,7 +159,7 @@ pub fn update_premises(
 }
 
 pub fn soft_delete_premises(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM premises WHERE id = ?1 AND deleted_at IS NULL",
@@ -174,7 +176,8 @@ pub fn soft_delete_premises(conn: &mut Connection, id: &str, actor: Option<&str>
         "UPDATE premises SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "premises", id, None, actor, &before, Some(&after))?;
+    let stamp = tx.register("premises", id, None)?;
+    log_delete(&tx, &stamp, "premises", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -244,7 +247,7 @@ fn insert_extension(
     premises_id: &str,
     cadastral_reference: Option<String>,
     rea_installation_code: Option<String>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<PremisesEsExtension> {
     let ext = PremisesEsExtension {
         premises_id: premises_id.to_string(),
@@ -261,7 +264,7 @@ fn insert_extension(
             ext.rea_installation_code
         ],
     )?;
-    log_insert(tx, "premises_es_extension", premises_id, None, actor, &ext)?;
+    log_insert(tx, stamp, "premises_es_extension", premises_id, &ext)?;
     Ok(ext)
 }
 
@@ -284,7 +287,7 @@ fn reconcile_extension(
     premises_id: &str,
     cadastral_reference: Option<String>,
     rea_installation_code: Option<String>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Option<PremisesEsExtension>> {
     let current = tx
         .query_row(
@@ -302,7 +305,7 @@ fn reconcile_extension(
             premises_id,
             cadastral_reference,
             rea_installation_code,
-            actor,
+            stamp,
         )?)),
         (Some(before), false) => {
             tx.execute(
@@ -311,10 +314,9 @@ fn reconcile_extension(
             )?;
             log_delete(
                 tx,
+                stamp,
                 "premises_es_extension",
                 premises_id,
-                None,
-                actor,
                 &before,
                 None,
             )?;
@@ -338,10 +340,9 @@ fn reconcile_extension(
             )?;
             log_update(
                 tx,
+                stamp,
                 "premises_es_extension",
                 premises_id,
-                None,
-                actor,
                 &before,
                 &after,
             )?;

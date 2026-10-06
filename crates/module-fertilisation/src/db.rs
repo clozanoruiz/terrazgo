@@ -7,6 +7,8 @@
 use crate::error::Result;
 use rusqlite::Connection;
 use rusqlite_migration::{M, Migrations};
+use terrazgo_core::merge::RowCaption;
+use terrazgo_core::sync::TableSync;
 
 /// The ordered migration steps this module contributes to the core's single
 /// global sequence. The shell's `composed_migrations()` collects these from
@@ -19,6 +21,61 @@ pub fn migration_set() -> Vec<M<'static>> {
         M::up(include_str!("../migrations/0002_seed_reference.sql")),
     ]
 }
+
+/// This module's half of the aggregate map (docs/sync.md → The aggregate map):
+/// what the merge does with each of its tables. Composed with core's and every
+/// other module's by the shell, whose contract test refuses a table nobody
+/// declared — the same division as [`BACKUP_SHAPE`].
+pub const SYNC_SHAPE: &[TableSync] = &[
+    TableSync::root("irrigation_record"),
+    TableSync::child(
+        "irrigation_plot",
+        "irrigation_record",
+        "irrigation_record_id",
+    ),
+    TableSync::child(
+        "irrigation_water_origin",
+        "irrigation_record",
+        "irrigation_record_id",
+    ),
+    TableSync::child(
+        "irrigation_practice",
+        "irrigation_record",
+        "irrigation_record_id",
+    ),
+    TableSync::root("fertiliser_material"),
+    TableSync::child(
+        "fertiliser_material_nutrient",
+        "fertiliser_material",
+        "fertiliser_material_id",
+    ),
+    TableSync::root("fertilisation_record"),
+    TableSync::child(
+        "fertilisation_plot",
+        "fertilisation_record",
+        "fertilisation_record_id",
+    ),
+    TableSync::child(
+        "fertilisation_practice",
+        "fertilisation_record",
+        "fertilisation_record_id",
+    ),
+    TableSync::root("fertilisation_plan"),
+    TableSync::child(
+        "fertilisation_plan_crop",
+        "fertilisation_plan",
+        "fertilisation_plan_id",
+    ),
+];
+
+/// How a row of each of this module's tables is named to a person — see
+/// `module_phytosanitary::ROW_CAPTIONS`, whose half of the map this joins.
+pub const ROW_CAPTIONS: &[RowCaption] = &[
+    RowCaption::new("fertiliser_material", "name"),
+    RowCaption::new("fertilisation_record", "applied_on"),
+    RowCaption::new("fertilisation_plan", "drawn_up_on"),
+    RowCaption::new("irrigation_record", "irrigated_on"),
+];
 
 /// The columns a current-version backup must carry for THIS module's tables.
 /// Composed with the core fingerprint and every other module's list by the
@@ -41,6 +98,10 @@ pub const BACKUP_SHAPE: &[terrazgo_core::backup::TableShape] = &[
     (
         "irrigation_water_origin",
         &["irrigation_record_id", "origin_code"],
+    ),
+    (
+        "irrigation_practice",
+        &["irrigation_record_id", "practice_code"],
     ),
     (
         "fertiliser_material",
@@ -100,7 +161,7 @@ pub const BACKUP_SHAPE: &[terrazgo_core::backup::TableShape] = &[
 /// reference season, farm, plot, crop and unit, so the module's SQL cannot run
 /// on its own). The app itself never calls this.
 ///
-/// Deliberately NOT module-cue's steps: this module does not depend on that
+/// Deliberately NOT module-phytosanitary's steps: this module does not depend on that
 /// one, and a test set that quietly pulled it in would hide the day some code
 /// here started relying on a treatment table.
 pub fn migrations() -> Migrations<'static> {
@@ -117,5 +178,8 @@ pub fn open_in_memory() -> Result<Connection> {
     // Tests run on the same connection configuration the app does.
     terrazgo_core::db::harden(&conn)?;
     migrations().to_latest(&mut conn)?;
+    // Every database is a replica of its own (terrazgo_core::open_in_memory).
+    terrazgo_core::sync::install_device(&conn, &terrazgo_core::sync::mint_device_id())?;
+    terrazgo_core::sync::install_shape(&conn, &[terrazgo_core::sync::CORE_SYNC_SHAPE, SYNC_SHAPE])?;
     Ok(conn)
 }

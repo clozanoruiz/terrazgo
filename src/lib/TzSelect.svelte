@@ -16,6 +16,8 @@
   import { Select } from "bits-ui";
   import { t } from "../i18n.js";
   import { refusalStore } from "./formRefusal.js";
+  import RequiredMark from "./RequiredMark.svelte";
+  import { pickerOptions } from "./selectItems.js";
 
   let {
     /// [{ value, label, disabled? }] — build with lib/selectItems.js.
@@ -34,6 +36,9 @@
     class: klass = "",
     /// Names this field inside its form, for TzForm's `anchors`.
     name = "",
+    /// A catalogue-backed list (items from `catalogueItems`): a stored code the
+    /// list does not carry is shown as itself, with a line saying why.
+    catalogue = false,
     /// Called with the new value. Present for the uncontrolled call sites,
     /// which pass `value` unbound, and for the cascading pairs that clear a
     /// dependent field.
@@ -46,7 +51,12 @@
   // The empty row goes in the ITEMS list, not just the markup: Select.Value and
   // the typeahead both read Root's `items`, so a row rendered without one there
   // is invisible to them.
-  const allItems = $derived(nullable ? [{ value: "", label: nullLabel }, ...items] : items);
+  // What the list shows: the codes it may offer, plus the stored one whatever
+  // its state, so a record's value never reads as an empty field.
+  const shown = $derived(pickerOptions(items, value, catalogue));
+  const allItems = $derived(
+    nullable ? [{ value: "", label: nullLabel }, ...shown.options] : shown.options,
+  );
 
   // Bits UI uses "" as its own sentinel for "nothing selected", so it will not
   // resolve the empty row to a label however the items are shaped — a nullable
@@ -91,13 +101,14 @@
 
 <div class="tz-field {klass}">
   {#if label}
-    <span class="tz-label" id={labelId}>{label}</span>
+    <span class="tz-label" id={labelId}>{label}<RequiredMark {required} /></span>
   {/if}
 
   <Select.Root type="single" items={allItems} {value} onValueChange={commit} {disabled}>
     <Select.Trigger
       id={uid}
       class="tz-control tz-trigger"
+      aria-required={required || undefined}
       aria-labelledby={label ? labelId : undefined}
       aria-label={label ? undefined : emptyText || undefined}
     >
@@ -151,6 +162,11 @@
   />
 
   {#if hint}<small>{hint}</small>{/if}
+  {#if shown.unknown}
+    <small>
+      {t("form.catalogue_code_unknown", { settings: t("nav.settings") })}
+    </small>
+  {/if}
   {#if showError && error}
     <small class="tz-field-error">{error}</small>
   {/if}

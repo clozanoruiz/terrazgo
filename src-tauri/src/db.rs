@@ -26,7 +26,7 @@ pub fn core_migrations() -> Vec<M<'static>> {
 
 /// The single global migration sequence: core steps first, then each registered
 /// module's steps in registry order. The resulting version numbers are GLOBAL —
-/// cue's two migrations are global v1 and v2 today.
+/// The phytosanitary module's two migrations are global v1 and v2 today.
 ///
 /// Pre-release, reordering/squashing is allowed and dev databases are recreated;
 /// the moment any database holds real data, this composed sequence becomes
@@ -41,7 +41,7 @@ pub fn composed_migrations() -> Migrations<'static> {
 }
 
 /// Open (or create) the app database: WAL mode + foreign keys + the composed
-/// global migrations. Mirrors `module_cue::db::open`, which stays library-only.
+/// global migrations. Mirrors `module_phytosanitary::db::open`, which stays library-only.
 ///
 /// Three settings are deliberately left at their defaults, and all three are
 /// the kind someone "optimises" later without noticing what they cost:
@@ -52,7 +52,14 @@ pub fn composed_migrations() -> Migrations<'static> {
 /// * `mmap_size` stays 0. With memory-mapped I/O a stray pointer anywhere in
 ///   the process can silently corrupt the database file.
 /// * `cell_size_check` stays off.
-pub fn open_app_db(path: &Path) -> Result<Connection> {
+///
+/// `device_id` is which device every change on this connection is stamped
+/// with (docs/sync.md → Device identity). It is a parameter, not something
+/// this function looks up, so neither startup nor a backup import can open the
+/// app database without saying who it writes as — and a connection opened
+/// without one could not log a single change. The device's own `sync_peer`
+/// row is made sure of here too, for the same reason.
+pub fn open_app_db(path: &Path, device_id: &str) -> Result<Connection> {
     let mut conn = Connection::open(path)
         .with_context(|| format!("opening database at {}", path.display()))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
@@ -64,6 +71,13 @@ pub fn open_app_db(path: &Path) -> Result<Connection> {
     composed_migrations()
         .to_latest(&mut conn)
         .context("applying the global migration sequence")?;
+    terrazgo_core::sync::install_device(&conn, device_id)?;
+    // Every logged row is checked against the aggregate map as it is written.
+    let shape = registry::composed_sync_shape();
+    terrazgo_core::sync::install_shape(&conn, &[&shape])?;
+    // No actor: the app registering the device it runs on is not something a
+    // person did.
+    terrazgo_core::repository::register_this_device(&mut conn, None)?;
     Ok(conn)
 }
 
@@ -85,7 +99,8 @@ pub fn schema_version(conn: &Connection) -> Result<usize> {
 /// week, and would never feel the difference — it paces work nobody asked for,
 /// rather than answering a question only they can answer. Weekly because the
 /// check is linear in database size (1.6 ms/MB, measured 2026-08-26 over
-/// 29-513 MB): free for a smallholder, and 0.8 s for a cooperative-scale book,
+/// 29-513 MB, and 1.65 again on 2026-09-18): free for a smallholder, and 0.8 s
+/// for a cooperative-scale book,
 /// which is work nobody asked for to repeat on every launch.
 const INTEGRITY_CHECK_INTERVAL_DAYS: i64 = 7;
 
@@ -108,8 +123,9 @@ fn integrity_check_is_due(previous: Option<&IntegrityCheck>, today: &str) -> boo
 
 /// `PRAGMA quick_check` on `path`, as a verdict.
 ///
-/// `quick_check` rather than `integrity_check`: it costs about half as much
-/// (measured 1.5-2.1x across sizes, converging on 2.1x) and catches structural
+/// `quick_check` rather than `integrity_check`: it costs a fraction as much
+/// (measured 2.3-3.5x across 33-521 MB on 2026-09-18, the gap widening with the
+/// log's indexes — it was 1.5-2.1x before the sync stamp added three) and catches structural
 /// page damage, which is what a recurring background check is for. The thorough one still runs on
 /// every backup, where `VACUUM INTO` reads every page and the copy is verified.
 ///
@@ -135,11 +151,13 @@ fn quick_check(path: &Path) -> Result<IntegrityCheck> {
 /// requested, so it is paced to cost nothing; this one is a person asking, and
 /// a person asking is willing to wait. It buys the checks `quick_check` skips:
 /// that every index row matches a table row and back, and that UNIQUE, NOT NULL
-/// and CHECK constraints actually hold. Roughly twice the cost: measured
-/// 2026-08-26 at 3.4 ms/MB against quick_check's 1.6, over 29-513 MB
-/// (`src-tauri/tests/quick_check_cost.rs` re-runs it). That is ~20 ms on a
-/// smallholder's 6 MB book and 1.7 s on a 513 MB cooperative-scale one —
-/// nothing for something a person asked for and is waiting on.
+/// and CHECK constraints actually hold. Measured 2026-09-18 at 5.8 ms/MB
+/// against quick_check's 1.65, over 33-521 MB
+/// (`src-tauri/tests/contracts/quick_check_cost.rs` re-runs it) — up from 3.4 on
+/// 2026-08-26, because the sync stamp gave `record_change` three more indexes
+/// and this check walks every index entry. That is ~35 ms on a smallholder's
+/// 6 MB book and 3.0 s on a 521 MB cooperative-scale one — acceptable for
+/// something a person asked for and is waiting on.
 pub(crate) fn integrity_check(conn: &Connection) -> IntegrityCheck {
     run_check(conn, "PRAGMA integrity_check", true)
 }
@@ -219,6 +237,30 @@ pub fn run_due_integrity_check(app: &tauri::AppHandle) -> Result<()> {
     Ok(())
 }
 
+/// How long after setup the purge waits before it takes the database: long
+/// enough for the first screen to be up and have read what it shows.
+pub const PURGE_AFTER_START: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Erase what is due for good, on the app's own connection (docs/sync.md → The
+/// purge, as settled → When it runs). Run at start, off the readiness path, and
+/// after every import. Returns how many registers went.
+///
+/// Nothing a farmer asked for, so nothing a farmer waits on: on most starts
+/// nothing is due and it costs one statement per register of a book, each
+/// reading removed rows only. A failure leaves the database as it was — the
+/// purge is one transaction — and it is tried again at the next start or
+/// import.
+pub fn run_due_purge(app: &tauri::AppHandle) -> Result<usize> {
+    use tauri::Manager;
+    let Some(state) = app.try_state::<crate::state::AppState>() else {
+        return Ok(0);
+    };
+    let mut db = state.db.lock()?;
+    let conn = db.conn_mut()?;
+    let today = terrazgo_core::date::today_utc();
+    Ok(terrazgo_core::repository::purge_due(conn, &today, None)?.registers)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,7 +317,7 @@ mod tests {
     #[test]
     fn a_healthy_database_passes_its_check() {
         let file = terrazgo_testkit::files::TempFile::reserve("shell-quick-check.db");
-        let conn = open_app_db(file.path()).unwrap();
+        let conn = open_app_db(file.path(), &terrazgo_core::sync::mint_device_id()).unwrap();
         conn.close().map_err(|(_, e)| e).unwrap();
 
         let verdict = quick_check(file.path()).unwrap();
@@ -299,7 +341,7 @@ mod tests {
         // that did not record WHICH check produced it would make "checked
         // recently, fine" mean two different things.
         let file = terrazgo_testkit::files::TempFile::reserve("shell-integrity-check.db");
-        let conn = open_app_db(file.path()).unwrap();
+        let conn = open_app_db(file.path(), &terrazgo_core::sync::mint_device_id()).unwrap();
 
         let verdict = integrity_check(&conn);
         assert!(verdict.ok);
@@ -324,7 +366,7 @@ mod tests {
         // makes: `page_count * page_size`, not the file's length, because in WAL
         // mode the pages are still in the sidecar when VACUUM returns.
         let file = terrazgo_testkit::files::TempFile::reserve("shell-vacuum.db");
-        let conn = open_app_db(file.path()).unwrap();
+        let conn = open_app_db(file.path(), &terrazgo_core::sync::mint_device_id()).unwrap();
         conn.execute_batch(
             "CREATE TABLE bulk (v TEXT);
              WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 5000)

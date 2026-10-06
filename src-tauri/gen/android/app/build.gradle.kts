@@ -1,5 +1,5 @@
-import groovy.json.JsonSlurper
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -27,13 +27,13 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    compileSdk = 36
+    compileSdk = 37
     namespace = "org.terrazgo.app"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
         applicationId = "org.terrazgo.app"
         minSdk = 24
-        targetSdk = 36
+        targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
     }
@@ -53,38 +53,54 @@ android {
             isDebuggable = true
             isJniDebuggable = true
             isMinifyEnabled = false
-            packaging {                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+            packaging {
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
                 jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86/*.so")
                 jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
             }
         }
         getByName("release") {
-            // Cleartext must stay allowed in release: certificate revocation
-            // checks run inside this process, and CRL/OCSP endpoints are plain
-            // http:// by design (CRLs are signed). With cleartext blocked,
-            // Android's revocation fetch throws and rustls-platform-verifier
-            // reports every CRL-only certificate (Let's Encrypt, Google Trust
-            // Services — OpenFreeMap's CA) as "Revoked", blanking the base map.
-            // The app's own traffic is unaffected: terrazgo-geo fetches HTTPS
-            // allowlisted sources only, and the webview CSP is 'self' + geo:.
-            manifestPlaceholders["usesCleartextTraffic"] = "true"
             if (keystorePropertiesFile.exists()) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = true
+            optimization {
+               enable = true
+            }
             proguardFiles(
-                *fileTree(".") { include("**/*.pro") }
-                    .plus(getDefaultProguardFile("proguard-android-optimize.txt"))
-                    .toList().toTypedArray()
+                *fileTree(".") {
+                  include("**/*.pro")
+                  exclude("build/**")
+                }.files.toTypedArray()
             )
         }
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
+    // Stays at 1.8, and the release log's "source value 8 is obsolete" warnings
+    // are NOT ours to fix (measured 2026-09-04, still so in Tauri 2.12.1). They
+    // come from javac, and this module has no Java at all — ten Kotlin files and
+    // zero .java. The three lines are one javac invocation inside Tauri's own
+    // Gradle modules, which build from the cargo registry
+    // (tauri-<version>/mobile/android and each plugin's android/) and hardcode
+    // VERSION_1_8 there.
+    //
+    // Raising this module to 17 was tried and verified to change nothing: the
+    // build was clean and the warnings identical. Reverted rather than kept,
+    // because it only diverged from the scaffold. `gradle.properties`'
+    // suppressSourceTargetDeprecationWarning would hide the warnings instead of
+    // fixing them, and they are a real signal about upstream — leave them
+    // visible until a Tauri release moves them.
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
     buildFeatures {
         buildConfig = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_1_8
     }
 }
 
@@ -94,45 +110,60 @@ rust {
 
 // rustls-platform-verifier's Kotlin half (org.rustls.platformverifier.
 // CertificateVerifier): the Rust side calls it over JNI to verify TLS
-// certificates against the Android trust store. The crate bundles the
-// compiled .aar as a Maven repository inside its published sources, and
-// `cargo metadata` locates the copy (and version) Cargo resolved — so the
-// Kotlin component tracks crate upgrades automatically. The version must be
-// explicit: the bundled repo has no maven-metadata.xml, which dynamic
-// versions like latest.release need.
-fun findRustlsPlatformVerifierAndroid(): Pair<String, String> {
-    val metadataJson = providers.exec {
-        workingDir = File(rootDir, "../../..")
-        commandLine(
-            "cargo", "metadata", "--format-version", "1",
-            "--filter-platform", "aarch64-linux-android",
-            "--manifest-path", "src-tauri/Cargo.toml"
-        )
-    }.standardOutput.asText.get()
-
-    @Suppress("UNCHECKED_CAST")
-    val packages = (JsonSlurper().parseText(metadataJson) as Map<String, Any>)
-        .getValue("packages") as List<Map<String, Any>>
-    val pkg = packages.first { it["name"] == "rustls-platform-verifier-android" }
-    val mavenDir = File(File(pkg.getValue("manifest_path") as String).parentFile, "maven")
-    return Pair(mavenDir.path, pkg.getValue("version") as String)
-}
-
-val rustlsVerifierAndroid = findRustlsPlatformVerifierAndroid()
-
+// certificates against the Android trust store. It comes from the crate's
+// GitHub-hosted Maven repository, at exactly the version of
+// `rustls-platform-verifier-android` in Cargo.lock: a version that differs
+// from the Rust half's can crash at runtime. The snippet is the crate's own
+// README's (0.7.1), read once per configuration and friendly to the
+// configuration cache.
 repositories {
     maven {
-        url = uri(rustlsVerifierAndroid.first)
-        metadataSources {
-            mavenPom()
-            artifact()
+        url = uri("https://github.com/rustls/rustls-platform-verifier/raw/maven-archive/android-release-support/maven/")
+    }
+}
+
+abstract class RustlsVersion : ValueSource<String, RustlsVersion.Params> {
+    interface Params : ValueSourceParameters {
+        val lockFile: RegularFileProperty
+    }
+
+    companion object {
+        const val CRATE_NAME = "rustls-platform-verifier-android"
+    }
+
+    override fun obtain(): String {
+        val version = parameters.lockFile.get().asFile.readLines().let { lines ->
+            val nameIdx = lines.indexOfFirst { it.trim() == "name = \"$CRATE_NAME\"" }
+            if (nameIdx < 0) {
+                null
+            } else {
+                lines.drop(nameIdx + 1)
+                    .firstOrNull { it.trimStart().startsWith("version = ") }
+                    ?.substringAfter('"', "")
+                    ?.substringBefore('"', "")
+                    ?.takeIf { it.isNotEmpty() }
+            }
+        }
+        return version ?: error("$CRATE_NAME not found in Cargo.lock")
+    }
+}
+
+val rustlsPlatformVerifierVersion = providers.of(RustlsVersion::class.java) {
+    parameters.lockFile.set(layout.projectDirectory.file("../../../../Cargo.lock"))
+}
+
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        if (requested.group == "org.rustls" && requested.name == "rustls-platform-verifier") {
+            useVersion(rustlsPlatformVerifierVersion.get())
+            because("native component version must be identical to version of ${RustlsVersion.CRATE_NAME}")
         }
     }
 }
 
 dependencies {
-    // Kept in lockstep with the Rust crate by the Maven repository above.
-    implementation("rustls:rustls-platform-verifier:${rustlsVerifierAndroid.second}")
+    // Its version comes from Cargo.lock, by the resolution rule above.
+    implementation("org.rustls:rustls-platform-verifier")
     implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("androidx.activity:activity-ktx:1.10.1")
@@ -143,4 +174,4 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }
 
-apply(from = "tauri.build.gradle.kts")
+apply(from = file("tauri.build.gradle.kts"))

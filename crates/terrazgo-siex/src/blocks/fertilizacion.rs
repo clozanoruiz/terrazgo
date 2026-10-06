@@ -27,13 +27,13 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::siex as cue_siex;
 use module_fertilisation::models::{FertilisationRecordDetail, IrrigationRecordDetail};
 use module_fertilisation::repository::{
     get_fertiliser_material_for_export, get_irrigation_record,
     list_fertilisation_records_for_export,
 };
 use module_fertilisation::siex;
+use module_phytosanitary::siex as cue_siex;
 use rusqlite::{Connection, OptionalExtension};
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 
@@ -82,8 +82,8 @@ fn entry(
         None => fecha_inicio.clone(),
     };
 
-    // `BUENAS_PRACTICAS_AMBITOS` codes, stored verbatim in the "Fertilización"
-    // ámbito. An empty list is a legal statement here, not a gap.
+    // `BUENAS_PRACTICAS_AMBITOS` codes, stored verbatim on the fertilisation
+    // that claims them. An empty list is a legal statement here, not a gap.
     let buenas_practicas = detail
         .practices
         .iter()

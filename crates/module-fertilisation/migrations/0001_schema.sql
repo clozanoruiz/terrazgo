@@ -1,7 +1,7 @@
 -- Terrazgo fertilisation module — migration 0001: schema (DDL only; seed data lives in 0002).
 --
 -- This module owns the record book's SECOND decree. RD 1311/2012 governs the
--- phytosanitary registers (module-cue); RD 1051/2022 art. 5, as amended by
+-- phytosanitary registers (module-phytosanitary); RD 1051/2022 art. 5, as amended by
 -- RD 934/2025, creates the cuaderno's fertilisation section and puts irrigation
 -- doses and dates in the same duty — binding since 1 January 2026, recorded
 -- within one month of each operation. Model sections 6, 7.1 and 8.
@@ -15,7 +15,7 @@
 -- migrated); it becomes append-only the moment any database contains real data.
 -- Core steps run EARLIER in the composed global sequence, so the references to
 -- season, farm, plot, crop and unit below are valid. This module references
--- module-cue's tables NOWHERE — modules never depend on each other.
+-- module-phytosanitary's tables NOWHERE — modules never depend on each other.
 --
 -- Conventions (see docs/data-model.md):
 --   * snake_case, singular table names, lowercase English enum values.
@@ -112,7 +112,7 @@ CREATE TABLE nutrient_kind (
 
 CREATE TABLE irrigation_record (
     id                      TEXT PRIMARY KEY,
-    season_id               TEXT NOT NULL REFERENCES season(id),
+    season_id               TEXT NOT NULL,
     farm_id                 TEXT NOT NULL REFERENCES farm(id),
 
     -- C.a. An INTERVAL, like a treatment's: art. 5.f lets intensive and
@@ -157,10 +157,23 @@ CREATE TABLE irrigation_record (
     notes                   TEXT,
     created_at              TEXT NOT NULL,
     updated_at              TEXT NOT NULL,
-    deleted_at              TEXT
+    deleted_at              TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 CREATE INDEX idx_irrigation_record_season ON irrigation_record (season_id, farm_id);
+
+-- The duplicate rule's window: one farm's irrigations whose periods meet
+-- (docs/sync.md → Duplicate suspects). Farm-wide, because two books kept for
+-- one campaign on two devices hold exactly the pairs worth finding.
+CREATE INDEX idx_irrigation_record_farm_day ON irrigation_record (farm_id, irrigated_on);
+
+-- What the purge looks through: the removed irrigations, and nothing else
+-- (docs/sync.md → The purge, as settled). Every register of a book has one.
+CREATE INDEX idx_irrigation_record_removed ON irrigation_record (deleted_at)
+    WHERE deleted_at IS NOT NULL;
 
 -- C.b, and model section 8's "Id. parcelas" + "Superficie regada (ha)".
 -- Recorded per unidad homogénea de cultivo, which is what a (plot, crop) pair
@@ -189,6 +202,19 @@ CREATE TABLE irrigation_water_origin (
     -- CLOSED list, so it gets a real foreign key.
     origin_code          TEXT NOT NULL REFERENCES water_origin(code),
     UNIQUE (irrigation_record_id, origin_code)
+);
+
+-- `Riego.BuenasPracticasRiego[]`: the good practices claimed for this watering,
+-- from FEGA `BUENAS_PRACTICAS_AMBITOS` — the practices it marks "SI" under
+-- "Ámbito Riego". Voluntario in Anexo V 3.11, obligatorio condicionado to
+-- regional rules in the 2027 model (Anexo 03 field 481), asked by no decree:
+-- captured and never demanded, like `fertilisation_practice`. The code is
+-- stored verbatim and THIS TABLE fixes the ámbito.
+CREATE TABLE irrigation_practice (
+    id                   TEXT PRIMARY KEY,
+    irrigation_record_id TEXT NOT NULL REFERENCES irrigation_record(id) ON DELETE CASCADE,
+    practice_code        TEXT NOT NULL,   -- provider catalogue code, verbatim, no FK
+    UNIQUE (irrigation_record_id, practice_code)
 );
 
 -- ============================================================================
@@ -288,7 +314,7 @@ CREATE TABLE fertiliser_material_nutrient (
 -- plots. SIEX twin: `Fertilizacion`.
 CREATE TABLE fertilisation_record (
     id                      TEXT PRIMARY KEY,
-    season_id               TEXT NOT NULL REFERENCES season(id),
+    season_id               TEXT NOT NULL,
     farm_id                 TEXT NOT NULL REFERENCES farm(id),
 
     -- C.a, an interval for the same reason irrigation's is: art. 5.f allows
@@ -382,10 +408,27 @@ CREATE TABLE fertilisation_record (
     notes                   TEXT,
     created_at              TEXT NOT NULL,
     updated_at              TEXT NOT NULL,
-    deleted_at              TEXT
+    deleted_at              TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 CREATE INDEX idx_fertilisation_record_season ON fertilisation_record (season_id, farm_id);
+
+-- The duplicate rule's window: one farm's applications within a day of another
+-- (docs/sync.md → Duplicate suspects).
+CREATE INDEX idx_fertilisation_record_farm_day ON fertilisation_record (farm_id, applied_on);
+
+-- The removed applications, for the purge, as `idx_irrigation_record_removed`.
+CREATE INDEX idx_fertilisation_record_removed ON fertilisation_record (deleted_at)
+    WHERE deleted_at IS NOT NULL;
+
+-- The fertigations that name an irrigation. Unindexed until 2026-10-02, when it
+-- had no reader; the purge is one — it erases an irrigation only together with
+-- every application that names it, and SQLite asks that through this column.
+CREATE INDEX idx_fertilisation_record_irrigation ON fertilisation_record (irrigation_record_id)
+    WHERE irrigation_record_id IS NOT NULL;
 
 -- C.b, and the model's "Referencia SIGPAC" + "Sup. (ha)" columns. Recorded per
 -- unidad homogénea de cultivo — a (plot, crop) pair, the unit `treatment_plot`
@@ -407,10 +450,10 @@ CREATE TABLE fertilisation_plot (
 -- demanded — the `seed_treatment.treatment_kind_code` rule: a book kept to the
 -- printed model must not be blocked on a question the model never asks.
 --
--- `BUENAS_PRACTICAS_AMBITOS` is keyed on (code, ámbito) and the same integer
--- means different things in each: 41 rows under "Fertilización", 31 under
--- "Riego", 26 under "Fitosanitario". The code is stored verbatim and THIS
--- TABLE fixes the ámbito.
+-- `BUENAS_PRACTICAS_AMBITOS` is one list for three ámbitos — 41 of its 60
+-- practices may be claimed on a fertilisation, 31 on irrigation, 26 on a
+-- treatment — and a practice keeps its code in all of them. The code is stored
+-- verbatim and THIS TABLE fixes the ámbito.
 -- Sustainable-management practices claimed for this application. A junction
 -- because several apply at once, and coded against the provider's list.
 CREATE TABLE fertilisation_practice (
@@ -446,7 +489,7 @@ CREATE TABLE fertilisation_practice (
 -- to pasture or fodder for self-consumption.
 CREATE TABLE fertilisation_plan (
     id                    TEXT PRIMARY KEY,
-    season_id             TEXT NOT NULL REFERENCES season(id),
+    season_id             TEXT NOT NULL,
     farm_id               TEXT NOT NULL REFERENCES farm(id),
 
     -- Art. 5.a, in its own order. Units are fixed by the field and stated in
@@ -474,10 +517,17 @@ CREATE TABLE fertilisation_plan (
     notes                 TEXT,
     created_at            TEXT NOT NULL,
     updated_at            TEXT NOT NULL,
-    deleted_at            TEXT
+    deleted_at            TEXT,
+    -- The season must be this farm's own (see `season`): a record filed under
+    -- another holding's season would print in neither book.
+    FOREIGN KEY (season_id, farm_id) REFERENCES season(id, farm_id)
 );
 
 CREATE INDEX idx_fertilisation_plan_season ON fertilisation_plan (season_id, farm_id);
+
+-- The removed plans, for the purge, as `idx_irrigation_record_removed`.
+CREATE INDEX idx_fertilisation_plan_removed ON fertilisation_plan (deleted_at)
+    WHERE deleted_at IS NOT NULL;
 
 -- The production unit the plan covers. A junction, not a column, because
 -- `PlanAbonado.DGCs` is an ARRAY and a unidad de producción may well be several
@@ -495,3 +545,15 @@ CREATE TABLE fertilisation_plan_crop (
     crop_id                TEXT NOT NULL REFERENCES crop(id),
     UNIQUE (fertilisation_plan_id, crop_id)
 );
+
+-- What still names a crop, on each of this module's three junctions. The purge
+-- erases a crop only together with every row that names it, and SQLite answers
+-- that through these columns — without an index, by reading the whole table for
+-- every crop it erases (docs/sync.md → The purge, as settled). Partial: a row
+-- naming no crop has nothing to find. The plan's UNIQUE leads with the plan,
+-- so it cannot serve this.
+CREATE INDEX idx_irrigation_plot_crop          ON irrigation_plot (crop_id)
+    WHERE crop_id IS NOT NULL;
+CREATE INDEX idx_fertilisation_plot_crop       ON fertilisation_plot (crop_id)
+    WHERE crop_id IS NOT NULL;
+CREATE INDEX idx_fertilisation_plan_crop_crop  ON fertilisation_plan_crop (crop_id);

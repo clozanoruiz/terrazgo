@@ -3,7 +3,7 @@
 
 //! Error type for the record book.
 //!
-//! The book borrowed `module_cue::Result` when it was extracted from that crate
+//! The book borrowed `module_phytosanitary::Result` when it was extracted from that crate
 //! (slice A, 2026-08-07). That was fine while treatments were the only domain
 //! it read; it stops being fine the moment a second module contributes
 //! sections, because a document is not a treatment and must not report failures
@@ -106,15 +106,15 @@ impl From<module_ecoscheme::EcoschemeError> for RecordbookError {
     }
 }
 
-impl From<module_cue::CueError> for RecordbookError {
-    fn from(e: module_cue::CueError) -> Self {
-        use module_cue::CueError;
+impl From<module_phytosanitary::PhytosanitaryError> for RecordbookError {
+    fn from(e: module_phytosanitary::PhytosanitaryError) -> Self {
+        use module_phytosanitary::PhytosanitaryError;
         match e {
-            CueError::Sqlite(e) => RecordbookError::Sqlite(e),
-            CueError::Json(e) => RecordbookError::Json(e),
-            CueError::NotFound => RecordbookError::NotFound,
-            CueError::InvalidDate(d) => RecordbookError::InvalidDate(d),
-            CueError::Invalid(msg) => RecordbookError::Invalid(msg),
+            PhytosanitaryError::Sqlite(e) => RecordbookError::Sqlite(e),
+            PhytosanitaryError::Json(e) => RecordbookError::Json(e),
+            PhytosanitaryError::NotFound => RecordbookError::NotFound,
+            PhytosanitaryError::InvalidDate(d) => RecordbookError::InvalidDate(d),
+            PhytosanitaryError::Invalid(msg) => RecordbookError::Invalid(msg),
             // The rest are write-path diagnostics (authorisation, country,
             // plot ownership, PHI inputs) that reading a book cannot raise,
             // plus the same non-user-explainable faults as above.

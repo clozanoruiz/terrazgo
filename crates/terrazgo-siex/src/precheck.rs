@@ -17,7 +17,7 @@
 //! list, and cannot act on a file that looks complete and is not.
 
 use crate::error::Result;
-use module_cue::repository::{
+use module_phytosanitary::repository::{
     list_non_field_treatments, list_seed_treatments, list_treatment_records,
 };
 use rusqlite::Connection;
@@ -196,7 +196,7 @@ pub struct ExportPrecheck {
     ///
     /// **Until 2026-08-22 this rule also refused the purely non-chemical
     /// record**, for want of an `OtrasActuacionesFito` writer. That record now
-    /// exports (docs/siex-export.md → "Seam 5").
+    /// exports (docs/siex-export.md → "`TratamFito`'s sub-blocks").
     pub records_mixing_product_and_measure: Vec<RecordRef>,
     /// An actuation whose measure block cannot be built: the
     /// `TIPO_MEDIDA_FITOSANITARIA` code is not an integer, the intensity was
@@ -213,7 +213,7 @@ pub struct ExportPrecheck {
     /// A measure whose kind demands an MDF registration number and carries
     /// none. Anexo V field 19 grades `Registro MDF` Obligatorio for *"suelta de
     /// OCB, trampas y otros y feromonas y atrayentes para monitoreo"* — the
-    /// three kinds `module_cue::siex::measure_requires_mdf_number` names.
+    /// three kinds `module_phytosanitary::siex::measure_requires_mdf_number` names.
     pub records_missing_measure_registration: Vec<RecordRef>,
     /// A record that names an advisor whose ROPO number is absent.
     ///
@@ -394,7 +394,7 @@ pub fn export_precheck(
     // Present but unmappable (not an INE province) blocks the same way as
     // absent: CAExplotacion cannot be derived from it.
     let province = es.and_then(|e| e.province_code.as_deref()).unwrap_or("");
-    if module_cue::siex::province_to_ccaa(province).is_none() {
+    if module_phytosanitary::siex::province_to_ccaa(province).is_none() {
         farm_missing_fields.push("province_code");
     }
 
@@ -424,11 +424,13 @@ pub fn export_precheck(
                     .record
                     .measure_intensity_unit_code
                     .as_deref()
-                    .is_some_and(|unit| module_cue::siex::intensity_unit_to_siex(unit).is_some());
+                    .is_some_and(|unit| {
+                        module_phytosanitary::siex::intensity_unit_to_siex(unit).is_some()
+                    });
             if kind.is_none() || !intensity_sendable {
                 records_with_unsendable_measure.push(record_ref());
             }
-            if kind.is_some_and(module_cue::siex::measure_requires_mdf_number)
+            if kind.is_some_and(module_phytosanitary::siex::measure_requires_mdf_number)
                 && is_blank(rec.record.measure_registration_number.as_deref())
             {
                 records_missing_measure_registration.push(record_ref());
@@ -549,7 +551,7 @@ pub fn export_precheck(
         let unit_sendable = record
             .quantity_unit_code
             .as_deref()
-            .is_some_and(|code| module_cue::siex::quantity_unit_to_siex(code).is_some());
+            .is_some_and(|code| module_phytosanitary::siex::quantity_unit_to_siex(code).is_some());
         if !produce_sendable || record.quantity_value.is_none() || !unit_sendable {
             harvest_missing_fields.push(HarvestRef {
                 harvest_record_id: record.id.clone(),

@@ -20,17 +20,20 @@
 //
 // So the two paths stay separate by construction: constraint validation is the
 // field's own and drives blocking; a refusal is the backend's and drives text.
-import { getContext, setContext } from "svelte";
+import { createContext } from "svelte";
 
-const REFUSALS = Symbol("tz-refusals");
+// A createContext triple rather than a Symbol key: its getter throws when no
+// TzForm set the context, and `has` asks whether one did.
+const [getRefusals, setRefusals, hasRefusals] = createContext();
 
 /// Called by TzForm with its reactive `{ byName: {} }` store.
 export function provideRefusals(store) {
-  setContext(REFUSALS, store);
+  setRefusals(store);
 }
 
 /// Called by an owned control at init. Returns the store or null — a control
-/// used outside a TzForm is ordinary and must not throw.
+/// used outside a TzForm is ordinary and must not throw, which is why presence
+/// is asked before the getter is.
 export function refusalStore() {
-  return getContext(REFUSALS) ?? null;
+  return hasRefusals() ? getRefusals() : null;
 }

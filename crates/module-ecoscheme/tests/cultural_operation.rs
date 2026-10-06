@@ -203,7 +203,7 @@ fn the_residue_destination_that_creates_an_inert_cover_is_stored_verbatim() {
 
     let mut new = sample(&fx);
     new.practice_code = "inert_cover".into();
-    new.operation_kind_code = "pruning".into();
+    new.operation_kind_code = "green_pruning_with_cleaning".into();
     new.residue_destination_code = Some(module_ecoscheme::siex::RESIDUE_LEFT_ON_GROUND.into());
     let detail = repo::insert_cultural_operation(&mut conn, new, None).unwrap();
 
@@ -431,23 +431,36 @@ fn operations_list_oldest_first_within_their_own_season_and_farm() {
     );
 }
 
+/// Deleting a book deletes its cultural operations, and bringing it back restores each one
+/// whole, the rows belonging to it included (docs/sync.md → Deleting a book
+/// with its records). Core finds the register in the aggregate map; this pins
+/// that it finds THIS one.
 #[test]
-fn a_season_holding_an_operation_reports_itself_in_use() {
-    // The shell chains this before soft-deleting a season. It must cover EVERY
-    // register the module owns: a season holding nothing but a cultural
-    // operation would otherwise be deletable, and its records would vanish from
-    // a book that is read season by season.
+fn deleting_its_book_takes_an_operation_and_bringing_it_back_restores_it_whole() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
+    let created = repo::insert_cultural_operation(&mut conn, sample(&fx), None).unwrap();
+    let id = created.record.id.clone();
+    let before = serde_json::to_value(repo::get_cultural_operation(&conn, &id).unwrap()).unwrap();
 
-    assert!(!repo::season_has_records(&conn, &fx.season_id).unwrap());
-    let detail = repo::insert_cultural_operation(&mut conn, sample(&fx), None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    assert_eq!(
+        terrazgo_core::repository::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        1
+    );
+    assert!(matches!(
+        repo::get_cultural_operation(&conn, &id),
+        Err(module_ecoscheme::EcoschemeError::NotFound)
+    ));
 
-    // Soft-deleted records still count: their audit history is only reachable
-    // through the season they belong to.
-    repo::soft_delete_cultural_operation(&mut conn, &detail.record.id, None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    terrazgo_core::repository::restore_book(
+        &mut conn,
+        &fx.season_id,
+        &terrazgo_core::date::today_utc(),
+        None,
+    )
+    .unwrap();
+    let after = serde_json::to_value(repo::get_cultural_operation(&conn, &id).unwrap()).unwrap();
+    terrazgo_testkit::assert_restored(&before, &after);
 }
 
 #[test]

@@ -42,7 +42,7 @@ pub fn cultural_operation_kind_to_siex(code: &str) -> Option<i64> {
         "mowing" => Some(5),
         "brush_cutting" => Some(5),
         "drainage" => Some(6),
-        "pruning" => Some(7),
+        "green_pruning_with_cleaning" => Some(7),
         "thinning" => Some(8),
         "staking" => Some(9),
         "grafting" => Some(10),
@@ -129,7 +129,7 @@ pub const RESIDUE_KINDS_BRUSH: &[&str] = &["mowing", "brush_cutting"];
 /// contradicts itself, and this list resolves that the only way that does not
 /// invent an answer — by leaving both booleans false, which is what the removal
 /// says.
-pub const RESIDUE_KINDS_PRUNING: &[&str] = &["pruning", "green_pruning"];
+pub const RESIDUE_KINDS_PRUNING: &[&str] = &["green_pruning_with_cleaning", "green_pruning"];
 
 /// Catalogue that `soil_cover.cover_type_code` is stored against — tier 2,
 /// verbatim, because `DatosCubierta.TipoCobertura` sends this very code.

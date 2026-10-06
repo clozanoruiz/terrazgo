@@ -9,14 +9,14 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 use serde_json::Value;
 use terrazgo_siex::{SiexError, build_cuaderno, export_precheck};
 
 // ---------------------------------------------------------------------------
-// Seam 1: module-cue's other four blocks — models 3.2, 3.3, 3.4/3.5 and 4.
+// Seam 1: module-phytosanitary's other four blocks — models 3.2, 3.3, 3.4/3.5 and 4.
 // ---------------------------------------------------------------------------
 
 /// A building with the REA code the format demands, plus the cadastral
@@ -346,7 +346,7 @@ fn an_analysis_exports_as_recorded_and_blocks_nothing() {
     let mut conn = db();
     let fx = fixture(&mut conn);
     let mut soil = analysis(&fx);
-    soil.soil = module_cue::models::SoilParameters {
+    soil.soil = module_phytosanitary::models::SoilParameters {
         ph: Some(7.8),
         organic_matter_pct: Some(1.9),
         available_p_mg_kg: Some(18.0),

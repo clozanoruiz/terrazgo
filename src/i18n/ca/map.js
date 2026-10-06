@@ -58,7 +58,8 @@ export default {
   "map.boundaries": "Contorns desats",
   "map.no_boundary": "Encara no hi ha cap contorn desat.",
   "map.delete_boundary": "Treu",
-  "map.delete_boundary_confirm": "Voleu treure el contorn {source}? Se'n conserva l'historial.",
+  "map.delete_boundary_confirm":
+    "Voleu treure el contorn {source}? Deixarà de veure's al mapa, però no s'esborra de la base de dades.",
   "map.source.manual": "dibuixat",
   "map.source.import": "importat",
   "map.source.sigpac": "SIGPAC",

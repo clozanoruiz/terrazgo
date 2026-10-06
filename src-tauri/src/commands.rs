@@ -1,17 +1,14 @@
 // SPDX-FileCopyrightText: 2026 Carlos Lozano Ruiz
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-//! Tauri commands: thin wrappers over the `terrazgo_core` and `module_cue`
+//! Tauri commands: thin wrappers over the `terrazgo_core` and `module_phytosanitary`
 //! repositories, plus the error mapping for the command boundary. Logic stays
 //! in the crates and is tested there (docs/architecture.md → Testing strategy #4).
 
 use anyhow::anyhow;
-use module_cue::alerts::AlertConfig;
-use module_cue::repository;
-use terrazgo_core::date::today_utc;
+use module_phytosanitary::repository;
 
 use crate::state;
-use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
 
@@ -21,26 +18,26 @@ use tauri::State;
 // — moving one between domains is not an API change.
 mod app;
 mod core;
-mod cue;
 mod ecoscheme;
 mod fertilisation;
 mod geo;
 mod links;
+mod phytosanitary;
 mod recordbook;
 mod sigpac;
 
 pub use app::*;
 pub use core::*;
-pub use cue::*;
 pub use ecoscheme::*;
 pub use fertilisation::*;
 pub use geo::*;
 pub use links::*;
+pub use phytosanitary::*;
 pub use recordbook::*;
 pub use sigpac::*;
 
 /// Serializable error for the command boundary. Tauri requires command errors
-/// to implement `Serialize`; `CueError`/`anyhow::Error` do not.
+/// to implement `Serialize`; `PhytosanitaryError`/`anyhow::Error` do not.
 ///
 /// Serialized as `{ code, params, message }`: `code` is a stable machine
 /// string the frontend maps to an `error.<code>` i18n key, `params` carries
@@ -98,7 +95,7 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
     if let Some(e) = err.downcast_ref::<terrazgo_core::CoreError>() {
         return e.classify();
     }
-    if let Some(e) = err.downcast_ref::<module_cue::CueError>() {
+    if let Some(e) = err.downcast_ref::<module_phytosanitary::PhytosanitaryError>() {
         return e.classify();
     }
     if let Some(e) = err.downcast_ref::<module_fertilisation::FertilisationError>() {
@@ -122,7 +119,7 @@ pub fn classify(err: &anyhow::Error) -> (String, serde_json::Value) {
     ("internal".into(), serde_json::json!({}))
 }
 
-// Blanket conversion so `?` maps any error (`CueError`, `rusqlite::Error`,
+// Blanket conversion so `?` maps any error (`PhytosanitaryError`, `rusqlite::Error`,
 // plain `anyhow::Error`, …) into `CommandError` at the boundary. Legal only
 // because `CommandError` itself is not `Into<anyhow::Error>` — otherwise this
 // would overlap with the standard library's reflexive `From<T> for T`.
@@ -140,21 +137,6 @@ type CmdResult<T> = Result<T, CommandError>;
 // database into `Unavailable`, which the blanket conversion below carries to
 // the frontend.
 
-/// Re-derive the alert set after a write, whatever domain the write was in.
-///
-/// The alert engine is module-cue's, and modules never call each other — so
-/// chaining it after a core, sigpac or fertilisation write is the SHELL's job,
-/// which is why this sits here beside the locks rather than in `cue.rs`.
-///
-/// The config is a parameter rather than read here because this runs with the
-/// connection already locked, and settings are always locked BEFORE the
-/// database (see [`active_actor`]). Callers resolve it with [`alert_config`]
-/// at the top of the command.
-fn reconcile_alerts(conn: &mut Connection, config: &AlertConfig) -> Result<(), CommandError> {
-    repository::refresh_alerts(conn, &today_utc(), config)?;
-    Ok(())
-}
-
 /// The device's active profile id — the author stamp every write command
 /// passes to the repositories (`record_change.actor`). `None` = no active
 /// profile; the id is read fresh per command so a Settings change applies
@@ -169,33 +151,25 @@ fn active_actor(settings: &State<'_, state::SettingsState>) -> CmdResult<Option<
         .clone())
 }
 
-/// The alert lead times this device is configured with — **the shell's only
-/// source of an [`AlertConfig`]**.
-///
-/// module-cue deliberately does not implement `Default` for it, so there is no
-/// second way to conjure one: a call site that skipped this helper would have
-/// to name `AlertConfig::defaults()` against its doc comment rather than
-/// merely forget something. An unset field follows module-cue's default, so a
-/// farmer who never opened Settings tracks the code.
+/// A copy of this device's settings, for a command that reads several of them
+/// — the alert list resolves each crate's settings from it.
 ///
 /// Read fresh per command, and the settings lock is released before any other
 /// is taken — same contract as [`active_actor`], which is why both are called
 /// at the top of a command rather than under the connection guard.
-fn alert_config(settings: &State<'_, state::SettingsState>) -> CmdResult<AlertConfig> {
-    let guard = settings
+fn device_settings(
+    settings: &State<'_, state::SettingsState>,
+) -> CmdResult<terrazgo_core::settings::AppSettings> {
+    Ok(settings
         .settings
         .lock()
-        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?;
-    Ok(AlertConfig::from_overrides(
-        guard.licence_lead_days,
-        guard.itv_lead_days,
-    ))
+        .map_err(|_| CommandError(anyhow!("settings mutex is poisoned")))?
+        .clone())
 }
 
 /// How far back the map's PHI tint looks on this device — **the shell's only
-/// source of a horizon**, for the same reason [`alert_config`] is the only
-/// source of an `AlertConfig`. module-cue keeps its own constant private, so a
-/// caller cannot reach past this and silently ignore the farmer's choice.
+/// source of a horizon**. module-phytosanitary keeps its own constant private,
+/// so a caller cannot reach past this and silently ignore the farmer's choice.
 fn phi_horizon(settings: &State<'_, state::SettingsState>) -> CmdResult<i64> {
     let guard = settings
         .settings
@@ -214,7 +188,7 @@ mod tests {
 
     #[test]
     fn domain_error_maps_to_code_and_params() {
-        let err = CommandError::from(module_cue::CueError::CountryMismatch {
+        let err = CommandError::from(module_phytosanitary::PhytosanitaryError::CountryMismatch {
             provided: "fr".into(),
             farm: "es".into(),
         });

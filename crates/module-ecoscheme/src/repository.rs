@@ -24,31 +24,23 @@ use rusqlite::OptionalExtension;
 use terrazgo_core::audit;
 
 pub use cultural_operation::{
-    get_cultural_operation, insert_cultural_operation, list_cultural_operations,
-    list_cultural_operations_for_export, soft_delete_cultural_operation, update_cultural_operation,
+    OPERATION_PRACTICES, get_cultural_operation, insert_cultural_operation,
+    list_cultural_operations, list_cultural_operations_for_export, soft_delete_cultural_operation,
+    soft_delete_cultural_operation_tx, update_cultural_operation,
 };
 pub use grazing::{
-    get_grazing_record, insert_grazing_record, list_grazing_records,
-    list_grazing_records_for_export, soft_delete_grazing_record, update_grazing_record,
+    GRAZING_PRACTICES, get_grazing_record, insert_grazing_record, list_grazing_records,
+    list_grazing_records_for_export, soft_delete_grazing_record, soft_delete_grazing_record_tx,
+    update_grazing_record,
 };
 pub use lookup::{list_cultural_operation_kinds, list_eco_practices};
 pub use soil_cover::{
-    get_soil_cover, get_soil_cover_for_export, insert_soil_cover, list_soil_covers,
-    list_soil_covers_for_export, soft_delete_soil_cover, update_soil_cover,
+    COVER_PRACTICES, get_soil_cover, get_soil_cover_for_export, insert_soil_cover,
+    list_soil_covers, list_soil_covers_for_export, soft_delete_soil_cover,
+    soft_delete_soil_cover_tx, update_soil_cover,
 };
 
 use crate::error::EcoschemeError;
-
-/// Whether any record of THIS module hangs off a season — the module's arm of
-/// the guard the shell chains before deleting one. Every register this crate
-/// owns has to be here: a season holding nothing but a grazing record would
-/// otherwise be deletable, and its records would vanish from a book that is
-/// read season by season.
-pub fn season_has_records(conn: &rusqlite::Connection, season_id: &str) -> crate::Result<bool> {
-    Ok(grazing::season_has_grazing(conn, season_id)?
-        || cultural_operation::season_has_operations(conn, season_id)?
-        || soil_cover::season_has_covers(conn, season_id)?)
-}
 
 /// Map `rusqlite::Error::QueryReturnedNoRows` to our `NotFound`, pass
 /// everything else through.

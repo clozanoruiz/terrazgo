@@ -19,6 +19,8 @@ thiserror = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 csv = { workspace = true }
+flate2 = { workspace = true }
+twox-hash = { workspace = true }
 
 # Shared test fixtures. This is a DEV-dependency cycle (the testkit depends on
 # this crate), which cargo allows precisely because it does not affect the

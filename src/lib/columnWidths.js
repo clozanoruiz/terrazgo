@@ -9,7 +9,7 @@
 // width may be and what survives a restart, so it is unit-tested
 // (docs/frontend-conventions.md → "The two-tier rule").
 //
-// Widths are a display preference like the collapsed sidebar and the inspector
+// Widths are a display preference like the collapsed sidebar
 // width: localStorage, never the database. Nothing about them belongs to the
 // holding's records, and a backup restoring a record book onto a new device
 // must not impose the old device's column layout.

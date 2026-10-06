@@ -10,8 +10,8 @@
 //! That second rule is the design, not a detail of what the first extraction
 //! needed. A module may never depend on another module, and each one pins that
 //! with a `the_module_runs_on_core_alone` test. A testkit that grew a
-//! `module-cue` dependency would let `module-fertilisation`'s tests reach
-//! `module-cue`'s schema through the back door, and those tests would keep
+//! `module-phytosanitary` dependency would let `module-fertilisation`'s tests reach
+//! `module-phytosanitary`'s schema through the back door, and those tests would keep
 //! passing while it was open — the guard is on the crate graph, and the testkit
 //! would be inside it. So: **anything that needs a module's tables is not a
 //! testkit fixture.** It belongs in that crate's own `tests/common`.
@@ -19,10 +19,14 @@
 //! What lives here is what only needs core:
 //!   * [`fixtures`] — the land a register test runs on (season, farm, plots).
 //!   * [`audit`]    — reading back the `record_change` row a write just logged.
+//!   * [`duplicates`] — the check a save runs for possible duplicates, held to
+//!     the list a book's page shows.
 //!   * [`files`]    — a temp path that cleans up after itself, panic or not.
 //!   * [`queries`]  — what a call costs the database, so an N+1 and an
 //!     unbounded result set are things a test can fail on rather than things a
 //!     later audit has to measure.
+//!   * [`sync`]     — one device's whole log carried to another through the
+//!     real bundle transport, and a device's own copy of a catalogue.
 //!
 //! The fixtures build core rows on whatever connection they are handed, so a
 //! module test opens through its own `open_in_memory()` (core + that module's
@@ -35,11 +39,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 pub mod audit;
+pub mod duplicates;
 pub mod files;
 pub mod fixtures;
 pub mod queries;
+pub mod restore;
+pub mod sync;
 
-pub use audit::last_change;
-pub use files::TempFile;
+pub use audit::{Stamped, last_change, last_stamp};
+pub use files::{TempDir, TempFile};
 pub use fixtures::{CoreFixture, FarmWithPlots, PlotSpec, farm_with_plots};
 pub use queries::{QueryCost, query_cost};
+pub use restore::assert_restored;

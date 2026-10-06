@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Terrazgo",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "identifier": "org.terrazgo.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -14,20 +14,23 @@
     "windows": [
       {
         "label": "main",
+        "create": false,
         "title": "Terrazgo",
         "width": 1100,
         "height": 740
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' geo: http://geo.localhost data: blob:; connect-src 'self' geo: http://geo.localhost; worker-src 'self' blob:",
-      "devCsp": "default-src 'self' ws://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' geo: http://geo.localhost data: blob:; connect-src 'self' ws://localhost:5173 geo: http://geo.localhost; worker-src 'self' blob:"
+      "csp": "default-src 'self'; img-src 'self' geo: http://geo.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost geo: http://geo.localhost; worker-src 'self'",
+      "devCsp": "default-src 'self' ws://localhost:5173; style-src 'self' 'unsafe-inline'; img-src 'self' geo: http://geo.localhost data: blob:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173 geo: http://geo.localhost; worker-src 'self'"
     }
   },
   "bundle": {
     "active": true,
     "targets": ["appimage", "deb", "rpm", "nsis"],
     "icon": ["icons/icon.png", "icons/128x128.png", "icons/32x32.png", "icons/icon.ico"],
+    "publisher": "Carlos Lozano Ruiz",
+    "copyright": "Copyright © 2026 Carlos Lozano Ruiz",
     "license": "AGPL-3.0-or-later",
     "licenseFile": "../LICENSE",
     "category": "Business",

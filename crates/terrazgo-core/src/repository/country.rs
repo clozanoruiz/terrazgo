@@ -46,16 +46,46 @@ pub fn list_irrigation_systems(conn: &Connection) -> Result<Vec<Lookup>> {
     )
 }
 
-/// GIP frameworks (RD 1311/2012 art. 10-11), for the crop form's per-row GIP
-/// column and the farm's advisory link. Rowid order keeps the seeded sequence,
-/// which is the order the official model lists the siglas in.
-pub fn list_gip_systems(conn: &Connection) -> Result<Vec<Lookup>> {
-    lookup_rows(conn, "SELECT code, i18n_key FROM gip_system ORDER BY rowid")
+/// GIP frameworks, for the crop form's per-row GIP column and the farm's
+/// advisory link. Offered per country: see [`gip_system_scheme`].
+pub fn list_gip_systems(conn: &Connection, country_code: &str) -> Result<Vec<Lookup>> {
+    scheme_rows(
+        conn,
+        "SELECT code, i18n_key FROM gip_system",
+        gip_system_scheme(country_code),
+    )
+}
+
+/// The GIP frameworks a country's scheme defines, in the order its own form
+/// lists them. `None` for a country with no written scheme.
+///
+/// **Not universal**, which is why this exists: Spain's are RD 1311/2012
+/// art. 10-11, and `atria` is a Spanish institution (Agrupaciones para
+/// Tratamientos Integrados en Agricultura). Another member state implements
+/// the same EU integrated-pest-management duty through its own frameworks, so
+/// it brings its own rows and its own entry here rather than inheriting these.
+///
+/// Public because the contract test checks it against the seeded rows in both
+/// directions — the tier-1 rule applied to the country dimension.
+pub fn gip_system_scheme(country_code: &str) -> Option<&'static [&'static str]> {
+    match country_code {
+        // The order the official model prints the siglas in: AE, PI, CP,
+        // Atrias, AS, NO.
+        "es" => Some(&[
+            "organic",
+            "integrated_production",
+            "private_certification",
+            "atria",
+            "advisor_assisted",
+            "not_required",
+        ]),
+        _ => None,
+    }
 }
 
 /// What a `premises` row is — building or vehicle — for the registry form.
 /// Core-native words: the register's own vocabulary (`storage_premises` /
-/// `transport`) belongs to module-cue, and these say what the THING is.
+/// `transport`) belongs to module-phytosanitary, and these say what the THING is.
 pub fn list_premises_kinds(conn: &Connection) -> Result<Vec<Lookup>> {
     lookup_rows(
         conn,
@@ -166,34 +196,80 @@ pub fn list_quantity_units(conn: &Connection) -> Result<Vec<Lookup>> {
 /// etc.)", which the SIEX `UNIDADES_MEDIDA` catalogue publishes both absolute
 /// and per hectare.
 ///
-/// Its own list for the same reason `list_units` is one: these are counts, and
-/// offering a count where a dose belongs (or a dose where a count belongs)
-/// invites a figure that reads as a false statement. Absolute before per
-/// hectare, traps and diffusers before the generic unit — the order the model's
-/// own examples suggest.
+/// Its own list for the same reason `list_units` is one: offering a count where
+/// a dose belongs (or a dose where a count belongs) invites a figure that reads
+/// as a false statement. Counts and areas, plus the two amounts Anexo V field
+/// 18 admits for a measure — kg and kg/ha, for "fitosanitarios biológicos";
+/// the 2027 model (Anexo 03) keeps the same list. Absolute before per hectare,
+/// traps and diffusers before the generic unit — the order the model's own
+/// examples suggest — and the amounts last.
+///
+/// This list is also what a stored measure is validated against, so the
+/// picker and the repository cannot disagree.
 pub fn list_intensity_units(conn: &Connection) -> Result<Vec<Lookup>> {
     lookup_rows(
         conn,
         "SELECT code, i18n_key FROM unit
-         WHERE dimension = 'intensity'
+         WHERE dimension = 'intensity' OR code IN ('kg', 'kg_ha')
          ORDER BY CASE code
              WHEN 'traps' THEN 1 WHEN 'traps_ha' THEN 2
              WHEN 'diffusers' THEN 3 WHEN 'diffusers_ha' THEN 4
-             WHEN 'units' THEN 5 ELSE 6 END",
+             WHEN 'units' THEN 5 WHEN 'units_ha' THEN 6 WHEN 'units_m2' THEN 7
+             WHEN 'm2' THEN 8 WHEN 'net_m2_ha' THEN 9
+             WHEN 'kg' THEN 10 ELSE 11 END",
     )
 }
 
-/// Operator licence levels (RD 1311/2012 niveles de capacitación), for the
-/// operator form. Rowid order keeps the seeded rising progression.
-pub fn list_licence_levels(conn: &Connection) -> Result<Vec<Lookup>> {
-    let mut stmt = conn.prepare("SELECT code, i18n_key FROM licence_level ORDER BY rowid")?;
-    let levels = stmt
-        .query_map([], |r| {
-            Ok(Lookup {
-                code: r.get(0)?,
-                i18n_key: r.get(1)?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    Ok(levels)
+/// Operator licence levels, for the operator form. Offered per country: see
+/// [`licence_level_scheme`].
+pub fn list_licence_levels(conn: &Connection, country_code: &str) -> Result<Vec<Lookup>> {
+    scheme_rows(
+        conn,
+        "SELECT code, i18n_key FROM licence_level",
+        licence_level_scheme(country_code),
+    )
+}
+
+/// The operator licence levels a country's scheme defines, in the order its own
+/// form lists them. `None` for a country with no written scheme.
+///
+/// **Not universal.** Spain's are RD 1311/2012's niveles de capacitación, in
+/// rising order; France's Certiphyto has its own categories entirely. The
+/// schema comment here used to say "Spanish carné today; regional mapping is
+/// config" — this function is that config.
+///
+/// Public because the contract test checks it against the seeded rows in both
+/// directions — the tier-1 rule applied to the country dimension.
+pub fn licence_level_scheme(country_code: &str) -> Option<&'static [&'static str]> {
+    match country_code {
+        "es" => Some(&["basic", "qualified", "fumigator", "pilot"]),
+        _ => None,
+    }
+}
+
+/// Rows for the codes a country's scheme names, in the SCHEME's order.
+///
+/// `None` — a country with no written scheme — is an empty list, not an error:
+/// a picker with nothing to offer, the answer `premises_classes` already gives
+/// for a country with no coded list. Never a fallback to Spain's.
+///
+/// Reading the whole table and projecting it is **not** the thing "a query
+/// answers the question it was asked" forbids. That rule is about result sets
+/// that grow as the farmer keeps using the app; these are fixed four- and
+/// six-row reference tables shipped in the binary, where the table *is* the
+/// vocabulary. The order is the country's own, which no `ORDER BY` can express
+/// — which is also why `ORDER BY rowid` is gone: the Spanish order now lives
+/// beside the Spanish list instead of being a fact about a seed file.
+///
+/// A code a scheme names but the table lacks is skipped here and caught in CI
+/// by the scope contract test, which is where a packaging error belongs.
+fn scheme_rows(conn: &Connection, sql: &str, scheme: Option<&[&str]>) -> Result<Vec<Lookup>> {
+    let Some(scheme) = scheme else {
+        return Ok(Vec::new());
+    };
+    let seeded = lookup_rows(conn, sql)?;
+    Ok(scheme
+        .iter()
+        .filter_map(|code| seeded.iter().find(|row| row.code == *code).cloned())
+        .collect())
 }

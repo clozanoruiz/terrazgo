@@ -9,10 +9,12 @@ export default {
   "farms.title": "Explotaciones",
   "farms.new": "Nueva explotación",
   "farms.empty": "Aún no hay explotaciones; cree la primera.",
-  "farms.back": "← Explotaciones",
+  "farm.section": "Explotación",
   "farm.name": "Nombre",
   "farm.owner": "Titular",
   "farm.country": "País",
+  "farm.country_fixed_hint":
+    "Se indica al crear la explotación y no se puede cambiar: determina qué listas codificadas usan sus registros.",
   "farm.location": "Ubicación",
   "farm.latitude": "Latitud",
   "farm.longitude": "Longitud",
@@ -50,10 +52,10 @@ export default {
   "water_points.title": "Captaciones de agua",
   "water_points.new": "Nueva captación",
   "water_points.hint":
-    "Puntos de captación de agua para consumo humano en la parcela o cerca de ella (apartado 2.2 del cuaderno). Marca «sin captaciones» en las parcelas donde lo hayas comprobado y no las haya: en blanco significa que aún no se ha comprobado.",
+    "Puntos de captación de agua para consumo humano en la parcela o cerca de ella (apartado 2.2 del cuaderno). Al editar una parcela, marca «sin captaciones» si lo has comprobado y no las hay: en blanco significa que aún no se ha comprobado.",
   "water_points.empty": "Aún no hay captaciones registradas.",
-  "water_points.none_on": "Sin captaciones en «{plot}» (comprobado)",
   "water_points.none_column": "Sin captaciones (comprobado)",
+  "plot.water_none_has_points": "La parcela tiene captaciones registradas.",
   "water_point.denomination": "Denominación",
   "water_point.inside_plot": "Incluida en la parcela",
   "water_point.distance": "Distancia (m)",
@@ -67,14 +69,85 @@ export default {
   "farm.map_title": "Mapa de la explotación",
   "farm.open_map": "Abrir en el mapa",
   "plot.on_map": "En el mapa",
-  "seasons.new": "Nueva campaña",
-  "seasons.empty": "Aún no hay campañas; cree la primera.",
-  "season.campaign_year": "Año de campaña",
-  "season.label": "Etiqueta",
+  "record_books.title": "Cuadernos",
+  "record_books.new": "Nuevo cuaderno",
+  "record_books.empty": "Aún no hay cuadernos; cree el primero para una explotación y una campaña.",
+  "record_book.section": "Campaña",
+  "record_book.delete": "Eliminar cuaderno",
+  "record_book.not_found": "Este cuaderno no existe o se ha eliminado.",
+  "removed_books.summary": "Cuadernos eliminados ({count})",
+  "removed_books.hint":
+    "Cada uno puede recuperarse, con lo que se eliminó con él, hasta la fecha que indica. Después se borra definitivamente.",
+  "removed_books.removed_by": "Eliminado el {date} por {person} en {device}",
+  "removed_books.removed_on": "Eliminado el {date} en {device}",
+  "removed_books.until": "Se puede recuperar hasta el {date}",
+  "removed_books.was_until": "Se podía recuperar hasta el {date}",
+  "removed_books.erasing_devices.one":
+    "Se borrará definitivamente cuando conste aquí que {devices} ha recibido la eliminación: sincronice ese dispositivo o, si ya no se usa, retírelo en {settings}, en «{peers}».",
+  "removed_books.erasing_devices.other":
+    "Se borrará definitivamente cuando conste aquí que {devices} han recibido la eliminación: sincronice esos dispositivos o, si alguno ya no se usa, retírelo en {settings}, en «{peers}».",
+  "removed_books.erasing_status":
+    "Se borrará definitivamente cuando se resuelva lo que queda pendiente de él en la página «{status}».",
+  "removed_books.erasing_due_on": "Se borrará definitivamente a partir del {date}.",
+  "removed_books.erasing_due": "Se borrará definitivamente la próxima vez que se abra Terrazgo.",
+  "removed_books.no_records": "Sin registros",
+  "removed_books.restore": "Recuperar",
+  "removed_books.restore_confirm":
+    "¿Recuperar el cuaderno «{label}» de {farm}, con los registros que se eliminaron con él?",
+  "removed_books.restored": "Listo. El cuaderno «{label}» vuelve a estar en la lista.",
+  "removed_books.restored_records.one":
+    "Listo. El cuaderno «{label}» vuelve a estar en la lista, con su registro.",
+  "removed_books.restored_records.other":
+    "Listo. El cuaderno «{label}» vuelve a estar en la lista, con sus {count} registros.",
+  "removed_with_book.notice_by":
+    "Al eliminar este cuaderno el {date} ({person}, en {device}) se eliminaron también sus registros. Después el cuaderno volvió a la lista, pero vacío: esos registros siguen eliminados. Si los recupera, volverán a este cuaderno tal como estaban. Puede hacerlo hasta el {until}.",
+  "removed_with_book.notice_on":
+    "Al eliminar este cuaderno el {date} (en {device}) se eliminaron también sus registros. Después el cuaderno volvió a la lista, pero vacío: esos registros siguen eliminados. Si los recupera, volverán a este cuaderno tal como estaban. Puede hacerlo hasta el {until}.",
+  "removed_with_book.restore": "Recuperarlos",
+  "removed_with_book.restore_confirm.one":
+    "¿Devolver a este cuaderno el registro que se eliminó con él? Volverá tal como estaba cuando se eliminó el cuaderno.",
+  "removed_with_book.restore_confirm.other":
+    "¿Devolver a este cuaderno los {count} registros que se eliminaron con él? Volverán tal como estaban cuando se eliminó el cuaderno.",
+  "removed_with_book.restored.one": "Listo. El registro vuelve a estar en el cuaderno.",
+  "removed_with_book.restored.other":
+    "Listo. Los {count} registros vuelven a estar en el cuaderno.",
+  "record_book.merge": "Unir con otro cuaderno…",
+  // Un cuaderno en un desplegable: su nombre y sus fechas, que es lo que
+  // distingue «2025/2026» de «2025/2026 bis» cuando son la misma campaña.
+  "season.option": "{label} · {span}",
+  "season.span": "{starts} – {ends}",
+  "book_merge.title": "Unir con otro cuaderno",
+  "book_merge.hint":
+    "Si este cuaderno y otro de la misma explotación son en realidad una sola campaña —por ejemplo, porque se empezó en dos dispositivos con fechas distintas—, únalos: los registros de uno pasan al otro, y el que queda vacío se elimina.",
+  "book_merge.other": "Cuaderno con el que unirlo",
+  "book_merge.pick": "Elija un cuaderno",
+  "book_merge.kept": "Cuaderno que se queda",
+  "book_merge.kept_hint":
+    "Viene elegido igual en todos los dispositivos. Si otra persona puede estar uniendo estos mismos cuadernos en otro dispositivo, déjelo como está: si cada uno conservara uno distinto, desaparecerían los dos hasta recuperarlos en la página «Estado».",
+  "book_merge.this_book": "{book} (este cuaderno)",
+  "book_merge.outcome":
+    "Los registros de «{absorbed}» pasarán a «{kept}», y «{absorbed}» se eliminará.",
+  "book_merge.submit": "Unir los cuadernos",
+  "book_merge.confirm":
+    "¿Unir los cuadernos? Todos los registros de «{absorbed}» pasarán a «{kept}», y «{absorbed}» dejará de aparecer en la lista de cuadernos. No se borra ningún registro.",
+  "book_merge.done.one":
+    "Listo. El registro de «{absorbed}» está ahora en «{kept}», y «{absorbed}» se ha eliminado.",
+  "book_merge.done.other":
+    "Listo. Los {count} registros de «{absorbed}» están ahora en «{kept}», y «{absorbed}» se ha eliminado.",
+  "book_merge.done_empty": "Listo. «{absorbed}» no tenía registros y se ha eliminado.",
+  "season.farm": "Explotación",
+  "season.custom_label": "Nombre",
+  "season.custom_label_hint":
+    "Opcional. En blanco, el cuaderno se nombra por sus fechas: 2025/2026, o 2026 si empieza y acaba el mismo año.",
   "season.starts": "Comienza el",
   "season.ends": "Termina el",
   "season.delete_confirm":
-    "¿Eliminar la campaña «{label}»? Solo es posible si no tiene cultivos ni tratamientos.",
+    "¿Eliminar el cuaderno {label} de {farm}? Podrá recuperarlo hasta el {date}, al pie de la lista de cuadernos. Después se borrará definitivamente.",
+  "season.delete_confirm_records.one":
+    "¿Eliminar el cuaderno {label} de {farm} y su registro? Podrá recuperarlos hasta el {date}, al pie de la lista de cuadernos. Después se borrarán definitivamente.",
+  "season.delete_confirm_records.other":
+    "¿Eliminar el cuaderno {label} de {farm} y sus {count} registros? Podrá recuperarlos hasta el {date}, al pie de la lista de cuadernos. Después se borrarán definitivamente.",
+  "season.deleted": "Listo. El cuaderno «{label}» se ha eliminado.",
   "crops.title": "Cultivos",
   "crops.new": "Nuevo cultivo",
   "crops.empty": "Aún no hay cultivos declarados para esta explotación y campaña.",
@@ -280,5 +353,5 @@ export default {
   "harvest.plots_section": "Parcelas de origen",
   "harvest.quantity_detail": "{quantity} {unit}",
   "harvest.lot_detail": "lote {lot}",
-  "harvest.delete_confirm": "\u00bfEliminar esta salida de cosecha? Se conserva en el historial.",
+  "harvest.delete_confirm": "¿Eliminar esta salida de cosecha? Dejará de aparecer en el cuaderno.",
 };

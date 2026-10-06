@@ -22,6 +22,10 @@
 // licence alone would therefore attribute fifteen of them to one wrong holder,
 // which is why the second level exists.
 //
+// ONE LICENCE PER LIBRARY. A dual-licensed package ("MIT OR Apache-2.0") is
+// shown under the option Terrazgo takes, never under both — `licenceShown` in
+// src/lib/thirdParty.js decides which, and says why that is enough.
+//
 // A package that ships no licence file falls back to third-party/, and one
 // with neither is a hard error — see that directory's README.
 
@@ -31,6 +35,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { THIRD_PARTY, licenceShown } from "../src/lib/thirdParty.js";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(root, "src/lib/thirdPartyLicences.json");
 
@@ -38,13 +44,10 @@ const OUT = path.join(root, "src/lib/thirdPartyLicences.json");
 /// file in third-party/; the value is every package it covers.
 const VENDORED = {
   "terra-draw": ["terra-draw", "terra-draw-maplibre-gl-adapter"],
-  // Dual-licensed and ships neither half, so both are vendored.
+  // Dual-licensed and ships neither half; only the MIT one is shown.
   geozero: ["geozero"],
-  "geozero-apache": ["geozero"],
   rusqlite_migration: ["rusqlite_migration"],
   typst: ["typst", "typst-layout", "typst-pdf"],
-  // jiff offers the Unlicense but publishes only its MIT half.
-  jiff: ["jiff"],
 };
 
 /// Which SPDX id a licence file states, decided by the phrase that only that
@@ -106,29 +109,12 @@ function npmVersion(pkg) {
 
 // --- collect ------------------------------------------------------------------
 
-const listed = JSON.parse(
-  execFileSync(
-    "node",
-    [
-      "--input-type=module",
-      "-e",
-      `import { THIRD_PARTY } from "${path.join(root, "src/lib/thirdParty.js")}";
-       process.stdout.write(JSON.stringify(THIRD_PARTY));`,
-    ],
-    { encoding: "utf8" },
-  ),
-);
+const listed = THIRD_PARTY;
 
 const crateDirs = cargoDirs();
-// A package may need SEVERAL vendored files: geozero is dual-licensed and
-// publishes neither half, so one file per package would leave the reader an
-// option they cannot read.
 const vendoredFor = new Map();
 for (const [file, pkgs] of Object.entries(VENDORED)) {
-  for (const pkg of pkgs) {
-    if (!vendoredFor.has(pkg)) vendoredFor.set(pkg, []);
-    vendoredFor.get(pkg).push(path.join(root, "third-party", `${file}.txt`));
-  }
+  for (const pkg of pkgs) vendoredFor.set(pkg, path.join(root, "third-party", `${file}.txt`));
 }
 
 /// spdx -> sha256 -> { text, packages: Set }
@@ -146,6 +132,13 @@ const versions = {};
 const versionSource = {};
 
 for (const lib of listed) {
+  let shown;
+  try {
+    shown = licenceShown(lib);
+  } catch (err) {
+    problems.push(err.message);
+    continue;
+  }
   for (const pkg of lib.packages) {
     const crate = lib.kind === "rust" ? crateDirs.get(pkg) : null;
     // A bundled component is in the binary without being a package: no
@@ -165,7 +158,7 @@ for (const lib of listed) {
       const dir = lib.kind === "rust" ? crate?.dir : path.join(root, "node_modules", pkg);
       versions[pkg] = lib.kind === "rust" ? crate?.version : npmVersion(pkg);
       files = licenceFiles(dir);
-      if (files.length === 0 && vendoredFor.has(pkg)) files = vendoredFor.get(pkg);
+      if (files.length === 0 && vendoredFor.has(pkg)) files = [vendoredFor.get(pkg)];
     }
     if (files.length === 0) {
       problems.push(
@@ -175,15 +168,15 @@ for (const lib of listed) {
       );
       continue;
     }
-    const matched = new Set();
+    let found = false;
     for (const file of files) {
       const text = fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n").trimEnd();
       const spdx = classify(text);
-      // A file the package ships that states a licence the row does not claim
-      // is not ours to show — csv and jiff ship a COPYING that only explains
-      // the dual licence, for instance.
-      if (!spdx || !lib.licences.includes(spdx)) continue;
-      matched.add(spdx);
+      // Only the licence the row is shown under. A dual-licensed crate's other
+      // file (LICENSE-APACHE beside LICENSE-MIT) is the option not taken, and
+      // csv and jiff also ship a COPYING that only explains the choice.
+      if (spdx !== shown) continue;
+      found = true;
       // Keyed on the WORDS, not the bytes: several packages ship the same
       // licence wrapped differently (301 "changed" lines between two
       // Apache-2.0 files that read identically, measured 2026-09-04). One
@@ -195,15 +188,10 @@ for (const lib of listed) {
       if (!texts.has(key)) texts.set(key, { text, packages: new Set() });
       texts.get(key).packages.add(pkg);
     }
-    // EVERY licence the row offers needs its own text, not just one of them:
-    // a row reading "Unlicense or MIT" with only the MIT text shown lets a
-    // reader take an option they cannot read. csv shipped both and jiff only
-    // one, and checking for a single match hid that.
-    const unevidenced = lib.licences.filter((l) => !matched.has(l));
-    if (unevidenced.length) {
+    if (!found) {
       problems.push(
-        `${pkg}: claims ${lib.licences.join(" or ")} but ships no text for ` +
-          `${unevidenced.join(", ")} (found: ${files.map((f) => path.basename(f)).join(", ") || "nothing"}).`,
+        `${pkg}: shown under ${shown} but ships no ${shown} text ` +
+          `(found: ${files.map((f) => path.basename(f)).join(", ") || "nothing"}).`,
       );
     }
   }
@@ -216,12 +204,10 @@ if (problems.length) {
 
 // --- emit ---------------------------------------------------------------------
 //
-// Licences in the order thirdParty.js first names them, and inside each, the
-// text shared by the most packages first — so the boilerplate one leads and the
-// single-package notices follow, which is the order a reader scans.
-
-const order = [];
-for (const lib of listed) for (const l of lib.licences) if (!order.includes(l)) order.push(l);
+// Licences in the order thirdParty.js first shows them — the order they were
+// first put in a bucket — and inside each, the text shared by the most packages
+// first, so the boilerplate one leads and the single-package notices follow,
+// which is the order a reader scans.
 
 // Package -> the project row it belongs to, so a box can be headed with the
 // names a reader recognises ("Tauri") while the guard still works on the
@@ -234,25 +220,23 @@ const out = {
   generator: "scripts/gen-third-party.mjs",
   versions,
   versionSource,
-  licences: order
-    .filter((spdx) => buckets.has(spdx))
-    .map((spdx) => ({
-      spdx,
-      texts: [...buckets.get(spdx).values()]
-        .map((entry) => {
-          const packages = [...entry.packages].sort();
-          const projects = [];
-          for (const pkg of packages) {
-            const name = projectOf.get(pkg);
-            if (!projects.includes(name)) projects.push(name);
-          }
-          return { projects, packages, text: entry.text };
-        })
-        .sort(
-          (a, b) =>
-            b.packages.length - a.packages.length || a.packages[0].localeCompare(b.packages[0]),
-        ),
-    })),
+  licences: [...buckets.keys()].map((spdx) => ({
+    spdx,
+    texts: [...buckets.get(spdx).values()]
+      .map((entry) => {
+        const packages = [...entry.packages].sort();
+        const projects = [];
+        for (const pkg of packages) {
+          const name = projectOf.get(pkg);
+          if (!projects.includes(name)) projects.push(name);
+        }
+        return { projects, packages, text: entry.text };
+      })
+      .sort(
+        (a, b) =>
+          b.packages.length - a.packages.length || a.packages[0].localeCompare(b.packages[0]),
+      ),
+  })),
 };
 
 // Two-space indent because that is what prettier expects, and this file is

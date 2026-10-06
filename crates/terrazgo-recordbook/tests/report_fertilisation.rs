@@ -46,6 +46,7 @@ fn irrigate(
                 irrigated_area_ha: Some(4.0),
             }],
             water_origins: vec!["groundwater".into()],
+            practices: vec![],
         },
         None,
     )
@@ -152,6 +153,7 @@ fn the_water_quality_cell_folds_two_values_and_stays_blank_when_unstated() {
                 irrigated_area_ha: None,
             }],
             water_origins: vec![],
+            practices: vec![],
         },
         None,
     )
@@ -193,6 +195,7 @@ fn an_irrigation_interval_prints_both_dates() {
                 irrigated_area_ha: None,
             }],
             water_origins: vec![],
+            practices: vec![],
         },
         None,
     )
@@ -221,6 +224,28 @@ fn the_irrigation_sheet_carries_typed_numbers_and_its_own_columns() {
     // Blank, never zero, where nothing was stated.
     assert!(matches!(row[8], terrazgo_report::Cell::Empty));
     assert!(matches!(row[9], terrazgo_report::Cell::Empty));
+}
+
+#[test]
+fn an_irrigations_good_practices_reach_the_sheet_by_name() {
+    // Sheet only, like section 6's: the model has no column, and the practices
+    // are whole sentences no register cell could carry. Named by code alone.
+    let mut conn = db_with_catalogues();
+    let fx = fixture(&mut conn);
+    let detail = irrigate(&mut conn, &fx, "2026-06-14", "drip", 320.0, "m3_ha");
+    conn.execute(
+        "INSERT INTO irrigation_practice (id, irrigation_record_id, practice_code)
+         VALUES ('p1', ?1, '23'), ('p2', ?1, '33')",
+        [&detail.record.id],
+    )
+    .unwrap();
+
+    let book = workbook(&conn, &fx);
+    let row = &sheet(&book, "8 Riego").rows[0];
+    assert!(matches!(
+        &row[11],
+        terrazgo_report::Cell::Text(t) if t == "Riego localizado.; Riego por aspersión nocturno"
+    ));
 }
 
 #[test]
@@ -591,21 +616,23 @@ fn the_fertilisation_sheet_splits_what_the_pdf_folds_into_one_cell() {
 }
 
 #[test]
-fn good_practices_reach_the_sheet_resolved_in_their_own_scope() {
+fn good_practices_reach_the_sheet_named_by_their_code_alone() {
     use terrazgo_report::Cell;
     // The SIEX twin requires `BuenasPracticas` while the printed model has no
     // column for it, so the practices are captured and appear only here — as
-    // whole sentences no register cell could carry. The catalogue holds three
-    // vocabularies keyed by ámbito and the same integer means a different
-    // practice in each, so resolving without the scope would print an
-    // irrigation practice on a fertilisation record.
+    // whole sentences no register cell could carry. The catalogue is one list
+    // for three ámbitos and a practice keeps its code and wording in each, so
+    // the code alone names it — including one a fertilisation is not offered
+    // today. The file takes a practice out of an ámbito by turning its "SI"
+    // into "NO", and a record that claimed it before must still print its name
+    // rather than a bare number.
     let mut conn = db_with_catalogues();
     let fx = fixture(&mut conn);
     let material_id = nac27(&mut conn);
     let created = fertilise(&mut conn, &fx, &material_id, "top_dressing", "broadcast");
     conn.execute(
         "INSERT INTO fertilisation_practice (id, fertilisation_record_id, practice_code)
-         VALUES ('p1', ?1, '3')",
+         VALUES ('p1', ?1, '3'), ('p2', ?1, '23')",
         [&created.record.id],
     )
     .unwrap();
@@ -616,8 +643,8 @@ fn good_practices_reach_the_sheet_resolved_in_their_own_scope() {
         other => panic!("expected text, got {other:?}"),
     };
     assert_eq!(
-        practices, "Aplicación de purines mediante inyección",
-        "code 3 in the Fertilización ámbito — not what 3 means under Riego"
+        practices, "Aplicación de purines mediante inyección; Riego localizado.",
+        "23 is irrigation's alone, and still prints its name"
     );
 }
 

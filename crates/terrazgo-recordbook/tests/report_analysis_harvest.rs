@@ -9,8 +9,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 
 // ---------------------------------------------------------------------------
@@ -394,10 +394,14 @@ fn the_water_sheet_writes_a_declared_plot_as_a_single_row() {
 // Anexo III A.3 — the soil block, and the second decree's annex additions
 // ---------------------------------------------------------------------------
 
-fn soil_analysis(conn: &mut Connection, fx: &Fixture, soil: module_cue::models::SoilParameters) {
-    module_cue::repository::insert_analysis_record(
+fn soil_analysis(
+    conn: &mut Connection,
+    fx: &Fixture,
+    soil: module_phytosanitary::models::SoilParameters,
+) {
+    module_phytosanitary::repository::insert_analysis_record(
         conn,
-        module_cue::models::NewAnalysisRecord {
+        module_phytosanitary::models::NewAnalysisRecord {
             season_id: fx.season_id.clone(),
             farm_id: fx.farm_id.clone(),
             sampled_on: "2025-09-08".into(),
@@ -409,7 +413,7 @@ fn soil_analysis(conn: &mut Connection, fx: &Fixture, soil: module_cue::models::
             substances_detected: None,
             soil,
             notes: None,
-            plots: vec![module_cue::models::NewAnalysisPlot {
+            plots: vec![module_phytosanitary::models::NewAnalysisPlot {
                 plot_id: fx.wheat_plot_id.clone(),
                 crop_id: None,
             }],
@@ -428,7 +432,7 @@ fn soil_figures_ride_in_the_findings_cell_the_model_has_no_page_for() {
     soil_analysis(
         &mut conn,
         &fx,
-        module_cue::models::SoilParameters {
+        module_phytosanitary::models::SoilParameters {
             ph: Some(6.8),
             organic_matter_pct: Some(2.1),
             available_p_mg_kg: Some(18.0),
@@ -460,7 +464,7 @@ fn a_partial_bulletin_prints_only_what_it_reported() {
     soil_analysis(
         &mut conn,
         &fx,
-        module_cue::models::SoilParameters {
+        module_phytosanitary::models::SoilParameters {
             ph: Some(7.4),
             organic_matter_pct: Some(1.8),
             ..Default::default()
@@ -496,7 +500,7 @@ fn the_soil_tab_gives_every_parameter_a_column_of_real_numbers() {
     soil_analysis(
         &mut conn,
         &fx,
-        module_cue::models::SoilParameters {
+        module_phytosanitary::models::SoilParameters {
             ph: Some(6.8),
             organic_matter_pct: Some(2.1),
             available_p_mg_kg: Some(18.0),

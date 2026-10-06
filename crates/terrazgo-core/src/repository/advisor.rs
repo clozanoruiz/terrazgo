@@ -11,10 +11,11 @@
 //! still resolve the advisor it named.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{Advisor, FarmAdvisor, FarmAdvisorDetail, NewAdvisor, UpdateAdvisor};
+use crate::sync::{FARM_ADVISOR_SLOT, slot_id_of};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use uuid::Uuid;
 
@@ -24,7 +25,7 @@ pub fn insert_advisor(
     actor: Option<&str>,
 ) -> Result<Advisor> {
     validate_name(&new.name)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let now = now_utc_iso();
     let advisor = Advisor {
         id: Uuid::now_v7().to_string(),
@@ -47,7 +48,8 @@ pub fn insert_advisor(
             advisor.updated_at
         ],
     )?;
-    log_insert(&tx, "advisor", &advisor.id, None, actor, &advisor)?;
+    let stamp = tx.register("advisor", &advisor.id, None)?;
+    log_insert(&tx, &stamp, "advisor", &advisor.id, &advisor)?;
     tx.commit()?;
     Ok(advisor)
 }
@@ -69,7 +71,7 @@ pub fn update_advisor(
     actor: Option<&str>,
 ) -> Result<Advisor> {
     validate_name(&update.name)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM advisor WHERE id = ?1 AND deleted_at IS NULL",
@@ -96,7 +98,8 @@ pub fn update_advisor(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "advisor", id, None, actor, &before, &after)?;
+    let stamp = tx.register("advisor", id, None)?;
+    log_update(&tx, &stamp, "advisor", id, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
@@ -106,7 +109,7 @@ pub fn update_advisor(
 /// Every removed link is logged on its own, so the audit trail says which
 /// holdings the removal touched.
 pub fn soft_delete_advisor(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM advisor WHERE id = ?1 AND deleted_at IS NULL",
@@ -116,6 +119,7 @@ pub fn soft_delete_advisor(conn: &mut Connection, id: &str, actor: Option<&str>)
         .optional()?
         .ok_or(CoreError::NotFound)?;
     let now = now_utc_iso();
+    let stamp = tx.register("advisor", id, None)?;
 
     let links = {
         let mut stmt =
@@ -131,12 +135,14 @@ pub fn soft_delete_advisor(conn: &mut Connection, id: &str, actor: Option<&str>)
             "UPDATE farm_advisor SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
             params![link.id, now],
         )?;
+        // Each link is a register of its own, withdrawn in this same change set.
+        let link_stamp =
+            tx.register("farm_advisor", &slot_id_of(&link, FARM_ADVISOR_SLOT)?, None)?;
         log_delete(
             &tx,
+            &link_stamp,
             "farm_advisor",
             &link.id,
-            None,
-            actor,
             &link,
             Some(&after),
         )?;
@@ -149,7 +155,7 @@ pub fn soft_delete_advisor(conn: &mut Connection, id: &str, actor: Option<&str>)
         "UPDATE advisor SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "advisor", id, None, actor, &before, Some(&after))?;
+    log_delete(&tx, &stamp, "advisor", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -211,7 +217,7 @@ pub fn set_farm_advisor(
     gip_system_code: Option<String>,
     actor: Option<&str>,
 ) -> Result<FarmAdvisor> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     // Both ends must exist and be active: a link to a deleted advisor would
     // print a name the registry no longer shows.
     let known: i64 = tx.query_row(
@@ -242,7 +248,12 @@ pub fn set_farm_advisor(
                 "UPDATE farm_advisor SET gip_system_code = ?2, updated_at = ?3 WHERE id = ?1",
                 params![after.id, after.gip_system_code, after.updated_at],
             )?;
-            log_update(&tx, "farm_advisor", &after.id, None, actor, &before, &after)?;
+            let stamp = tx.register(
+                "farm_advisor",
+                &slot_id_of(&after, FARM_ADVISOR_SLOT)?,
+                None,
+            )?;
+            log_update(&tx, &stamp, "farm_advisor", &after.id, &before, &after)?;
             after
         }
         None => {
@@ -268,7 +279,9 @@ pub fn set_farm_advisor(
                     link.updated_at
                 ],
             )?;
-            log_insert(&tx, "farm_advisor", &link.id, None, actor, &link)?;
+            let stamp =
+                tx.register("farm_advisor", &slot_id_of(&link, FARM_ADVISOR_SLOT)?, None)?;
+            log_insert(&tx, &stamp, "farm_advisor", &link.id, &link)?;
             link
         }
     };
@@ -279,7 +292,7 @@ pub fn set_farm_advisor(
 /// Detach an advisor from a farm. Soft delete: the link is history of who
 /// advised the holding, and re-attaching later writes a fresh row.
 pub fn remove_farm_advisor(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM farm_advisor WHERE id = ?1 AND deleted_at IS NULL",
@@ -296,7 +309,12 @@ pub fn remove_farm_advisor(conn: &mut Connection, id: &str, actor: Option<&str>)
         "UPDATE farm_advisor SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(&tx, "farm_advisor", id, None, actor, &before, Some(&after))?;
+    let stamp = tx.register(
+        "farm_advisor",
+        &slot_id_of(&before, FARM_ADVISOR_SLOT)?,
+        None,
+    )?;
+    log_delete(&tx, &stamp, "farm_advisor", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }

@@ -5,7 +5,7 @@
 //! machinery — their CRUD, their soft-delete rules, and the list functions the
 //! treatment entry UI reads its selectors from.
 //!
-//! These moved into core from module-cue when the farm registry did; the
+//! These moved into core from module-phytosanitary when the farm registry did; the
 //! Spanish regulatory meaning of each is in docs/data-model.md.
 // Test code may unwrap (clippy.toml exempts tests); the workspace lint only
 // auto-allows #[test] fns, so file-level for the shared fixtures/helpers too.
@@ -20,8 +20,8 @@ use terrazgo_core::models::*;
 use terrazgo_core::repository as repo;
 
 // ---------------------------------------------------------------------------
-// Season, crop, operator, machinery. These moved here from module-cue
-// (2026-06-12); the CUE suite exercises them through fixtures, but their
+// Season, crop, operator, machinery. These moved here from module-phytosanitary
+// (2026-06-12); the phytosanitary suite exercises them through fixtures, but their
 // contracts belong to this crate's tests.
 // ---------------------------------------------------------------------------
 
@@ -48,13 +48,14 @@ fn base_crop(plot_id: &str, season_id: &str) -> NewCrop {
 #[test]
 fn insert_season_starts_active_and_logs_full_image() {
     let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let season = repo::insert_season(
         &mut conn,
         NewSeason {
-            campaign_year: 2026,
-            label: "2026".into(),
-            starts_on: Some("2025-09-01".into()),
-            ends_on: None,
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -62,6 +63,7 @@ fn insert_season_starts_active_and_logs_full_image() {
 
     assert_eq!(season.id.len(), 36, "UUIDv7 TEXT id");
     assert_eq!(season.status, "active", "a new season starts active");
+    assert_eq!(season.label, "2025/2026", "the dates name an unnamed book");
 
     let (op, before, after) = last_change(&conn, "season", &season.id);
     assert_eq!(op, "insert");
@@ -69,8 +71,9 @@ fn insert_season_starts_active_and_logs_full_image() {
     // Complete row image: every column present, absent optionals as null.
     for column in [
         "id",
-        "campaign_year",
+        "farm_id",
         "label",
+        "custom_label",
         "starts_on",
         "ends_on",
         "status",
@@ -83,86 +86,132 @@ fn insert_season_starts_active_and_logs_full_image() {
             "after-image is missing column '{column}'"
         );
     }
-    assert_eq!(after["campaign_year"], 2026);
-    assert_eq!(after["ends_on"], Value::Null);
+    assert_eq!(after["farm_id"], farm.id.as_str());
+    assert_eq!(after["label"], "2025/2026");
+    assert_eq!(after["custom_label"], Value::Null);
+    assert_eq!(after["ends_on"], "2026-08-31");
     assert_eq!(after["deleted_at"], Value::Null);
 }
 
 #[test]
 fn update_season_replaces_fields_and_logs_complete_images() {
     let mut conn = db();
-    let season = repo::insert_season(&mut conn, new_season(2025, "2025 (typo)"), None).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let season =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2025, "2025 (typo)"), None).unwrap();
 
     let updated = repo::update_season(
         &mut conn,
         &season.id,
         UpdateSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: Some("2025-09-01".into()),
-            ends_on: Some("2026-08-31".into()),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
     .unwrap();
 
-    assert_eq!(updated.campaign_year, 2026);
+    // The typed name is gone, so the dates name the book again.
     assert_eq!(updated.label, "2025/2026");
-    assert_eq!(updated.starts_on.as_deref(), Some("2025-09-01"));
+    assert_eq!(updated.custom_label, None);
+    assert_eq!(updated.starts_on, "2025-09-01");
     // Untouched by the update: archiving is a separate lifecycle action.
     assert_eq!(updated.status, "active");
 
     let (op, before, after) = last_change(&conn, "season", &season.id);
     assert_eq!(op, "update");
     assert_eq!(before["label"], "2025 (typo)");
-    assert_eq!(before["campaign_year"], 2025);
+    assert_eq!(before["custom_label"], "2025 (typo)");
     assert_eq!(after["label"], "2025/2026");
-    assert_eq!(after["campaign_year"], 2026);
+    assert_eq!(after["custom_label"], Value::Null);
     assert_eq!(after["ends_on"], "2026-08-31");
 }
 
 #[test]
-fn update_season_rejects_a_blank_label_and_an_unknown_id() {
+fn update_season_rejects_reversed_dates_and_an_unknown_id() {
     let mut conn = db();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
 
-    let blank = repo::update_season(
+    let reversed = repo::update_season(
         &mut conn,
         &season.id,
         UpdateSeason {
-            campaign_year: 2026,
-            label: "   ".into(),
-            starts_on: None,
-            ends_on: None,
+            starts_on: "2026-08-31".into(),
+            ends_on: "2025-09-01".into(),
+            custom_label: None,
         },
         None,
     );
-    assert!(matches!(blank, Err(CoreError::Invalid("empty_name"))));
+    assert!(matches!(
+        reversed,
+        Err(CoreError::Invalid("invalid_date_interval"))
+    ));
 
     let missing = repo::update_season(
         &mut conn,
         "no-such-season",
         UpdateSeason {
-            campaign_year: 2026,
-            label: "2026".into(),
-            starts_on: None,
-            ends_on: None,
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     );
     assert!(matches!(missing, Err(CoreError::NotFound)));
 }
 
+/// The name is derived again on every correction: fixing a date renames a book
+/// its dates name, and leaves alone a book the farmer named.
 #[test]
-fn soft_delete_season_hides_an_empty_season_and_logs_both_images() {
+fn correcting_the_dates_renames_only_a_book_the_dates_name() {
     let mut conn = db();
-    let keep = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
-    let mistake = repo::insert_season(&mut conn, new_season(2027, "2027 (mistake)"), None).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let dated =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+    let named =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2027, "Olivar 2027"), None).unwrap();
 
-    repo::soft_delete_season(&mut conn, &mistake.id, None).unwrap();
+    let calendar = |custom: Option<&str>| UpdateSeason {
+        starts_on: "2026-01-01".into(),
+        ends_on: "2026-12-31".into(),
+        custom_label: custom.map(str::to_string),
+    };
+    let renamed = repo::update_season(&mut conn, &dated.id, calendar(None), None).unwrap();
+    assert_eq!(renamed.label, "2026");
 
-    let ids: Vec<String> = repo::list_seasons(&conn)
+    let kept = repo::update_season(
+        &mut conn,
+        &named.id,
+        UpdateSeason {
+            starts_on: "2026-10-01".into(),
+            ends_on: "2027-09-30".into(),
+            custom_label: Some("Olivar 2027".into()),
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(kept.label, "Olivar 2027");
+}
+
+#[test]
+fn deleting_an_empty_book_hides_it_and_logs_both_images() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let keep = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
+    let mistake = repo::insert_season(
+        &mut conn,
+        new_season(&farm.id, 2027, "2027 (mistake)"),
+        None,
+    )
+    .unwrap();
+
+    repo::delete_book(&mut conn, &mistake.id, &[], None).unwrap();
+
+    let ids: Vec<String> = repo::list_seasons(&conn, 100, 0)
         .unwrap()
+        .seasons
         .into_iter()
         .map(|s| s.id)
         .collect();
@@ -176,20 +225,57 @@ fn soft_delete_season_hides_an_empty_season_and_logs_both_images() {
 
     // Deleting twice is a not-found, like every other soft delete.
     assert!(matches!(
-        repo::soft_delete_season(&mut conn, &mistake.id, None),
+        repo::delete_book(&mut conn, &mistake.id, &[], None),
         Err(CoreError::NotFound)
     ));
 }
 
-/// Only an EMPTY season may be deleted: hiding one that owns records would hide
-/// the records with it, since every record-book view is season-scoped. Core
-/// guards its own half (crops); the shell chains module-cue for treatments.
+/// What a screen picking one of a farm's books offers: that farm's live books,
+/// the latest ending first — never another farm's, never a removed one, and
+/// none at all for a removed farm.
 #[test]
-fn soft_delete_season_is_refused_while_a_crop_references_it() {
+fn a_farm_lists_its_own_live_books_latest_first() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Los Llanos"), None).unwrap();
+    let neighbour = repo::insert_farm(&mut conn, new_farm("El Soto"), None).unwrap();
+    let older =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2025, "2024/2025"), None).unwrap();
+    let newer =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+    let removed =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2027, "2026/2027"), None).unwrap();
+    repo::delete_book(&mut conn, &removed.id, &[], None).unwrap();
+    let theirs = repo::insert_season(
+        &mut conn,
+        new_season(&neighbour.id, 2026, "2025/2026"),
+        None,
+    )
+    .unwrap();
+
+    let ids = |conn: &rusqlite::Connection, farm_id: &str| -> Vec<String> {
+        repo::list_farm_seasons(conn, farm_id)
+            .unwrap()
+            .into_iter()
+            .map(|season| season.id)
+            .collect()
+    };
+    assert_eq!(ids(&conn, &farm.id), vec![newer.id, older.id]);
+    assert_eq!(ids(&conn, &neighbour.id), vec![theirs.id]);
+
+    // The book itself is still live: the farm going is what takes it out.
+    repo::soft_delete_farm(&mut conn, &neighbour.id, None).unwrap();
+    assert!(ids(&conn, &neighbour.id).is_empty());
+}
+
+/// A book is deleted with what is in it: every record-book view is
+/// season-scoped, so a book removed around a live crop would hide the crop
+/// (docs/sync.md → Deleting a book with its records).
+#[test]
+fn deleting_a_book_takes_its_crops_with_it() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let crop = repo::insert_crop(
         &mut conn,
         NewCrop {
@@ -211,16 +297,27 @@ fn soft_delete_season_is_refused_while_a_crop_references_it() {
     )
     .unwrap();
 
-    assert!(matches!(
-        repo::soft_delete_season(&mut conn, &season.id, None),
-        Err(CoreError::Invalid("season_in_use"))
-    ));
-    assert_eq!(repo::list_seasons(&conn).unwrap().len(), 1, "still there");
+    assert_eq!(repo::count_book_records(&conn, &season.id).unwrap(), 1);
 
-    // A soft-deleted crop no longer holds the season down.
-    repo::soft_delete_crop(&mut conn, &crop.id, None).unwrap();
-    repo::soft_delete_season(&mut conn, &season.id, None).unwrap();
-    assert!(repo::list_seasons(&conn).unwrap().is_empty());
+    assert_eq!(
+        repo::delete_book(&mut conn, &season.id, &[], None).unwrap(),
+        1,
+        "the crop went with its book"
+    );
+    assert!(
+        repo::list_seasons(&conn, 100, 0)
+            .unwrap()
+            .seasons
+            .is_empty()
+    );
+    let (op, before, after) = last_change(&conn, "crop", &crop.id);
+    assert_eq!(op, "delete");
+    assert_eq!(before["deleted_at"], Value::Null);
+    assert!(
+        after["deleted_at"].is_string(),
+        "removed, as its own delete would"
+    );
+    assert_eq!(after["species_name"], "cebada", "complete after-image");
 }
 
 #[test]
@@ -231,10 +328,10 @@ fn insert_crop_ties_plot_to_season_and_logs_full_image() {
     let season = repo::insert_season(
         &mut conn,
         NewSeason {
-            campaign_year: 2026,
-            label: "2026".into(),
-            starts_on: None,
-            ends_on: None,
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: Some("2026".into()),
         },
         None,
     )
@@ -292,7 +389,7 @@ fn update_crop_replaces_fields_and_keeps_it_on_its_plot_and_season() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let crop = repo::insert_crop(
         &mut conn,
         NewCrop {
@@ -376,7 +473,7 @@ fn insert_crop_defaults_source_to_user() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let crop = repo::insert_crop(&mut conn, base_crop(&plot.id, &season.id), None).unwrap();
 
     assert_eq!(crop.source, "user");
@@ -392,7 +489,7 @@ fn insert_crop_with_provenance_persists_and_logs_it() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let crop = repo::insert_crop(
         &mut conn,
         NewCrop {
@@ -429,7 +526,7 @@ fn update_crop_keeps_provenance_the_form_does_not_send() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let crop = repo::insert_crop(
         &mut conn,
         NewCrop {
@@ -482,7 +579,7 @@ fn soft_delete_crop_hides_it_and_logs_both_images() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let new_crop = |species: &str| NewCrop {
         plot_id: plot.id.clone(),
         season_id: season.id.clone(),
@@ -529,7 +626,7 @@ fn season_and_crop_changes_record_their_season_scope() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let crop = repo::insert_crop(
         &mut conn,
         NewCrop {
@@ -591,13 +688,14 @@ fn season_and_crop_changes_record_their_season_scope() {
 #[test]
 fn insert_crop_with_unknown_plot_is_rejected_by_the_schema() {
     let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let season = repo::insert_season(
         &mut conn,
         NewSeason {
-            campaign_year: 2026,
-            label: "2026".into(),
-            starts_on: None,
-            ends_on: None,
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: Some("2026".into()),
         },
         None,
     )
@@ -667,7 +765,7 @@ fn insert_operator_round_trips_and_logs_full_image() {
     assert_eq!(after["licence_expiry_date"], "2027-03-01");
 }
 
-/// Complements module-cue's with-extension test (which asserts core row and
+/// Complements module-phytosanitary's with-extension test (which asserts core row and
 /// registry extension are logged separately): without any registry number
 /// (ROMA or REGANIP) there must be no extension row and no extension log
 /// entry at all.
@@ -720,25 +818,396 @@ fn insert_machinery_without_registry_numbers_writes_no_extension() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn list_seasons_orders_newest_campaign_first() {
+fn list_seasons_orders_the_latest_ending_first() {
     let mut conn = db();
-    repo::insert_season(&mut conn, new_season(2025, "2025"), None).unwrap();
-    repo::insert_season(&mut conn, new_season(2027, "2027"), None).unwrap();
-    repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(&farm.id, 2025, "2024/2025"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(&farm.id, 2027, "2026/2027"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
 
-    let years: Vec<i64> = repo::list_seasons(&conn)
+    let labels: Vec<String> = repo::list_seasons(&conn, 100, 0)
         .unwrap()
-        .iter()
-        .map(|s| s.campaign_year)
+        .seasons
+        .into_iter()
+        .map(|s| s.label)
         .collect();
-    assert_eq!(years, vec![2027, 2026, 2025]);
+    assert_eq!(labels, vec!["2026/2027", "2025/2026", "2024/2025"]);
+}
+
+/// The record book list pages: latest ending first, then farm name, and every
+/// page reports the total a page control draws its pages from.
+#[test]
+fn list_seasons_pages_newest_campaign_then_farm() {
+    let mut conn = db();
+    let vega = repo::insert_farm(&mut conn, new_farm("La Vega"), None).unwrap();
+    let alamo = repo::insert_farm(&mut conn, new_farm("Alamo"), None).unwrap();
+    for year in [2024, 2025, 2026] {
+        for farm in [&vega, &alamo] {
+            repo::insert_season(
+                &mut conn,
+                new_season(&farm.id, year, &year.to_string()),
+                None,
+            )
+            .unwrap();
+        }
+    }
+    let names = |page: &SeasonPage| -> Vec<(i64, String)> {
+        page.seasons
+            .iter()
+            .map(|s| {
+                let farm = if s.farm_id == vega.id {
+                    "La Vega"
+                } else {
+                    "Alamo"
+                };
+                (s.ends_on[..4].parse().unwrap(), farm.to_string())
+            })
+            .collect()
+    };
+
+    let first = repo::list_seasons(&conn, 4, 0).unwrap();
+    assert_eq!(first.total, 6);
+    assert_eq!(
+        names(&first),
+        vec![
+            (2026, "Alamo".to_string()),
+            (2026, "La Vega".to_string()),
+            (2025, "Alamo".to_string()),
+            (2025, "La Vega".to_string()),
+        ]
+    );
+    let second = repo::list_seasons(&conn, 4, 4).unwrap();
+    assert_eq!(second.total, 6, "every page carries the whole total");
+    assert_eq!(
+        names(&second),
+        vec![(2024, "Alamo".to_string()), (2024, "La Vega".to_string())]
+    );
+    assert!(repo::list_seasons(&conn, 4, 8).unwrap().seasons.is_empty());
+}
+
+/// The page size is the caller's to choose within bounds, never unbounded: the
+/// list is paged precisely because rows rendered are the cost.
+#[test]
+fn list_seasons_clamps_its_page_size_and_offset() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    for year in 2020..2023 {
+        repo::insert_season(
+            &mut conn,
+            new_season(&farm.id, year, &year.to_string()),
+            None,
+        )
+        .unwrap();
+    }
+    assert_eq!(
+        repo::list_seasons(&conn, 0, 0).unwrap().seasons.len(),
+        1,
+        "at least one"
+    );
+    assert_eq!(
+        repo::list_seasons(&conn, i64::MAX, -5)
+            .unwrap()
+            .seasons
+            .len(),
+        3,
+        "a huge limit is cut to the maximum and a negative offset reads as the start"
+    );
+    // The view asks for 100 a page, so the ceiling must allow it — checked when
+    // the test compiles, being a fact about two constants.
+    const _: () = assert!(
+        repo::SEASON_PAGE_MAX >= 100,
+        "a page of 100 must be possible"
+    );
+}
+
+/// A name typed as spaces is no name: the dates name the book, rather than the
+/// save being refused over a field the farmer may leave blank.
+#[test]
+fn a_blank_name_lets_the_dates_name_the_book() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "   "), None).unwrap();
+    assert_eq!(season.label, "2025/2026");
+    assert_eq!(season.custom_label, None);
 }
 
 #[test]
-fn season_validation_rejects_blank_label() {
+fn a_season_ending_before_it_starts_is_refused() {
     let mut conn = db();
-    let result = repo::insert_season(&mut conn, new_season(2026, "   "), None);
-    assert!(matches!(result, Err(CoreError::Invalid("empty_name"))));
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let result = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2026-08-31".into(),
+            ends_on: "2025-09-01".into(),
+            custom_label: None,
+        },
+        None,
+    );
+    assert!(matches!(
+        result,
+        Err(CoreError::Invalid("invalid_date_interval"))
+    ));
+}
+
+// ---------------------------------------------------------------------------
+// A season is one holding's campaign, and so one record book (2026-09-16)
+// ---------------------------------------------------------------------------
+
+/// Books are told apart by name: a holding may keep several campaigns in one
+/// year, but never two books a list, a printed cover or an export file name
+/// could not distinguish.
+#[test]
+fn a_farm_may_keep_two_campaigns_in_one_year_under_different_names() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let spring = |custom: Option<&str>| NewSeason {
+        farm_id: farm.id.clone(),
+        starts_on: "2026-02-01".into(),
+        ends_on: "2026-06-30".into(),
+        custom_label: custom.map(str::to_string),
+    };
+    let autumn = |custom: Option<&str>| NewSeason {
+        farm_id: farm.id.clone(),
+        starts_on: "2026-07-01".into(),
+        ends_on: "2026-11-30".into(),
+        custom_label: custom.map(str::to_string),
+    };
+    let first = repo::insert_season(&mut conn, spring(None), None).unwrap();
+    assert_eq!(first.label, "2026");
+
+    // The dates alone would name the second one "2026" too.
+    assert!(matches!(
+        repo::insert_season(&mut conn, autumn(None), None),
+        Err(CoreError::Invalid("season_name_taken"))
+    ));
+    assert_eq!(
+        repo::list_seasons(&conn, 100, 0).unwrap().total,
+        1,
+        "nothing written"
+    );
+
+    let second = repo::insert_season(&mut conn, autumn(Some("2026 otoño")), None).unwrap();
+    assert_eq!(second.label, "2026 otoño");
+    assert_eq!(repo::list_seasons(&conn, 100, 0).unwrap().total, 2);
+}
+
+#[test]
+fn another_farm_may_keep_a_book_of_the_same_name() {
+    let mut conn = db();
+    let farm_a = repo::insert_farm(&mut conn, new_farm("Finca A"), None).unwrap();
+    let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B"), None).unwrap();
+    let a =
+        repo::insert_season(&mut conn, new_season(&farm_a.id, 2026, "2025/2026"), None).unwrap();
+    let b =
+        repo::insert_season(&mut conn, new_season(&farm_b.id, 2026, "2025/2026"), None).unwrap();
+
+    assert_ne!(a.id, b.id, "one row per farm, not one shared campaign row");
+    assert_eq!(
+        (a.label.as_str(), b.label.as_str()),
+        ("2025/2026", "2025/2026")
+    );
+    assert_eq!(b.farm_id, farm_b.id);
+}
+
+#[test]
+fn correcting_a_book_into_a_name_the_farm_already_uses_is_refused() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+    let later =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2027, "2026/2027"), None).unwrap();
+
+    // Moving its dates back a year would name it "2025/2026" too.
+    assert!(matches!(
+        repo::update_season(
+            &mut conn,
+            &later.id,
+            UpdateSeason {
+                starts_on: "2025-09-01".into(),
+                ends_on: "2026-08-31".into(),
+                custom_label: None,
+            },
+            None,
+        ),
+        Err(CoreError::Invalid("season_name_taken"))
+    ));
+
+    // Keeping its own name is not a collision with itself.
+    let corrected = repo::update_season(
+        &mut conn,
+        &later.id,
+        UpdateSeason {
+            starts_on: "2026-10-01".into(),
+            ends_on: "2027-08-31".into(),
+            custom_label: None,
+        },
+        None,
+    )
+    .unwrap();
+    assert_eq!(corrected.label, "2026/2027");
+}
+
+#[test]
+fn a_deleted_book_frees_its_name() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let mistake =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+    repo::delete_book(&mut conn, &mistake.id, &[], None).unwrap();
+
+    let again = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None);
+    assert!(again.is_ok(), "the name rule counts live books only");
+}
+
+// --- one campaign, one id (docs/sync.md → Seasons created on two devices) ---
+
+#[test]
+fn two_devices_creating_one_campaign_create_one_book() {
+    // The id is derived from the farm and the dates, so the two devices never
+    // had to agree on anything: the same campaign IS the same row.
+    let farm = "0192f3a4-0000-7000-8000-00000000000f";
+    assert_eq!(
+        repo::season_id(farm, "2026-09-01", "2027-08-31"),
+        repo::season_id(farm, "2026-09-01", "2027-08-31")
+    );
+}
+
+#[test]
+fn recreating_a_deleted_book_revives_it_rather_than_making_a_second() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let mistake =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+    repo::delete_book(&mut conn, &mistake.id, &[], None).unwrap();
+
+    let again =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "Campaña buena"), None).unwrap();
+
+    assert_eq!(
+        again.id, mistake.id,
+        "a campaign has one id on this farm forever — a second would be a book \
+         no other device could recognise as the same one"
+    );
+    assert_eq!(again.label, "Campaña buena", "revived with the new name");
+    assert!(again.deleted_at.is_none() && again.status == "active");
+    assert_eq!(repo::get_season(&conn, &mistake.id).unwrap().id, mistake.id);
+
+    let books: i64 = conn
+        .query_row("SELECT COUNT(*) FROM season", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(books, 1, "revived in place, not inserted beside itself");
+}
+
+#[test]
+fn a_revival_continues_the_register_rather_than_starting_one() {
+    // It is logged as an update, so the register's version vector carries on
+    // from where the deletion left it — which is what lets another device merge
+    // the revival instead of seeing an unrelated book appear.
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let season =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+    repo::delete_book(&mut conn, &season.id, &[], None).unwrap();
+    repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+
+    let operations: Vec<String> = conn
+        .prepare(
+            "SELECT operation FROM record_change
+             WHERE entity_table = 'season' AND entity_id = ?1 ORDER BY id",
+        )
+        .unwrap()
+        .query_map([&season.id], |r| r.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .unwrap();
+    assert_eq!(operations, ["insert", "delete", "update"]);
+}
+
+#[test]
+fn a_second_live_book_for_the_same_dates_is_refused_legibly() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
+
+    // A different NAME, so the older rule would have allowed it; the dates are
+    // what make it the same campaign.
+    let twin = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "Otro nombre"), None);
+    assert!(matches!(
+        twin,
+        Err(CoreError::Invalid("season_dates_taken"))
+    ));
+}
+
+#[test]
+fn get_season_opens_a_live_book_and_nothing_else() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
+
+    let opened = repo::get_season(&conn, &season.id).unwrap();
+    assert_eq!(opened.id, season.id);
+    assert_eq!(opened.farm_id, farm.id, "the book says whose it is");
+
+    assert!(matches!(
+        repo::get_season(&conn, "no-such-season"),
+        Err(CoreError::NotFound)
+    ));
+    repo::delete_book(&mut conn, &season.id, &[], None).unwrap();
+    assert!(matches!(
+        repo::get_season(&conn, &season.id),
+        Err(CoreError::NotFound)
+    ));
+}
+
+/// A deleted farm's books leave the list and stop opening, as the farm leaves
+/// every farm picker — the same population in both places.
+#[test]
+fn a_deleted_farms_books_leave_the_list() {
+    let mut conn = db();
+    let kept = repo::insert_farm(&mut conn, new_farm("Finca A"), None).unwrap();
+    let gone = repo::insert_farm(&mut conn, new_farm("Finca B"), None).unwrap();
+    let kept_book =
+        repo::insert_season(&mut conn, new_season(&kept.id, 2026, "2026"), None).unwrap();
+    let gone_book =
+        repo::insert_season(&mut conn, new_season(&gone.id, 2026, "2026"), None).unwrap();
+
+    repo::soft_delete_farm(&mut conn, &gone.id, None).unwrap();
+
+    let ids: Vec<String> = repo::list_seasons(&conn, 100, 0)
+        .unwrap()
+        .seasons
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(ids, vec![kept_book.id]);
+    assert!(matches!(
+        repo::get_season(&conn, &gone_book.id),
+        Err(CoreError::NotFound)
+    ));
+}
+
+/// The crop is the one season-scoped table the schema cannot hold to its farm:
+/// it reaches the farm through its plot, so `insert_crop` checks. A crop on
+/// farm B filed under farm A's season would be listed in neither book.
+#[test]
+fn insert_crop_refuses_a_season_of_another_farm() {
+    let mut conn = db();
+    let farm_a = repo::insert_farm(&mut conn, new_farm("Finca A"), None).unwrap();
+    let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B"), None).unwrap();
+    let plot_b = repo::insert_plot(&mut conn, new_plot(&farm_b.id, "B1"), None).unwrap();
+    let season_a =
+        repo::insert_season(&mut conn, new_season(&farm_a.id, 2026, "2026"), None).unwrap();
+
+    assert!(matches!(
+        repo::insert_crop(&mut conn, base_crop(&plot_b.id, &season_a.id), None),
+        Err(CoreError::Invalid("season_not_on_farm"))
+    ));
+    let crops: i64 = conn
+        .query_row("SELECT COUNT(*) FROM crop", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(crops, 0, "refused before anything was written");
 }
 
 #[test]
@@ -746,7 +1215,7 @@ fn crop_validation_rejects_blank_species() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
 
     let result = repo::insert_crop(
         &mut conn,
@@ -777,8 +1246,14 @@ fn list_crops_is_per_season_and_farm() {
     let farm_b = repo::insert_farm(&mut conn, new_farm("Finca B"), None).unwrap();
     let plot_a = repo::insert_plot(&mut conn, new_plot(&farm_a.id, "A1"), None).unwrap();
     let plot_b = repo::insert_plot(&mut conn, new_plot(&farm_b.id, "B1"), None).unwrap();
-    let season_1 = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
-    let season_2 = repo::insert_season(&mut conn, new_season(2027, "2027"), None).unwrap();
+    let season_1 =
+        repo::insert_season(&mut conn, new_season(&farm_a.id, 2026, "2026"), None).unwrap();
+    let season_2 =
+        repo::insert_season(&mut conn, new_season(&farm_a.id, 2027, "2027"), None).unwrap();
+    // Farm B's own 2026: a season belongs to one farm, so B's crops cannot be
+    // filed under season 1.
+    let season_b =
+        repo::insert_season(&mut conn, new_season(&farm_b.id, 2026, "2026"), None).unwrap();
 
     let crop = |plot_id: &str, season_id: &str, species: &str| NewCrop {
         plot_id: plot_id.into(),
@@ -798,14 +1273,22 @@ fn list_crops_is_per_season_and_farm() {
     // Only this one matches (farm A, season 1):
     let wheat =
         repo::insert_crop(&mut conn, crop(&plot_a.id, &season_1.id, "trigo"), None).unwrap();
-    // Same farm, other season; other farm, same season:
+    // Same farm, other season; other farm, same campaign year:
     repo::insert_crop(&mut conn, crop(&plot_a.id, &season_2.id, "cebada"), None).unwrap();
-    repo::insert_crop(&mut conn, crop(&plot_b.id, &season_1.id, "girasol"), None).unwrap();
+    repo::insert_crop(&mut conn, crop(&plot_b.id, &season_b.id, "girasol"), None).unwrap();
 
     let listed = repo::list_crops(&conn, &season_1.id, &farm_a.id).unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].id, wheat.id);
     assert_eq!(listed[0].species_name, "trigo");
+
+    // The farm half of the filter still holds on its own: farm A asked about
+    // farm B's season sees none of B's crops.
+    assert!(
+        repo::list_crops(&conn, &season_b.id, &farm_a.id)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -1109,4 +1592,97 @@ fn list_machinery_details_pairs_rows_with_their_extension() {
         Some("REG-7")
     );
     assert!(details[1].es.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// Dates are refused on the way in: the alert rules read them later, and a date
+// nobody checked at the form would only be found on the Status view, days on.
+// ---------------------------------------------------------------------------
+
+fn log_rows(conn: &rusqlite::Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM record_change", [], |r| r.get(0))
+        .unwrap()
+}
+
+fn refused_date(result: Result<impl std::fmt::Debug, CoreError>, date: &str) {
+    match result {
+        Err(CoreError::InvalidDate(got)) => assert_eq!(got, date),
+        other => panic!("expected InvalidDate({date}), got {other:?}"),
+    }
+}
+
+#[test]
+fn an_operator_whose_licence_date_cannot_be_read_is_refused_and_nothing_is_written() {
+    let mut conn = db();
+    let before = log_rows(&conn);
+    let mut new = plain_operator("Ana López");
+    new.licence_expiry_date = Some("15/08/2026".into());
+    refused_date(repo::insert_operator(&mut conn, new, None), "15/08/2026");
+    assert_eq!(log_rows(&conn), before, "a refused insert logs nothing");
+    assert!(repo::list_operators(&conn).unwrap().is_empty());
+
+    let operator = repo::insert_operator(&mut conn, plain_operator("Ana López"), None).unwrap();
+    let update = UpdateOperator {
+        full_name: "Ana López".into(),
+        tax_id: None,
+        licence_number: None,
+        licence_level_code: None,
+        licence_expiry_date: Some("2026-8-15".into()),
+    };
+    refused_date(
+        repo::update_operator(&mut conn, &operator.id, update, None),
+        "2026-8-15",
+    );
+    assert_eq!(
+        repo::list_operators(&conn).unwrap()[0].licence_expiry_date,
+        None,
+        "the stored row is untouched"
+    );
+}
+
+#[test]
+fn an_operator_with_no_licence_date_or_a_valid_one_is_accepted() {
+    let mut conn = db();
+    repo::insert_operator(&mut conn, plain_operator("Sin carné"), None).unwrap();
+    let mut dated = plain_operator("Con carné");
+    dated.licence_expiry_date = Some("2028-02-29".into());
+    repo::insert_operator(&mut conn, dated, None).unwrap();
+    assert_eq!(repo::list_operators(&conn).unwrap().len(), 2);
+}
+
+#[test]
+fn a_machine_with_any_unreadable_date_is_refused_on_insert_and_update() {
+    let mut conn = db();
+    let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
+    // Each of the three dates on its own: a check on one would pass the others.
+    let set = |machine: &mut NewMachinery, which: usize, date: &str| match which {
+        0 => machine.acquired_on = Some(date.into()),
+        1 => machine.last_inspection_date = Some(date.into()),
+        _ => machine.next_inspection_due_date = Some(date.into()),
+    };
+    for which in 0..3 {
+        let mut new = plain_machinery(&farm.id, "Atomizador");
+        set(&mut new, which, "2026-02-30");
+        refused_date(repo::insert_machinery(&mut conn, new, None), "2026-02-30");
+    }
+    assert!(repo::list_machinery(&conn, &farm.id).unwrap().is_empty());
+
+    let machine =
+        repo::insert_machinery(&mut conn, plain_machinery(&farm.id, "Atomizador"), None).unwrap();
+    for which in 0..3 {
+        let bad = |slot: usize| (which == slot).then(|| "01/07/2026".to_string());
+        let update = UpdateMachinery {
+            name: "Atomizador".into(),
+            kind: None,
+            acquired_on: bad(0),
+            last_inspection_date: bad(1),
+            next_inspection_due_date: bad(2),
+            roma_number: None,
+            reganip_number: None,
+        };
+        refused_date(
+            repo::update_machinery(&mut conn, &machine.id, update, None),
+            "01/07/2026",
+        );
+    }
 }

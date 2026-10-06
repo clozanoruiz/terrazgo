@@ -26,7 +26,7 @@ serde_json = { workspace = true }
 geozero = { workspace = true }
 
 # Shared test fixtures — specifically the RAII temp-path guard this crate's
-# import tests introduced and now share with core's and module-cue's backup
+# import tests introduced and now share with core's and module-phytosanitary's backup
 # tests. It depends on terrazgo-core alone.
 [dev-dependencies]
 terrazgo-testkit = { workspace = true }

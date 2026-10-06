@@ -4,7 +4,7 @@
 //! Contract tests binding this module's neutral-code → SIEX-code maps
 //! (`module_fertilisation::siex`) to the vendored FEGA catalogue snapshot.
 //!
-//! Two directions, for the reason module-cue's equivalent states: every mapped
+//! Two directions, for the reason module-phytosanitary's equivalent states: every mapped
 //! code must exist and be active in its catalogue, AND every active catalogue
 //! code must be the image of some lookup row — so a snapshot refresh that adds
 //! a code fails the suite instead of silently under-offering choices in the

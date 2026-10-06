@@ -13,7 +13,7 @@
 //! edit that drops one is a hard delete logged with a null after-image, the
 //! same contract as `product_active_substance`.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, begin, log_delete, log_insert, log_update, write_change};
 use super::no_rows_to_not_found;
 use crate::error::{FertilisationError, Result};
 use crate::models::{
@@ -37,7 +37,7 @@ pub fn insert_fertiliser_material(
     actor: Option<&str>,
 ) -> Result<FertiliserMaterialDetail> {
     let nutrients = validated_nutrients(&new.nutrients)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     validate_material_code(&tx, &new.material_code)?;
     validate_manure_treatment(&tx, new.manure_treatment_code.as_deref())?;
 
@@ -83,18 +83,12 @@ pub fn insert_fertiliser_material(
             material.updated_at
         ],
     )?;
-    log_insert(
-        &tx,
-        "fertiliser_material",
-        &material.id,
-        None,
-        actor,
-        &material,
-    )?;
+    let stamp = tx.register("fertiliser_material", &material.id, None)?;
+    log_insert(&tx, &stamp, "fertiliser_material", &material.id, &material)?;
 
     let mut rows = Vec::new();
     for nutrient in nutrients {
-        rows.push(insert_nutrient_row(&tx, &material.id, nutrient, actor)?);
+        rows.push(insert_nutrient_row(&tx, &material.id, nutrient, &stamp)?);
     }
     tx.commit()?;
     Ok(FertiliserMaterialDetail {
@@ -115,8 +109,7 @@ pub fn update_fertiliser_material(
     actor: Option<&str>,
 ) -> Result<FertiliserMaterialDetail> {
     let nutrients = validated_nutrients(&update.nutrients)?;
-    let tx = conn.transaction()?;
-    validate_material_code(&tx, &update.material_code)?;
+    let tx = begin(conn, actor)?;
     validate_manure_treatment(&tx, update.manure_treatment_code.as_deref())?;
 
     let before = tx
@@ -127,6 +120,11 @@ pub fn update_fertiliser_material(
         )
         .optional()?
         .ok_or(FertilisationError::NotFound)?;
+    // The code the material already carries was checked where it was written;
+    // only a changed one is checked here.
+    if update.material_code != before.material_code {
+        validate_material_code(&tx, &update.material_code)?;
+    }
 
     let mut after = before.clone();
     after.name = non_empty(update.name, "empty_name")?;
@@ -164,9 +162,10 @@ pub fn update_fertiliser_material(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "fertiliser_material", id, None, actor, &before, &after)?;
+    let stamp = tx.register("fertiliser_material", id, None)?;
+    log_update(&tx, &stamp, "fertiliser_material", id, &before, &after)?;
 
-    let rows = reconcile_nutrients(&tx, id, nutrients, actor)?;
+    let rows = reconcile_nutrients(&tx, id, nutrients, &stamp)?;
     tx.commit()?;
     Ok(FertiliserMaterialDetail {
         material: after,
@@ -182,7 +181,7 @@ pub fn soft_delete_fertiliser_material(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM fertiliser_material WHERE id = ?1 AND deleted_at IS NULL",
@@ -199,13 +198,13 @@ pub fn soft_delete_fertiliser_material(
         "UPDATE fertiliser_material SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
+    let stamp = tx.register("fertiliser_material", id, None)?;
     write_change(
         &tx,
+        &stamp,
         "fertiliser_material",
         id,
-        None,
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
     tx.commit()?;
@@ -277,7 +276,7 @@ fn reconcile_nutrients(
     tx: &Transaction,
     material_id: &str,
     desired: Vec<MaterialNutrient>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<MaterialNutrient>> {
     let current = nutrients_of_tx(tx, material_id)?;
     let same = |a: &MaterialNutrient, b: &MaterialNutrient| {
@@ -292,10 +291,9 @@ fn reconcile_nutrients(
             )?;
             log_delete(
                 tx,
+                stamp,
                 "fertiliser_material_nutrient",
                 &existing.id,
-                None,
-                actor,
                 &nutrient_image(existing, material_id),
                 None::<&serde_json::Value>,
             )?;
@@ -321,10 +319,9 @@ fn reconcile_nutrients(
                     )?;
                     log_update(
                         tx,
+                        stamp,
                         "fertiliser_material_nutrient",
                         &after.id,
-                        None,
-                        actor,
                         &nutrient_image(existing, material_id),
                         &nutrient_image(&after, material_id),
                     )?;
@@ -333,7 +330,7 @@ fn reconcile_nutrients(
                     rows.push(existing.clone());
                 }
             }
-            None => rows.push(insert_nutrient_row(tx, material_id, want, actor)?),
+            None => rows.push(insert_nutrient_row(tx, material_id, want, stamp)?),
         }
     }
     rows.sort_by_key(|row| kind_rank(&row.kind_code));
@@ -344,7 +341,7 @@ fn insert_nutrient_row(
     tx: &Transaction,
     material_id: &str,
     nutrient: MaterialNutrient,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<MaterialNutrient> {
     let row = MaterialNutrient {
         id: Uuid::now_v7().to_string(),
@@ -364,10 +361,9 @@ fn insert_nutrient_row(
     )?;
     log_insert(
         tx,
+        stamp,
         "fertiliser_material_nutrient",
         &row.id,
-        None,
-        actor,
         &nutrient_image(&row, material_id),
     )?;
     Ok(row)
@@ -469,6 +465,10 @@ fn validate_density(density: Option<f64>) -> Result<()> {
 /// decree itself enumerates, so a code outside it is a typo rather than a
 /// snapshot that has fallen behind. Checked only when the catalogue has been
 /// imported; a bare test database has nothing to check against.
+///
+/// Asked only of a code a save adds or changes: a material synced from a device
+/// whose catalogue is newer may carry one this device's copy lacks
+/// (docs/sync.md → What stays device-local), and renaming it must still save.
 ///
 /// `material_detail_code` deliberately gets no such check: it names one of 1243
 /// commercial products in a registry that grows between our snapshot releases,

@@ -6,7 +6,6 @@
   // Operators are not farm-scoped (the same applicator may work several farms).
   import { formatDate, t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
-  import { lookups, loadLookups } from "./lookups.svelte.js";
   import { run } from "./notifications.svelte.js";
   import DateInput from "./DateInput.svelte";
   import TextInput from "./TextInput.svelte";
@@ -30,9 +29,20 @@
   // Display order is the client's business: SQL orders by BINARY collation,
   // which puts "Ángel" after "Zubiri".
   const sortedOperators = $derived(sortedBy(operators, (o) => o.full_name));
-  // Session-wide reference data (lib/lookups.svelte.js).
-  const licenceLevels = $derived(lookups.licenceLevels);
+  // NOT session-wide: the levels are one country's scheme (Spain's carné, RD
+  // 1311/2012), so the list takes the country the hints already resolve
+  // against. Fetched in an $effect rather than on mount because RegistryView
+  // starts at "es" and overwrites it from the holdings on file AFTER this
+  // component has mounted — a one-shot fetch would keep the guess.
+  let licenceLevels = $state([]);
   let loading = $state(true);
+
+  $effect(() => {
+    const country = countryCode;
+    run(async () => {
+      licenceLevels = country ? await invoke("list_licence_levels", { countryCode: country }) : [];
+    });
+  });
 
   // Form; null editingId = the form creates, an id = it edits.
   let formOpen = $state(false);
@@ -44,7 +54,7 @@
   let expiryDate = $state("");
 
   run(async () => {
-    [operators] = await Promise.all([invoke("list_operators"), loadLookups()]);
+    operators = await invoke("list_operators");
   }).finally(() => (loading = false));
 
   function showForm(operator = null) {
@@ -94,7 +104,7 @@
   // is what lets a reader scan the licence expiry dates down the list instead
   // of hunting for them inside four different sentences.
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(operators.find((o) => o.id === editingId) ?? null);
 </script>

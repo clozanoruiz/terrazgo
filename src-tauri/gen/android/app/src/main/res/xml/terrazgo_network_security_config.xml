@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext stays allowed, in every build: certificate revocation checks run
+  inside this process, and CRL endpoints are plain http:// by design (CRLs are
+  signed). With cleartext blocked, Android's revocation fetch throws, and
+  rustls-platform-verifier reports the certificate as "Revoked" — a
+  CRL-only CA (Let's Encrypt, Google Trust Services, OpenFreeMap's) then
+  blanks the base map, as the release build of 2026-07-21 did.
+
+  rustls-platform-verifier-android 0.2.0 ships a configuration of its own that
+  allows cleartext only to the CRL hosts known when it was released. A CA that
+  moves to a new host before this app ships a newer verifier would bring that
+  failure back, so the manifest replaces it with this one (2026-10-04).
+
+  The app's own traffic is unaffected: terrazgo-geo fetches allowlisted HTTPS
+  sources only, and the webview's CSP is 'self' + geo:.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

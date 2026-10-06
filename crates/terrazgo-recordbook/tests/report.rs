@@ -15,8 +15,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use terrazgo_core::models::FarmEsFields;
 use terrazgo_recordbook::{ReportLanguage, cuaderno_inputs, render_cuaderno};
 
@@ -42,17 +42,6 @@ fn inputs_carry_farm_identity_campaign_and_generation_date() {
 #[test]
 fn a_farm_without_regional_data_prints_blank_not_missing() {
     let mut conn = db();
-    let season = repo::insert_season(
-        &mut conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
     let farm = repo::insert_farm(
         &mut conn,
         NewFarm {
@@ -61,6 +50,18 @@ fn a_farm_without_regional_data_prints_blank_not_missing() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+    let season = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: Some("2026".into()),
         },
         None,
     )
@@ -413,17 +414,6 @@ fn a_declared_register_and_an_untouched_one_both_render_cleanly() {
 #[test]
 fn renders_even_an_empty_farm() {
     let mut conn = db();
-    let season = repo::insert_season(
-        &mut conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
     let farm = repo::insert_farm(
         &mut conn,
         NewFarm {
@@ -432,6 +422,18 @@ fn renders_even_an_empty_farm() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+    let season = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: Some("2026".into()),
         },
         None,
     )
@@ -914,7 +916,6 @@ fn farm_block_carries_contact_details_and_both_registry_numbers() {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: "es".into(),
             es: Some(FarmEsFields {
                 rega_code: None,
                 rea_code: Some("ES244700000123".into()),

@@ -17,7 +17,7 @@
 //! already open, which is how the cover register writes model 9.4's Pastoreo
 //! column through this code instead of a copy of it.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update, write_change};
 use super::{no_rows_to_not_found, validated_cover_link};
 use crate::error::{EcoschemeError, Result};
 use crate::models::{
@@ -43,7 +43,7 @@ use uuid::Uuid;
 ///
 /// `inert_cover` and `flooded_biodiversity` stay out: art. 43 asks for no
 /// maintenance at all, and a flooded crop is not grazed.
-const GRAZING_PRACTICES: [&str; 4] = [
+pub const GRAZING_PRACTICES: [&str; 4] = [
     "extensive_grazing",
     "sustainable_mowing",
     "communal_pasture",
@@ -55,17 +55,16 @@ pub fn insert_grazing_record(
     new: NewGrazingRecord,
     actor: Option<&str>,
 ) -> Result<GrazingRecordDetail> {
-    let tx = conn.transaction()?;
-    let detail = insert_grazing_record_tx(&tx, new, actor)?;
+    let tx = begin(conn, actor)?;
+    let detail = insert_grazing_record_tx(&tx, new)?;
     tx.commit()?;
     Ok(detail)
 }
 
 /// The insert itself, inside a transaction the caller owns.
 pub(super) fn insert_grazing_record_tx(
-    tx: &Transaction,
+    tx: &WriteTx,
     new: NewGrazingRecord,
-    actor: Option<&str>,
 ) -> Result<GrazingRecordDetail> {
     validate_interval(&new.started_on, new.ended_on.as_deref())?;
     validate_practice(&new.practice_code)?;
@@ -114,35 +113,20 @@ pub(super) fn insert_grazing_record_tx(
         ],
     )?;
 
+    // The record is a register of its own, in whatever change set the caller
+    // opened — its own, or a soil cover's writing its maintenance line.
+    let stamp = tx.register("grazing_record", &record.id, Some(&record.season_id))?;
+
     let mut plot_rows = Vec::new();
     for plot_id in plot_ids {
-        plot_rows.push(insert_plot_row(
-            tx,
-            &record.id,
-            &record.season_id,
-            &plot_id,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(tx, &record.id, &plot_id, &stamp)?);
     }
     let mut animal_rows = Vec::new();
     for animal in animals {
-        animal_rows.push(insert_animal_row(
-            tx,
-            &record.id,
-            &record.season_id,
-            animal,
-            actor,
-        )?);
+        animal_rows.push(insert_animal_row(tx, &record.id, animal, &stamp)?);
     }
 
-    log_insert(
-        tx,
-        "grazing_record",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(tx, &stamp, "grazing_record", &record.id, &record)?;
     Ok(GrazingRecordDetail {
         record,
         plots: plot_rows,
@@ -160,18 +144,17 @@ pub fn update_grazing_record(
     update: UpdateGrazingRecord,
     actor: Option<&str>,
 ) -> Result<GrazingRecordDetail> {
-    let tx = conn.transaction()?;
-    let detail = update_grazing_record_tx(&tx, id, update, actor)?;
+    let tx = begin(conn, actor)?;
+    let detail = update_grazing_record_tx(&tx, id, update)?;
     tx.commit()?;
     Ok(detail)
 }
 
 /// The correction itself, inside a transaction the caller owns.
 pub(super) fn update_grazing_record_tx(
-    tx: &Transaction,
+    tx: &WriteTx,
     id: &str,
     update: UpdateGrazingRecord,
-    actor: Option<&str>,
 ) -> Result<GrazingRecordDetail> {
     validate_interval(&update.started_on, update.ended_on.as_deref())?;
     validate_practice(&update.practice_code)?;
@@ -184,6 +167,7 @@ pub(super) fn update_grazing_record_tx(
         )
         .optional()?
         .ok_or(EcoschemeError::NotFound)?;
+    let stamp = tx.register("grazing_record", id, Some(&before.season_id))?;
     let plot_ids = validated_plots(tx, &before.farm_id, &update.plot_ids)?;
     let animals = validated_animals(&update.animals)?;
     let soil_cover_id = validated_cover_link(
@@ -218,18 +202,10 @@ pub(super) fn update_grazing_record_tx(
             after.updated_at
         ],
     )?;
-    log_update(
-        tx,
-        "grazing_record",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    log_update(tx, &stamp, "grazing_record", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(tx, &after, &plot_ids, actor)?;
-    let animal_rows = reconcile_animals(tx, &after, animals, actor)?;
+    let plot_rows = reconcile_plots(tx, &after, &plot_ids, &stamp)?;
+    let animal_rows = reconcile_animals(tx, &after, animals, &stamp)?;
     Ok(GrazingRecordDetail {
         record: after,
         plots: plot_rows,
@@ -242,18 +218,17 @@ pub fn soft_delete_grazing_record(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
-    soft_delete_grazing_record_tx(&tx, id, actor)?;
+    let tx = begin(conn, actor)?;
+    soft_delete_grazing_record_tx(&tx, id)?;
     tx.commit()?;
     Ok(())
 }
 
-/// The withdrawal itself, inside a transaction the caller owns.
-pub(super) fn soft_delete_grazing_record_tx(
-    tx: &Transaction,
-    id: &str,
-    actor: Option<&str>,
-) -> Result<()> {
+/// The withdrawal itself, inside a transaction the caller owns: a soil
+/// cover's maintenance line, and a record removed as a duplicate, which shares
+/// one change set with the verdict that says why (docs/sync.md → Duplicate
+/// suspects).
+pub fn soft_delete_grazing_record_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM grazing_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -262,6 +237,7 @@ pub(super) fn soft_delete_grazing_record_tx(
         )
         .optional()?
         .ok_or(EcoschemeError::NotFound)?;
+    let stamp = tx.register("grazing_record", id, Some(&before.season_id))?;
     let now = now_utc_iso();
     let mut after = before.clone();
     after.deleted_at = Some(now.clone());
@@ -272,11 +248,10 @@ pub(super) fn soft_delete_grazing_record_tx(
     )?;
     write_change(
         tx,
+        &stamp,
         "grazing_record",
         id,
-        Some(&before.season_id),
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
     Ok(())
@@ -336,19 +311,6 @@ pub fn list_grazing_records_for_export(
     all_with_details(conn, records)
 }
 
-/// Whether any grazing hangs off this season — this module's arm of the guard
-/// the shell chains before deleting one. Soft-deleted records count, as they do
-/// in the other modules: their audit history is only reachable through the
-/// season they belong to.
-pub(super) fn season_has_grazing(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM grazing_record WHERE season_id = ?1)",
-        [season_id],
-        |r| r.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- reconciliation --------------------------------------------------------
 
 /// Plots carry no attributes of their own here — unlike an irrigation's, a
@@ -359,7 +321,7 @@ fn reconcile_plots(
     tx: &Transaction,
     record: &GrazingRecord,
     desired: &[String],
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<GrazingPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -371,10 +333,9 @@ fn reconcile_plots(
             tx.execute("DELETE FROM grazing_plot WHERE id = ?1", [&existing.id])?;
             log_delete(
                 tx,
+                stamp,
                 "grazing_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&GrazingPlot>,
             )?;
@@ -385,13 +346,7 @@ fn reconcile_plots(
     for plot_id in desired {
         match current.iter().find(|c| &c.plot_id == plot_id) {
             Some(existing) => rows.push(existing.clone()),
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                plot_id,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, plot_id, stamp)?),
         }
     }
     Ok(rows)
@@ -410,7 +365,7 @@ fn reconcile_animals(
     tx: &Transaction,
     record: &GrazingRecord,
     desired: Vec<GrazingAnimal>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<GrazingAnimal>> {
     let current = animals_of_tx(tx, &record.id)?;
 
@@ -422,10 +377,9 @@ fn reconcile_animals(
             tx.execute("DELETE FROM grazing_animal WHERE id = ?1", [&existing.id])?;
             log_delete(
                 tx,
+                stamp,
                 "grazing_animal",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&GrazingAnimal>,
             )?;
@@ -446,27 +400,13 @@ fn reconcile_animals(
                         "UPDATE grazing_animal SET animal_count = ?2 WHERE id = ?1",
                         params![existing.id, after.animal_count],
                     )?;
-                    log_update(
-                        tx,
-                        "grazing_animal",
-                        &existing.id,
-                        Some(&record.season_id),
-                        actor,
-                        existing,
-                        &after,
-                    )?;
+                    log_update(tx, stamp, "grazing_animal", &existing.id, existing, &after)?;
                     rows.push(after);
                 } else {
                     rows.push(existing.clone());
                 }
             }
-            None => rows.push(insert_animal_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                want,
-                actor,
-            )?),
+            None => rows.push(insert_animal_row(tx, &record.id, want, stamp)?),
         }
     }
     Ok(rows)
@@ -475,9 +415,8 @@ fn reconcile_animals(
 fn insert_plot_row(
     tx: &Transaction,
     grazing_record_id: &str,
-    season_id: &str,
     plot_id: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<GrazingPlot> {
     let row = GrazingPlot {
         id: Uuid::now_v7().to_string(),
@@ -488,16 +427,15 @@ fn insert_plot_row(
         "INSERT INTO grazing_plot (id, grazing_record_id, plot_id) VALUES (?1, ?2, ?3)",
         params![row.id, row.grazing_record_id, row.plot_id],
     )?;
-    log_insert(tx, "grazing_plot", &row.id, Some(season_id), actor, &row)?;
+    log_insert(tx, stamp, "grazing_plot", &row.id, &row)?;
     Ok(row)
 }
 
 fn insert_animal_row(
     tx: &Transaction,
     grazing_record_id: &str,
-    season_id: &str,
     animal: GrazingAnimal,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<GrazingAnimal> {
     let row = GrazingAnimal {
         id: Uuid::now_v7().to_string(),
@@ -518,7 +456,7 @@ fn insert_animal_row(
             row.animal_count
         ],
     )?;
-    log_insert(tx, "grazing_animal", &row.id, Some(season_id), actor, &row)?;
+    log_insert(tx, stamp, "grazing_animal", &row.id, &row)?;
     Ok(row)
 }
 

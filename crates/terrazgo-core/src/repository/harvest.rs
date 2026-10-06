@@ -3,7 +3,7 @@
 
 //! Commercialised harvest — model section 5.
 //!
-//! In core rather than in the CUE module: what leaves the holding and to whom
+//! In core rather than in the phytosanitary module: what leaves the holding and to whom
 //! is whole-farm data the costs and analytics modules will want, and modules
 //! never depend on each other.
 //!
@@ -16,7 +16,7 @@
 //! the row.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{
@@ -36,7 +36,7 @@ pub fn insert_harvest_record(
     let buyer_name = validated_buyer(&new.buyer_name)?;
     validate_quantity(new.quantity_value, new.quantity_unit_code.as_deref())?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let plots = validated_plots(&tx, &new.farm_id, &new.plots)?;
 
     let now = now_utc_iso();
@@ -91,24 +91,12 @@ pub fn insert_harvest_record(
     )?;
 
     let mut plot_rows = Vec::new();
+    let stamp = tx.register("harvest_record", &record.id, Some(&record.season_id))?;
     for plot in plots {
-        plot_rows.push(insert_plot_row(
-            &tx,
-            &record.id,
-            &record.season_id,
-            plot,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(&tx, &record.id, plot, &stamp)?);
     }
 
-    log_insert(
-        &tx,
-        "harvest_record",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(&tx, &stamp, "harvest_record", &record.id, &record)?;
     tx.commit()?;
     Ok(HarvestRecordDetail {
         record,
@@ -130,7 +118,7 @@ pub fn update_harvest_record(
     let buyer_name = validated_buyer(&update.buyer_name)?;
     validate_quantity(update.quantity_value, update.quantity_unit_code.as_deref())?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM harvest_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -180,17 +168,10 @@ pub fn update_harvest_record(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "harvest_record",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    let stamp = tx.register("harvest_record", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "harvest_record", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(&tx, &after, plots, actor)?;
+    let plot_rows = reconcile_plots(&tx, &after, plots, &stamp)?;
     tx.commit()?;
     Ok(HarvestRecordDetail {
         record: after,
@@ -203,7 +184,16 @@ pub fn soft_delete_harvest_record(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_harvest_record_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_harvest_record_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM harvest_record WHERE id = ?1 AND deleted_at IS NULL",
@@ -220,16 +210,8 @@ pub fn soft_delete_harvest_record(
         "UPDATE harvest_record SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(
-        &tx,
-        "harvest_record",
-        id,
-        Some(&before.season_id),
-        actor,
-        &before,
-        Some(&after),
-    )?;
-    tx.commit()?;
+    let stamp = tx.register("harvest_record", id, Some(&before.season_id))?;
+    log_delete(tx, &stamp, "harvest_record", id, &before, Some(&after))?;
     Ok(())
 }
 
@@ -283,22 +265,6 @@ pub fn list_harvest_records(
     all_with_details(conn, records)
 }
 
-/// Whether any harvest hangs off this season — half the guard
-/// `soft_delete_season` uses. The module-owned registers are the other half,
-/// chained by the shell (core may never query a module's table).
-///
-/// Soft-deleted records count, like `season_has_treatments`: their audit
-/// history is only reachable through the season they belong to, so hiding the
-/// season would hide them for good.
-pub(super) fn season_has_harvests(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM harvest_record WHERE season_id = ?1)",
-        [season_id],
-        |row| row.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- reconcile -------------------------------------------------------------
 
 /// Reconcile the origin plots against the submitted state — the 3-way match the
@@ -307,7 +273,7 @@ fn reconcile_plots(
     tx: &Transaction,
     record: &HarvestRecord,
     desired: Vec<NewHarvestPlot>,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<HarvestPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -319,10 +285,9 @@ fn reconcile_plots(
             tx.execute("DELETE FROM harvest_plot WHERE id = ?1", [&existing.id])?;
             log_delete(
                 tx,
+                stamp,
                 "harvest_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&HarvestPlot>,
             )?;
@@ -353,27 +318,13 @@ fn reconcile_plots(
                             after.variety_snapshot
                         ],
                     )?;
-                    log_update(
-                        tx,
-                        "harvest_plot",
-                        &existing.id,
-                        Some(&record.season_id),
-                        actor,
-                        existing,
-                        &after,
-                    )?;
+                    log_update(tx, stamp, "harvest_plot", &existing.id, existing, &after)?;
                     rows.push(after);
                 } else {
                     rows.push(existing.clone());
                 }
             }
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                want,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, want, stamp)?),
         }
     }
     Ok(rows)
@@ -382,9 +333,8 @@ fn reconcile_plots(
 fn insert_plot_row(
     tx: &Transaction,
     harvest_record_id: &str,
-    season_id: &str,
     plot: NewHarvestPlot,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<HarvestPlot> {
     let (crop_name, variety) = crop_snapshot(tx, plot.crop_id.as_deref())?;
     let row = HarvestPlot {
@@ -408,7 +358,7 @@ fn insert_plot_row(
             row.variety_snapshot
         ],
     )?;
-    log_insert(tx, "harvest_plot", &row.id, Some(season_id), actor, &row)?;
+    log_insert(tx, stamp, "harvest_plot", &row.id, &row)?;
     Ok(row)
 }
 

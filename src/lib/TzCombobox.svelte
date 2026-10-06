@@ -17,9 +17,11 @@
   import { t } from "../i18n.js";
   import { refusalStore } from "./formRefusal.js";
   import { fold, searchItems } from "./collate.js";
+  import RequiredMark from "./RequiredMark.svelte";
+  import { pickerOptions } from "./selectItems.js";
 
   let {
-    /// [{ value, label }] — the FULL list; narrowing happens here.
+    /// [{ value, label, offered? }] — the FULL list; narrowing happens here.
     items = [],
     value = $bindable(""),
     label = "",
@@ -30,6 +32,9 @@
     class: klass = "",
     /// Names this field inside its form, for TzForm's `anchors`.
     name = "",
+    /// A catalogue-backed list (items from `catalogueItems`): a stored code the
+    /// list does not carry is shown as itself, with a line saying why.
+    catalogue = false,
     onchange = null,
   } = $props();
 
@@ -45,9 +50,12 @@
 
   // Fold once per list, not once per keystroke: normalize() is not cheap and
   // the biggest catalogue behind these pickers runs to thousands of rows.
-  const folded = $derived(items.map((item) => ({ ...item, folded: fold(item.label) })));
+  // What the list shows: the codes it may offer, plus the stored one whatever
+  // its state, so a record's value never reads as an empty field.
+  const shown = $derived(pickerOptions(items, value, catalogue));
+  const folded = $derived(shown.options.map((item) => ({ ...item, folded: fold(item.label) })));
   const result = $derived(searchItems(folded, query, MAX_VISIBLE));
-  const chosen = $derived(items.find((item) => item.value === value));
+  const chosen = $derived(shown.options.find((item) => item.value === value));
 
   let proxy = $state(null);
   let showError = $state(false);
@@ -73,7 +81,7 @@
 
 <div class="tz-field {klass}">
   {#if label}
-    <span class="tz-label" id={labelId}>{label}</span>
+    <span class="tz-label" id={labelId}>{label}<RequiredMark {required} /></span>
   {/if}
 
   <Combobox.Root
@@ -93,6 +101,7 @@
       <Combobox.Input
         id={uid}
         aria-labelledby={label ? labelId : undefined}
+        aria-required={required || undefined}
         placeholder={chosen?.label || placeholder}
         oninput={(event) => (query = event.currentTarget.value)}
         onfocus={() => (open = true)}
@@ -148,6 +157,11 @@
   />
 
   {#if hint}<small>{hint}</small>{/if}
+  {#if shown.unknown}
+    <small>
+      {t("form.catalogue_code_unknown", { settings: t("nav.settings") })}
+    </small>
+  {/if}
   {#if showError && error}
     <small class="tz-field-error">{error}</small>
   {/if}

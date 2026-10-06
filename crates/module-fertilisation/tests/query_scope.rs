@@ -88,6 +88,7 @@ fn listing_irrigations_costs_the_same_at_four_times_the_records() {
                 ],
                 // One origin, so the joined ordering is exercised too.
                 water_origins: vec!["surface".into()],
+                practices: vec![],
             },
             None,
         )

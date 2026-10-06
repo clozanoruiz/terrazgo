@@ -28,14 +28,27 @@ pub struct Lookup {
 #[derive(Debug, Clone, Serialize)]
 pub struct Season {
     pub id: String,
-    pub campaign_year: i64,
+    /// The holding whose book this campaign is. Fixed at creation.
+    pub farm_id: String,
+    /// The book's name, derived on every write: `custom_label`, or the dates'
+    /// years ("2025/2026", "2026").
     pub label: String,
-    pub starts_on: Option<String>,
-    pub ends_on: Option<String>,
+    /// The name the farmer gave the book, if any.
+    pub custom_label: Option<String>,
+    pub starts_on: String,
+    pub ends_on: String,
     pub status: String,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
+}
+
+/// One page of the record book list, and how many books there are in all —
+/// what a page control needs to draw its pages.
+#[derive(Debug, Clone, Serialize)]
+pub struct SeasonPage {
+    pub total: i64,
+    pub seasons: Vec<Season>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -90,6 +103,19 @@ pub struct UserProfile {
     pub display_name: String,
     /// Optional "this user is this applicator" link to an operator row.
     pub operator_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub deleted_at: Option<String>,
+}
+
+/// A device that has written to this book (docs/sync.md → Device identity).
+/// The id IS the device id from that device's `settings.json`, so every device
+/// naming one phone writes the same row.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SyncPeer {
+    pub id: String,
+    /// What people call the device. `None` until somebody names it.
+    pub label: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -368,10 +394,11 @@ pub struct PlotEsFields {
 
 #[derive(Debug, Deserialize)]
 pub struct NewSeason {
-    pub campaign_year: i64,
-    pub label: String,
-    pub starts_on: Option<String>,
-    pub ends_on: Option<String>,
+    pub farm_id: String,
+    pub starts_on: String,
+    pub ends_on: String,
+    /// Blank or absent: the dates name the book.
+    pub custom_label: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -470,16 +497,57 @@ pub struct UpdatePremises {
     pub rea_installation_code: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+/// A new farm carries the SAME fields as `UpdateFarm`, plus the one that can
+/// only be stated here.
+///
+/// It used to carry four of them, and the create form asked four questions
+/// where the edit form asked twenty-six — a farmer being asked different
+/// things about one holding depending on which screen they reached it from, for
+/// no reason in the domain. Everything but `country_code` is optional at
+/// creation, so the short version of the form is still a short version; it is
+/// now a subset of one form rather than a different form.
+///
+/// `#[serde(default)]` on everything but the name and the country, so a payload
+/// may state only what it knows. `Default` so a Rust caller — the demo seed,
+/// four dozen test fixtures — can name the fields it cares about and let the
+/// rest alone; a field added here later must not mean editing all of them
+/// again.
+#[derive(Debug, Default, Deserialize)]
 pub struct NewFarm {
     pub name: String,
-    pub owner_name: Option<String>,
-    pub owner_tax_id: Option<String>,
     /// The farm's country (ISO 3166-1 alpha-2 code). Required: treatment records derive
-    /// their country from here.
+    /// their country from here. THE ONE FIELD `UpdateFarm` does not carry —
+    /// stated once, at creation, for the reason given there.
     pub country_code: String,
+    #[serde(default)]
+    pub owner_name: Option<String>,
+    #[serde(default)]
+    pub owner_tax_id: Option<String>,
+    #[serde(default)]
+    pub location_text: Option<String>,
+    #[serde(default)]
+    pub address: Option<String>,
+    #[serde(default)]
+    pub postal_code: Option<String>,
+    #[serde(default)]
+    pub phone_fixed: Option<String>,
+    #[serde(default)]
+    pub phone_mobile: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub opened_on: Option<String>,
+    #[serde(default)]
+    pub latitude: Option<f64>,
+    #[serde(default)]
+    pub longitude: Option<f64>,
     /// Spanish regional fields; written to `farm_es_extension` when present.
+    #[serde(default)]
     pub es: Option<FarmEsFields>,
+    /// Model 1.1's "titular o representante"; written to `farm_representative`
+    /// when present.
+    #[serde(default)]
+    pub representative: Option<FarmRepresentativeFields>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -493,6 +561,12 @@ pub struct NewPlot {
 
 /// Full-row update for a farm: the form submits the complete desired state.
 /// `es: None` means "no extension" and removes an existing extension row.
+///
+/// `country_code` is deliberately absent, for `UpdatePlot::farm_id`'s reason: a
+/// farm does not change countries, and letting it would silently re-home the
+/// MEANING of every country-scoped code already on its records — the licence
+/// level of an operator, the GIP framework of a crop, the catalogue a coded
+/// field resolves against. A holding that genuinely moved is a new farm.
 #[derive(Debug, Deserialize)]
 pub struct UpdateFarm {
     pub name: String,
@@ -508,7 +582,6 @@ pub struct UpdateFarm {
     pub opened_on: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
-    pub country_code: String,
     pub es: Option<FarmEsFields>,
     /// `None` removes the representative row — same reconcile-from-submitted
     /// contract as `es`.
@@ -555,6 +628,58 @@ pub struct NewZoneFlag {
     pub status: String,
     pub coverage_pct: Option<f64>,
     pub detail: Option<String>,
+}
+
+/// One person's act on an alert — seen, or hidden — as `alert_acknowledgement`
+/// stores it. Synced user data, unlike the alert it was made on: every device
+/// works out its own alerts, and this is what lets them agree on which ones a
+/// person has already dealt with (docs/sync.md → Alert acknowledgements roam).
+///
+/// **Insert-only.** A second act is a second row, never an update of the first,
+/// so two devices acting on one alert write two registers and never conflict;
+/// [`crate::alerts::alert_status`] takes the strongest. Serialize is the full
+/// row image the log carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AlertAcknowledgement {
+    pub id: String,
+    /// The kind's code, as the crate that raises it declares it. Not checked
+    /// against a table: kinds are constants in their crates, so a code is only
+    /// ever copied from one, and an act about a kind this build does not know —
+    /// synced from a newer one — is kept and matches nothing.
+    pub alert_type_code: String,
+    pub subject_table: String,
+    pub subject_id: String,
+    /// The deadline the person acted on; `None` for a standing condition, which
+    /// has none.
+    pub due_date: Option<String>,
+    pub status: crate::alerts::AlertStatus,
+    pub created_at: String,
+}
+
+/// One person's judgement of two records that looked like one operation
+/// recorded twice, as `duplicate_verdict` stores it. Synced user data, unlike
+/// the suspicion it answers: every device works the suspicions out when the
+/// list is read, and this is what lets them agree on which a person has already
+/// settled (docs/sync.md → Duplicate suspects).
+///
+/// **Insert-only**, like [`AlertAcknowledgement`] and for its reason: two
+/// devices judging one pair write two registers and never conflict. Serialize
+/// is the full row image the log carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DuplicateVerdict {
+    pub id: String,
+    /// The register both records are in — copied from the rule that raised the
+    /// suspicion, never from a screen.
+    pub subject_table: String,
+    /// The pair, the smaller id first, so every device names it alike.
+    pub first_id: String,
+    pub second_id: String,
+    pub verdict: crate::duplicates::Verdict,
+    /// For [`crate::duplicates::Verdict::Duplicate`], the record kept; the
+    /// other one is the record this act removed. `None` for a pair judged
+    /// distinct, which keeps both.
+    pub kept_id: Option<String>,
+    pub created_at: String,
 }
 
 /// An abstraction point for human consumption near a plot — the water half of
@@ -644,13 +769,14 @@ pub struct UpdateOperator {
 }
 
 /// Full-row update for a season. `status` is deliberately absent: archiving is
-/// a separate lifecycle action, not part of correcting a mistyped label or year.
+/// a separate lifecycle action, not part of correcting a mistyped name or date.
+/// So is `farm_id`, like `UpdatePlot`'s: moving a season would carry its whole
+/// book to another holding.
 #[derive(Debug, Deserialize)]
 pub struct UpdateSeason {
-    pub campaign_year: i64,
-    pub label: String,
-    pub starts_on: Option<String>,
-    pub ends_on: Option<String>,
+    pub starts_on: String,
+    pub ends_on: String,
+    pub custom_label: Option<String>,
 }
 
 /// Full-row update for a crop. `plot_id` and `season_id` are deliberately absent,
@@ -852,7 +978,7 @@ pub struct UpdateSowingRecord {
 // Commercialised harvest (model section 5)
 // ---------------------------------------------------------------------------
 
-/// What left the holding, and to whom. In core rather than in the CUE module
+/// What left the holding, and to whom. In core rather than in the phytosanitary module
 /// because it is whole-farm data the costs and analytics modules will want, and
 /// modules never depend on each other.
 #[derive(Debug, Clone, Serialize)]
@@ -869,7 +995,7 @@ pub struct HarvestRecord {
     /// Nullable together with the unit: the printed form leaves the cell to be
     /// filled by hand, so an unstated quantity is unknown, never zero.
     pub quantity_value: Option<f64>,
-    /// `kg` or `t`, enforced in the repository — `unit` is a module-cue lookup
+    /// `kg` or `t`, enforced in the repository — `unit` is a module-phytosanitary lookup
     /// and core may never reference a module's table.
     pub quantity_unit_code: Option<String>,
     pub delivery_note_ref: Option<String>,

@@ -9,8 +9,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 use terrazgo_core::models::{NewZoneFlag, PlotEsFields};
 
@@ -399,6 +399,7 @@ fn table_1_4_is_scoped_to_the_farm_being_printed() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )

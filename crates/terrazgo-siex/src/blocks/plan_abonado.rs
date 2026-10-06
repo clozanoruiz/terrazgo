@@ -16,9 +16,9 @@
 use crate::SIEX_TARGET;
 use crate::descriptor::*;
 use crate::error::{Result, SiexError};
-use module_cue::siex as cue_siex;
 use module_fertilisation::models::FertilisationPlanDetail;
 use module_fertilisation::repository::list_fertilisation_plans_for_export;
+use module_phytosanitary::siex as cue_siex;
 use rusqlite::Connection;
 use terrazgo_core::repository::{ensure_export_alias, find_export_alias};
 

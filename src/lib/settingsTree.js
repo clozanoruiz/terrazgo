@@ -106,6 +106,25 @@ export const SETTINGS_TREE = [
         ],
       },
       {
+        id: "advanced.sync",
+        labelKey: "sync.title",
+        hintKey: "sync.hint",
+        items: [
+          { id: "sync_export", keys: ["actions.export_sync"] },
+          { id: "sync_import", keys: ["actions.import_sync"] },
+        ],
+      },
+      {
+        // Beside the sync actions rather than inside them: exporting and
+        // importing is something a farmer does, naming a device is something
+        // they keep. The review queue that reads these names is on the Status
+        // view, where work waiting on somebody belongs.
+        id: "advanced.peers",
+        labelKey: "sync.peers_title",
+        hintKey: "sync.peers_hint",
+        items: [{ id: "peers", keys: ["sync.peer_label", "sync.peer_this_device"] }],
+      },
+      {
         id: "advanced.maintenance",
         labelKey: "settings.maintenance",
         hintKey: "settings.maintenance_hint",

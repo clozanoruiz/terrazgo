@@ -16,6 +16,7 @@
   import { formatDate, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
@@ -117,7 +118,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
 
@@ -168,18 +169,22 @@
         })),
     };
 
+    let savedId = editingId;
     if (editingId) {
       await invoke("update_grazing_record", {
         grazingRecordId: editingId,
         update: payload,
       });
     } else {
-      await invoke("create_grazing_record", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_grazing_record", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideForm();
     load();
+    await checkSaved("grazing_record", savedId);
   }
 
   function remove(record) {
@@ -297,6 +302,7 @@
                   (entry) => entry.name,
                   (entry) => entry.code,
                 )}
+                catalogue
                 required
                 bind:value={row.speciesCode}
               />

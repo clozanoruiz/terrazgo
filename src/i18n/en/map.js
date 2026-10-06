@@ -57,7 +57,8 @@ export default {
   "map.boundaries": "Stored boundaries",
   "map.no_boundary": "No boundary stored yet.",
   "map.delete_boundary": "Remove",
-  "map.delete_boundary_confirm": "Remove the {source} boundary? Its history is kept.",
+  "map.delete_boundary_confirm":
+    "Remove the {source} boundary? It will no longer show on the map, but it is not erased from the database.",
   "map.source.manual": "drawn",
   "map.source.import": "imported",
   "map.source.sigpac": "SIGPAC",

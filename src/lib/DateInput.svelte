@@ -18,6 +18,7 @@
   import { formatTag, formatDate, t } from "../i18n.js";
   import { refusalStore } from "./formRefusal.js";
   import { toCalendarDate, fromCalendarDate } from "./dateValue.js";
+  import RequiredMark from "./RequiredMark.svelte";
 
   let {
     value = $bindable(""),
@@ -102,10 +103,14 @@
     fixedWeeks={true}
   >
     {#if label}
-      <DatePicker.Label class="tz-label">{label}</DatePicker.Label>
+      <DatePicker.Label class="tz-label">{label}<RequiredMark {required} /></DatePicker.Label>
     {/if}
 
-    <DatePicker.Input id={uid} class="tz-control tz-datefield">
+    <DatePicker.Input
+      id={uid}
+      class="tz-control tz-datefield"
+      aria-required={required || undefined}
+    >
       {#snippet children({ segments })}
         <!-- Keyed by INDEX, not by part: a DD/MM/YYYY field carries TWO
              `literal` segments for its separators, and keying on `part` would

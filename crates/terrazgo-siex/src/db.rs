@@ -6,7 +6,7 @@
 //! This crate owns no tables — like the record book it is a read model over
 //! core and every module. And like the record book it needs the *composed*
 //! schema, not any one module's: while `TratamFito` was the only block the
-//! tests could borrow `module_cue::open_in_memory` and it happened to be
+//! tests could borrow `module_phytosanitary::open_in_memory` and it happened to be
 //! enough, exactly as the book's did before its second section arrived.
 //!
 //! Composing it here, next to the code whose correctness depends on it, is what
@@ -24,7 +24,7 @@ use rusqlite_migration::Migrations;
 /// the same reason.
 pub fn migrations() -> Migrations<'static> {
     let mut steps = terrazgo_core::migration_set();
-    steps.extend(module_cue::migration_set());
+    steps.extend(module_phytosanitary::migration_set());
     steps.extend(module_fertilisation::migration_set());
     steps.extend(module_ecoscheme::migration_set());
     Migrations::new(steps)
@@ -41,5 +41,16 @@ pub fn open_in_memory() -> Result<Connection> {
     migrations()
         .to_latest(&mut conn)
         .map_err(|e| SiexError::Internal(e.to_string()))?;
+    // Every database is a replica of its own (terrazgo_core::open_in_memory).
+    terrazgo_core::sync::install_device(&conn, &terrazgo_core::sync::mint_device_id())?;
+    terrazgo_core::sync::install_shape(
+        &conn,
+        &[
+            terrazgo_core::sync::CORE_SYNC_SHAPE,
+            module_phytosanitary::SYNC_SHAPE,
+            module_fertilisation::SYNC_SHAPE,
+            module_ecoscheme::SYNC_SHAPE,
+        ],
+    )?;
     Ok(conn)
 }

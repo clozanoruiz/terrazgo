@@ -766,7 +766,7 @@
 // (the PHI-column precedent).
 //
 // The row is a plot, and its five cells are gathered from three tables in three
-// crates: core's sowing register, module-cue's treatments and
+// crates: core's sowing register, module-phytosanitary's treatments and
 // module-ecoscheme's cultural operations. The footnote says where each is
 // annotated, so a farmer knows which form to reach for.
 #subsection[#L.s9.s93.title]

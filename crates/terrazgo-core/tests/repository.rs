@@ -41,6 +41,7 @@ fn insert_farm_with_extension_writes_both_rows_and_logs_both() {
                 siex_code: None,
                 province_code: Some("47".into()),
             }),
+            ..NewFarm::default()
         },
         None,
     )
@@ -65,6 +66,123 @@ fn insert_farm_with_extension_writes_both_rows_and_logs_both() {
     assert_eq!(after["province_code"], "47");
 }
 
+/// A holding created with its whole block keeps it. Until 2026-09-15
+/// `insert_farm` wrote four columns and left the rest NULL whatever the payload
+/// carried, which is why the create form asked four questions where the edit
+/// form asked twenty-six. The two now ask the same ones, and this is the half
+/// a shared component cannot prove.
+#[test]
+fn insert_farm_writes_every_field_it_is_given() {
+    let mut conn = db();
+    let farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Finca entera".into(),
+            country_code: "es".into(),
+            owner_name: Some("Carlos".into()),
+            owner_tax_id: Some("12345678Z".into()),
+            location_text: Some("Moreruela de Tábara".into()),
+            address: Some("Camino de los Llanos, 14".into()),
+            postal_code: Some("49148".into()),
+            phone_fixed: Some("980 000 000".into()),
+            phone_mobile: Some("600 000 000".into()),
+            email: Some("finca@ejemplo.es".into()),
+            opened_on: Some("2026-01-02".into()),
+            latitude: Some(41.80312),
+            longitude: Some(-5.84571),
+            es: None,
+            representative: None,
+        },
+        None,
+    )
+    .unwrap();
+
+    let stored = repo::get_farm(&conn, &farm.id).unwrap().farm;
+    assert_eq!(stored.owner_tax_id.as_deref(), Some("12345678Z"));
+    assert_eq!(stored.location_text.as_deref(), Some("Moreruela de Tábara"));
+    assert_eq!(stored.address.as_deref(), Some("Camino de los Llanos, 14"));
+    assert_eq!(stored.postal_code.as_deref(), Some("49148"));
+    assert_eq!(stored.phone_fixed.as_deref(), Some("980 000 000"));
+    assert_eq!(stored.phone_mobile.as_deref(), Some("600 000 000"));
+    assert_eq!(stored.email.as_deref(), Some("finca@ejemplo.es"));
+    assert_eq!(stored.opened_on.as_deref(), Some("2026-01-02"));
+    assert_eq!(stored.latitude, Some(41.80312));
+    assert_eq!(stored.longitude, Some(-5.84571));
+
+    // The audit image is the sync delta source, so it must carry the new
+    // columns too rather than the four the INSERT used to name.
+    let (op, _, after) = last_change(&conn, "farm", &farm.id);
+    assert_eq!(op, "insert");
+    assert_eq!(after["address"], "Camino de los Llanos, 14");
+    assert_eq!(after["email"], "finca@ejemplo.es");
+    assert_eq!(after["opened_on"], "2026-01-02");
+}
+
+/// The representative is reconciled on create by the same function that
+/// reconciles it on update, so `Some` inserts the row and logs it.
+#[test]
+fn insert_farm_writes_a_representative_when_given_one() {
+    let mut conn = db();
+    let farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Finca con representante".into(),
+            country_code: "es".into(),
+            representative: Some(FarmRepresentativeFields {
+                full_name: "Ana Gómez".into(),
+                tax_id: Some("87654321X".into()),
+                representation_kind: Some("Administradora".into()),
+                address: None,
+                locality: None,
+                province: None,
+                postal_code: None,
+                phone: None,
+                email: None,
+            }),
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+
+    let representative = repo::get_farm(&conn, &farm.id).unwrap().representative;
+    let representative = representative.expect("a representative was submitted");
+    assert_eq!(representative.full_name, "Ana Gómez");
+    assert_eq!(representative.tax_id.as_deref(), Some("87654321X"));
+
+    let (op, before, after) = last_change(&conn, "farm_representative", &farm.id);
+    assert_eq!(op, "insert");
+    assert!(before.is_null());
+    assert_eq!(after["full_name"], "Ana Gómez");
+}
+
+/// Everything but the name and the country is optional, so the short version of
+/// the form still saves. A farm created that way stores NULLs, not empty
+/// strings — a blank cell in the printed book means "not recorded", and "" would
+/// print as a statement that there is nothing to record.
+#[test]
+fn insert_farm_leaves_what_it_was_not_given_null() {
+    let mut conn = db();
+    let farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Finca mínima".into(),
+            country_code: "es".into(),
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+
+    let detail = repo::get_farm(&conn, &farm.id).unwrap();
+    assert_eq!(detail.farm.address, None);
+    assert_eq!(detail.farm.email, None);
+    assert_eq!(detail.farm.opened_on, None);
+    assert_eq!(detail.farm.latitude, None);
+    assert!(detail.representative.is_none());
+    assert!(detail.es.is_none());
+}
+
 /// The export-facing farm identifiers (docs/siex-export.md → gap 4): the
 /// holder's tax id lives on the core row, the REA registration code on the
 /// Spanish extension. Both must round-trip and appear in the audit images.
@@ -84,6 +202,7 @@ fn farm_identifiers_roundtrip_and_are_audited() {
                 siex_code: None,
                 province_code: Some("47".into()),
             }),
+            ..NewFarm::default()
         },
         None,
     )
@@ -119,7 +238,6 @@ fn farm_identifiers_roundtrip_and_are_audited() {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: "es".into(),
             es: Some(FarmEsFields {
                 rega_code: None,
                 rea_code: Some("REA-47-99999".into()),
@@ -193,7 +311,6 @@ fn update_farm_replaces_fields_and_logs_complete_images() {
             opened_on: None,
             latitude: Some(41.65),
             longitude: Some(-4.72),
-            country_code: "es".into(),
             es: None,
             representative: None,
         },
@@ -213,6 +330,66 @@ fn update_farm_replaces_fields_and_logs_complete_images() {
     assert_eq!(after["country_code"], "es");
 }
 
+/// A farm's country is stated once, at creation, and no update can move it —
+/// `UpdateFarm` carries no `country_code` at all, so this is enforced by the
+/// compiler. What is checked here is the half a type cannot state: that the
+/// update path leaves the stored country alone rather than resetting it.
+///
+/// The farm is Italian on purpose. An `es` farm would pass this test even if
+/// the UPDATE wrote a hardcoded "es", and the point is that a non-Spanish
+/// holding survives an edit intact.
+#[test]
+fn update_farm_cannot_move_a_holding_to_another_country() {
+    let mut conn = db();
+    let farm = repo::insert_farm(
+        &mut conn,
+        NewFarm {
+            name: "Podere".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            country_code: "it".into(),
+            es: None,
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+
+    let detail = repo::update_farm(
+        &mut conn,
+        &farm.id,
+        UpdateFarm {
+            name: "Podere nuovo".into(),
+            owner_name: None,
+            owner_tax_id: None,
+            location_text: None,
+            address: None,
+            postal_code: None,
+            phone_fixed: None,
+            phone_mobile: None,
+            email: None,
+            opened_on: None,
+            latitude: None,
+            longitude: None,
+            es: None,
+            representative: None,
+        },
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(detail.farm.name, "Podere nuovo");
+    assert_eq!(
+        detail.farm.country_code, "it",
+        "the update must leave the country exactly as created"
+    );
+
+    // And the audit trail agrees, in both images.
+    let (_, before, after) = last_change(&conn, "farm", &farm.id);
+    assert_eq!(before["country_code"], "it");
+    assert_eq!(after["country_code"], "it");
+}
+
 #[test]
 fn update_farm_extension_transitions_are_logged() {
     let mut conn = db();
@@ -230,7 +407,6 @@ fn update_farm_extension_transitions_are_logged() {
         opened_on: None,
         latitude: None,
         longitude: None,
-        country_code: "es".into(),
         es: None,
         representative: None,
     };
@@ -272,7 +448,6 @@ fn update_farm_extension_transitions_are_logged() {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: "es".into(),
             es: Some(FarmEsFields {
                 rega_code: None,
                 rea_code: None,
@@ -306,7 +481,6 @@ fn update_farm_extension_transitions_are_logged() {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: "es".into(),
             es: None,
             representative: None,
         },

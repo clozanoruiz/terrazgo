@@ -7,8 +7,6 @@
 export default {
   "treatments.title": "Tractaments fitosanitaris",
   "treatments.records_title": "Tractaments",
-  "treatments.farm": "Explotació",
-  "treatments.season": "Campanya",
   "treatments.new": "Nou tractament",
   "treatments.empty": "Encara no hi ha tractaments registrats per a aquesta explotació i campanya.",
   "treatments.no_farms": "Creeu primer una explotació amb com a mínim una parcel·la:",
@@ -37,6 +35,7 @@ export default {
   "treatment.measure_intensity_hint": "Nre. de trampes, nre. de difusors, etc.",
   "treatment.measure_intensity_unit": "Unitat d'intensitat",
   "treatment.measure_registration": "Núm. de registre del mitjà",
+  "treatment.measure_basic_substance": "Substància bàsica",
   "treatment.measure_intensity_detail": "{value} {unit}",
   "treatment.total_quantity_suggest": "Usa {value} {unit} (dosi \u00d7 superf\u00edcie)",
   "treatment.total_quantity_detail": "{value} {unit} en total",
@@ -69,8 +68,7 @@ export default {
   "treatment.remove": "Treu",
   "treatment.phi_until": "Termini de seguretat: collita a partir del {date}",
   "treatment.delete": "Suprimeix",
-  "treatment.delete_confirm":
-    "Voleu suprimir aquest tractament? S'ocultarà de l'aplicació, però es conserva al registre d'auditoria.",
+  "treatment.delete_confirm": "Voleu suprimir aquest tractament? Deixarà d'aparèixer al quadern.",
   "advisory.title": "Estat del quadern",
   "advisory.hint":
     "Avís informatiu: el quadern s’imprimeix igualment. S’assenyala el que un annex obligatori demana i el llibre imprimeix en blanc.",
@@ -106,6 +104,11 @@ export default {
     "Pasturatges sense data de fi, amb la campanya ja tancada (RD 1048/2022 art. 30.2 ter)",
   "advisory.grazing_records_without_end_hint":
     "El termini d'un mes compta des del final del pasturatge, així que un registre obert no va amb retard: simplement el quadern no el pot donar per acabat.",
+  "advisory.unnamed_codes": "Codis sense nom als catàlegs d’aquest dispositiu",
+  "advisory.unnamed_codes_hint.one":
+    "El quadern imprimeix 1 codi com a número, sense el seu nom: els catàlegs de referència d’aquest dispositiu no el tenen, normalment perquè el registre es va escriure en un altre dispositiu amb catàlegs més recents. Actualitzeu-los a la pàgina «{settings}», apartat «{catalogues}».",
+  "advisory.unnamed_codes_hint.other":
+    "El quadern imprimeix {count} codis com a número, sense el seu nom: els catàlegs de referència d’aquest dispositiu no els tenen, normalment perquè els registres es van escriure en un altre dispositiu amb catàlegs més recents. Actualitzeu-los a la pàgina «{settings}», apartat «{catalogues}».",
   "export.pdf_title": "Quadern imprimible (PDF)",
   "export.pdf_run": "Genera el PDF…",
   "export.pdf_hint":
@@ -207,7 +210,7 @@ export default {
   "non_field.quantity_hint": "Opcional; s'imprimeix en blanc si no s'indica.",
   "non_field.product_quantity": "Quantitat de producte utilitzada",
   "non_field.product_quantity_unit": "Unitat (kg o l)",
-  "non_field.delete_confirm": "Voleu suprimir aquest tractament? Es conserva a l'historial.",
+  "non_field.delete_confirm": "Voleu suprimir aquest tractament? Deixarà d'aparèixer al quadern.",
 
   // Registre 3.2: \u00fas de llavor tractada.
   "seed.title": "Llavor tractada",
@@ -242,7 +245,7 @@ export default {
   "seed.surface": "Superf\u00edcie sembrada (ha)",
   "seed.lot_detail": "lot {lot}",
   "seed.quantity_detail": "{kg} kg de llavor",
-  "seed.delete_confirm": "Voleu suprimir aquesta sembra? Es conserva a l'historial.",
+  "seed.delete_confirm": "Voleu suprimir aquesta sembra? Deixarà d'aparèixer al quadern.",
 
   // Registre 4: an\u00e0lisis. Nom\u00e9s metadades: el butllet\u00ed es conserva a part.
   "analysis.title": "An\u00e0lisis",
@@ -260,7 +263,7 @@ export default {
   "analysis.keep_hint":
     "El butllet\u00ed d'an\u00e0lisi es conserva a part, amb la resta de documentaci\u00f3 de l'explotaci\u00f3.",
   "analysis.bulletin_detail": "butllet\u00ed {bulletin}",
-  "analysis.delete_confirm": "Voleu suprimir aquesta an\u00e0lisi? Es conserva a l'historial.",
+  "analysis.delete_confirm": "Voleu suprimir aquesta anàlisi? Deixarà d'aparèixer al quadern.",
 
   // Els quatre valors del cat\u00e0leg MATERIAL_ANALIZADO del FEGA, que
   // distingeix el cultiu dempeus del producte ja collit.

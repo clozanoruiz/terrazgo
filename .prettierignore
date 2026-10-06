@@ -11,6 +11,6 @@ package-lock.json
 src/lib/thirdPartyLicences.json
 # Harvested service responses used as test fixtures — byte-exact, never reformatted.
 crates/*/tests/fixtures/
-crates/module-cue/src/demo/*.geojson
+crates/module-phytosanitary/src/demo/*.geojson
 # Vendored official reference documents (FEGA schemas) — byte-exact, never reformatted.
 docs/references/

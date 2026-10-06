@@ -38,6 +38,11 @@ pub struct AppState {
 /// documented performance contract).
 pub struct GeoState {
     pub cache: Database,
+    /// Where that file is. Kept beside the handle for the same reason
+    /// [`AppState`] keeps `db_path`: the About panel reports both databases'
+    /// location and size on disk, and a path recovered from the connection
+    /// would need the lock to answer a question that is not about the data.
+    pub cache_path: PathBuf,
 }
 
 /// Device-local app settings (`settings.json` in the app data dir), loaded
@@ -57,6 +62,6 @@ pub struct SettingsState {
 /// command taking `State<...>` then fails with Tauri's raw "state not
 /// managed" error. The frontend polls `app_ready` (which has no `State`
 /// parameter, so it works at any time) before mounting the app. Desktop
-/// never races — its window is created only after setup returns — so the
-/// first poll answers `true` there.
+/// races too: its window is up while `initialise` still runs on a worker, so
+/// a first poll there can answer `false` as well.
 pub struct SetupComplete;

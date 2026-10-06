@@ -10,7 +10,46 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{Connection, Row, params_from_iter};
+use rusqlite::{CachedStatement, Connection, Row, params_from_iter};
+
+/// A statement prepared once per connection and reused by every call that runs
+/// it — **the only way anything in this workspace reaches SQLite's prepared
+/// statement cache.**
+///
+/// The cache is an LRU keyed by the SQL TEXT, sized by
+/// [`crate::db::STATEMENT_CACHE_CAPACITY`], and it belongs to the connection —
+/// which the whole app shares. So it is one small fixed-size resource that
+/// every code path draws on, and two properties have to hold for it to stay
+/// useful:
+///
+/// 1. **Cached SQL is fixed text.** Text built per table or per parameter count
+///    puts a separate entry in the cache for every variant, evicting the
+///    statements that do run on every write. `&'static str` is the compiler
+///    saying so: `&format!(…)` does not fit through this signature. A statement
+///    whose text varies is prepared with plain `prepare`, or held by the loop
+///    that runs it — see "the bulk rule" below.
+/// 2. **Every cached statement is a named `const`.** Nothing in the type system
+///    asks for this; a budget does. The cache cannot be inspected at runtime
+///    (rusqlite exposes no length or capacity outside its own tests), so the
+///    only way to know the working set fits is to count the names, which
+///    `statement_cache.rs` does. An inline literal would be uncountable.
+///
+/// **The bulk rule.** A loop that writes many rows of many shapes — the sync
+/// applier is the one this exists for — does not belong here at all, however
+/// hot it is. It groups its rows by shape and holds one `Statement` per group
+/// for the length of that group, which is both faster (no per-row lookup) and
+/// finite (the statements die with the import). A bulk path on the shared cache
+/// evicts the steady-state one no matter how large the cache is.
+///
+/// Caching is worth it for statements that run on EVERY write and are cheap to
+/// run: parsing and planning them afresh cost more than running them, which is
+/// the measurement that put [`crate::audit::begin`] here (4-5 µs, from 24).
+pub fn cached_statement<'conn>(
+    conn: &'conn Connection,
+    sql: &'static str,
+) -> rusqlite::Result<CachedStatement<'conn>> {
+    conn.prepare_cached(sql)
+}
 
 /// Parent ids per statement. Comfortably under SQLite's variable limit on every
 /// version (999 before 3.32, 32 766 after), so the bound never has to be

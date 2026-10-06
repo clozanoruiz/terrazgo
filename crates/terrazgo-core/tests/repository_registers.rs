@@ -49,7 +49,6 @@ fn farm_contact_details_round_trip_and_are_audited() {
             opened_on: None,
             latitude: None,
             longitude: None,
-            country_code: "es".into(),
             es: Some(FarmEsFields {
                 rega_code: None,
                 rea_code: Some("ES244700000123".into()),
@@ -97,7 +96,6 @@ fn farm_representative_is_reconciled_from_the_submitted_state() {
         opened_on: None,
         latitude: None,
         longitude: None,
-        country_code: "es".into(),
         es: None,
         representative: rep,
     };
@@ -166,7 +164,7 @@ fn crop_carries_its_own_surface_and_agronomic_codes() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Parcela 1"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
 
     let crop = repo::insert_crop(
         &mut conn,
@@ -291,7 +289,7 @@ fn operator_tax_id_and_machinery_acquisition_date_round_trip() {
 
 // --- commercialised harvest (model section 5) -------------------------------
 //
-// In core rather than in the CUE module: what leaves the holding and to whom is
+// In core rather than in the phytosanitary module: what leaves the holding and to whom is
 // whole-farm data the costs and analytics modules will want. Fully correctable,
 // like the treated-seed register — the record holds no snapshot of another
 // row's identity, so there is nothing a later edit elsewhere could rewrite.
@@ -305,8 +303,8 @@ struct HarvestFixture {
 }
 
 fn harvest_fixture(conn: &mut Connection) -> HarvestFixture {
-    let season = repo::insert_season(conn, new_season(2026, "2025/2026"), None).unwrap();
     let farm = repo::insert_farm(conn, new_farm("Finca La Vega"), None).unwrap();
+    let season = repo::insert_season(conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
     let plot_a = repo::insert_plot(conn, new_plot(&farm.id, "El Prado"), None).unwrap();
     let plot_b = repo::insert_plot(conn, new_plot(&farm.id, "La Loma"), None).unwrap();
     let crop_a = repo::insert_crop(
@@ -393,7 +391,7 @@ fn a_harvest_records_what_left_the_holding_and_to_whom() {
 /// A quantity is a value AND its unit or neither: an amount with no unit is not
 /// a statement, and the set is {kg, t} because that is what the model measures a
 /// sold harvest in. Enforced here rather than by a foreign key — `unit` is a
-/// module-cue lookup and core may never reference a module's table.
+/// module-phytosanitary lookup and core may never reference a module's table.
 #[test]
 fn a_harvest_quantity_is_a_value_and_a_unit_or_neither() {
     let mut conn = db();
@@ -665,30 +663,52 @@ fn harvests_list_per_farm_and_campaign_oldest_first() {
     assert_eq!(rows[1].record.harvested_on, "2026-08-02");
 }
 
-/// The core half of the season-deletion guard. Every record-book view is read
-/// through its season, so hiding one would hide the sale it holds — including a
-/// soft-deleted one, whose audit history is reachable only that way.
+/// Deleting a book deletes the sales it holds: every record-book view is read
+/// through its book, so a book removed around a live sale would hide it
+/// (docs/sync.md → Deleting a book with its records). A sale removed on its own
+/// before is left as it was — nothing is written to it.
 #[test]
-fn a_season_holding_a_harvest_cannot_be_deleted() {
+fn deleting_a_book_takes_its_harvests_and_leaves_a_removed_one_alone() {
     let mut conn = db();
     let fx = harvest_fixture(&mut conn);
-    let empty = repo::insert_season(&mut conn, new_season(2028, "2027/2028"), None).unwrap();
+    let empty =
+        repo::insert_season(&mut conn, new_season(&fx.farm_id, 2028, "2027/2028"), None).unwrap();
 
-    let saved = repo::insert_harvest_record(&mut conn, new_harvest(&fx), None).unwrap();
-    assert!(matches!(
-        repo::soft_delete_season(&mut conn, &fx.season_id, None).unwrap_err(),
-        CoreError::Invalid("season_in_use")
-    ));
-    // A season with nothing in it is still deletable.
-    assert!(repo::soft_delete_season(&mut conn, &empty.id, None).is_ok());
+    let sold = repo::insert_harvest_record(&mut conn, new_harvest(&fx), None).unwrap();
+    let withdrawn = repo::insert_harvest_record(&mut conn, new_harvest(&fx), None).unwrap();
+    repo::soft_delete_harvest_record(&mut conn, &withdrawn.record.id, None).unwrap();
+    let logged = |conn: &rusqlite::Connection, id: &str| -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM record_change WHERE root_id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap()
+    };
+    let withdrawn_history = logged(&conn, &withdrawn.record.id);
 
-    repo::soft_delete_harvest_record(&mut conn, &saved.record.id, None).unwrap();
+    assert_eq!(
+        repo::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        2,
+        "the live sale and the fixture's crop — never the sale removed before"
+    );
     assert!(
-        matches!(
-            repo::soft_delete_season(&mut conn, &fx.season_id, None).unwrap_err(),
-            CoreError::Invalid("season_in_use")
-        ),
-        "a soft-deleted sale still pins its season"
+        repo::list_harvest_records(&conn, &fx.season_id, &fx.farm_id)
+            .unwrap()
+            .is_empty()
+    );
+    let (op, _, after) = last_change(&conn, "harvest_record", &sold.record.id);
+    assert_eq!(op, "delete");
+    assert!(after["deleted_at"].is_string());
+    assert_eq!(
+        logged(&conn, &withdrawn.record.id),
+        withdrawn_history,
+        "a sale already removed is not written again"
+    );
+    // A book with nothing in it goes the same way.
+    assert_eq!(
+        repo::delete_book(&mut conn, &empty.id, &[], None).unwrap(),
+        0
     );
 }
 
@@ -916,6 +936,31 @@ fn a_sowing_needs_a_plot_and_it_must_be_on_the_farm() {
     ));
 }
 
+/// The schema's own half of the season rule. A register names its farm AND its
+/// season, and the composite key onto `season(id, farm_id)` refuses a pair from
+/// two holdings — a record filed so would print in neither book. No rule in
+/// this crate checks it first; the plots here are all on the record's farm.
+#[test]
+fn a_sowing_filed_under_another_farms_season_is_refused_by_the_schema() {
+    let mut conn = db();
+    let fx = harvest_fixture(&mut conn);
+    let other_farm = repo::insert_farm(&mut conn, new_farm("Finca del Vecino"), None).unwrap();
+    let other_season = repo::insert_season(
+        &mut conn,
+        new_season(&other_farm.id, 2026, "2025/2026"),
+        None,
+    )
+    .unwrap();
+
+    let mut crossed = new_sowing(&fx);
+    crossed.season_id = other_season.id;
+    let err = repo::insert_sowing_record(&mut conn, crossed, None).unwrap_err();
+    assert!(
+        matches!(&err, CoreError::Sqlite(e) if e.to_string().contains("FOREIGN KEY")),
+        "expected the composite foreign key to refuse it, got {err:?}"
+    );
+}
+
 #[test]
 fn a_correction_reconciles_the_sown_plots_and_keeps_the_ones_that_stayed() {
     let mut conn = db();
@@ -1022,13 +1067,13 @@ fn sowings_list_oldest_first_within_their_own_season_and_farm() {
 }
 
 #[test]
-fn a_season_holding_a_sowing_cannot_be_deleted() {
-    // Every register scoped to a season has to be in this guard: a season
-    // holding nothing but a sowing would otherwise be deletable, and its
-    // records would vanish from a book that is read season by season.
+fn deleting_a_book_takes_its_sowings_and_leaves_their_plots_alone() {
+    // A sowing is removed as its own delete removes it — its row, never its
+    // plots, which belong to it and go nowhere without it.
     let mut conn = db();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2025/2026"), None).unwrap();
     let farm = repo::insert_farm(&mut conn, new_farm("Arrozal"), None).unwrap();
+    let season =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2025/2026"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "Tabla 1"), None).unwrap();
 
     repo::insert_sowing_record(
@@ -1050,11 +1095,26 @@ fn a_season_holding_a_sowing_cannot_be_deleted() {
         None,
     )
     .unwrap();
+    let plots_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sowing_plot", [], |r| r.get(0))
+        .unwrap();
 
-    assert!(matches!(
-        repo::soft_delete_season(&mut conn, &season.id, None).unwrap_err(),
-        CoreError::Invalid("season_in_use")
-    ));
+    assert_eq!(
+        repo::delete_book(&mut conn, &season.id, &[], None).unwrap(),
+        1
+    );
+    let live: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sowing_record WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(live, 0);
+    let plots_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM sowing_plot", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(plots_after, plots_before, "children are untouched");
 }
 
 #[test]
@@ -1066,8 +1126,9 @@ fn crops_on_plot_returns_every_live_unit_and_says_nothing_about_choosing() {
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "El Prado"), None).unwrap();
     let bare = repo::insert_plot(&mut conn, new_plot(&farm.id, "El Erial"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
-    let other_season = repo::insert_season(&mut conn, new_season(2027, "2027"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
+    let other_season =
+        repo::insert_season(&mut conn, new_season(&farm.id, 2027, "2027"), None).unwrap();
 
     let crop = |plot_id: &str, season_id: &str, species: &str| NewCrop {
         plot_id: plot_id.into(),
@@ -1126,7 +1187,7 @@ fn find_crop_for_export_resolves_a_withdrawn_crop() {
     let mut conn = db();
     let farm = repo::insert_farm(&mut conn, new_farm("Finca"), None).unwrap();
     let plot = repo::insert_plot(&mut conn, new_plot(&farm.id, "El Prado"), None).unwrap();
-    let season = repo::insert_season(&mut conn, new_season(2026, "2026"), None).unwrap();
+    let season = repo::insert_season(&mut conn, new_season(&farm.id, 2026, "2026"), None).unwrap();
     let wheat = repo::insert_crop(
         &mut conn,
         NewCrop {

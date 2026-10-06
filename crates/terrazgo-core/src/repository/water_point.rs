@@ -9,7 +9,7 @@
 //! snapshot of another row, which is the condition `*_snapshot` columns exist
 //! to handle. Where there is nothing frozen, immutability buys nothing.
 //!
-//! The declaration invariant runs BOTH ways, as in the CUE module's
+//! The declaration invariant runs BOTH ways, as in the phytosanitary module's
 //! `register_declaration`: declaring a plot empty while it holds points is
 //! refused, and recording a point on a declared plot withdraws the declaration
 //! in the same transaction. The record is the stronger statement, and a stale
@@ -17,10 +17,11 @@
 //! proof-of-check.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{WriteTx, begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{NewWaterPoint, UpdateWaterPoint, WaterDeclaration, WaterPoint};
+use crate::sync::{WATER_DECLARATION_SLOT, slot_id_of};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use uuid::Uuid;
 
@@ -35,10 +36,11 @@ pub fn insert_water_point(
     let distance_m = validated_distance(new.inside_plot, new.distance_m)?;
     let (latitude, longitude) = validated_coordinates(new.latitude, new.longitude)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     require_active_plot(&tx, &new.plot_id)?;
+    // Two registers, one change set: the point, and the declaration it retracts.
     // A point contradicts any standing "nothing here" for its plot.
-    withdraw_declaration_tx(&tx, &new.plot_id, actor)?;
+    withdraw_declaration_tx(&tx, &new.plot_id)?;
 
     let now = now_utc_iso();
     let point = WaterPoint {
@@ -70,7 +72,8 @@ pub fn insert_water_point(
             point.updated_at
         ],
     )?;
-    log_insert(&tx, "plot_water_point", &point.id, None, actor, &point)?;
+    let stamp = tx.register("plot_water_point", &point.id, None)?;
+    log_insert(&tx, &stamp, "plot_water_point", &point.id, &point)?;
     tx.commit()?;
     Ok(point)
 }
@@ -102,7 +105,7 @@ pub fn update_water_point(
     let distance_m = validated_distance(update.inside_plot, update.distance_m)?;
     let (latitude, longitude) = validated_coordinates(update.latitude, update.longitude)?;
 
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM plot_water_point WHERE id = ?1 AND deleted_at IS NULL",
@@ -135,7 +138,8 @@ pub fn update_water_point(
             after.updated_at
         ],
     )?;
-    log_update(&tx, "plot_water_point", id, None, actor, &before, &after)?;
+    let stamp = tx.register("plot_water_point", id, None)?;
+    log_update(&tx, &stamp, "plot_water_point", id, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
@@ -143,7 +147,7 @@ pub fn update_water_point(
 /// Soft delete: a past campaign's printed book named this point, so the row
 /// stays reachable through its audit history.
 pub fn soft_delete_water_point(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM plot_water_point WHERE id = ?1 AND deleted_at IS NULL",
@@ -160,15 +164,8 @@ pub fn soft_delete_water_point(conn: &mut Connection, id: &str, actor: Option<&s
         "UPDATE plot_water_point SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(
-        &tx,
-        "plot_water_point",
-        id,
-        None,
-        actor,
-        &before,
-        Some(&after),
-    )?;
+    let stamp = tx.register("plot_water_point", id, None)?;
+    log_delete(&tx, &stamp, "plot_water_point", id, &before, Some(&after))?;
     tx.commit()?;
     Ok(())
 }
@@ -196,7 +193,7 @@ pub fn set_water_declaration(
     declared_on: &str,
     actor: Option<&str>,
 ) -> Result<WaterDeclaration> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     require_active_plot(&tx, plot_id)?;
 
     let points: i64 = tx.query_row(
@@ -226,12 +223,16 @@ pub fn set_water_declaration(
                 "UPDATE plot_water_declaration SET declared_on = ?2, updated_at = ?3 WHERE id = ?1",
                 params![after.id, after.declared_on, after.updated_at],
             )?;
+            let stamp = tx.register(
+                "plot_water_declaration",
+                &slot_id_of(&after, WATER_DECLARATION_SLOT)?,
+                None,
+            )?;
             log_update(
                 &tx,
+                &stamp,
                 "plot_water_declaration",
                 &after.id,
-                None,
-                actor,
                 &before,
                 &after,
             )?;
@@ -258,7 +259,12 @@ pub fn set_water_declaration(
                     row.updated_at
                 ],
             )?;
-            log_insert(&tx, "plot_water_declaration", &row.id, None, actor, &row)?;
+            let stamp = tx.register(
+                "plot_water_declaration",
+                &slot_id_of(&row, WATER_DECLARATION_SLOT)?,
+                None,
+            )?;
+            log_insert(&tx, &stamp, "plot_water_declaration", &row.id, &row)?;
             row
         }
     };
@@ -273,8 +279,8 @@ pub fn clear_water_declaration(
     plot_id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
-    withdraw_declaration_tx(&tx, plot_id, actor)?;
+    let tx = begin(conn, actor)?;
+    withdraw_declaration_tx(&tx, plot_id)?;
     tx.commit()?;
     Ok(())
 }
@@ -286,7 +292,10 @@ pub fn clear_water_declaration(
 /// Withdraw the standing declaration for one plot, if there is one. Shared by
 /// the explicit clear and by `insert_water_point`, which must withdraw inside
 /// its own transaction so the record and the retraction land together.
-fn withdraw_declaration_tx(tx: &Transaction, plot_id: &str, actor: Option<&str>) -> Result<()> {
+///
+/// Takes the caller's change set rather than a stamp: the declaration is a
+/// register of its own, so it registers itself in whatever set is open.
+fn withdraw_declaration_tx(tx: &WriteTx, plot_id: &str) -> Result<()> {
     let Some(before) = tx
         .query_row(
             "SELECT * FROM plot_water_declaration WHERE plot_id = ?1 AND deleted_at IS NULL",
@@ -305,12 +314,16 @@ fn withdraw_declaration_tx(tx: &Transaction, plot_id: &str, actor: Option<&str>)
         "UPDATE plot_water_declaration SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![before.id, now],
     )?;
+    let stamp = tx.register(
+        "plot_water_declaration",
+        &slot_id_of(&before, WATER_DECLARATION_SLOT)?,
+        None,
+    )?;
     log_delete(
         tx,
+        &stamp,
         "plot_water_declaration",
         &before.id,
-        None,
-        actor,
         &before,
         Some(&after),
     )?;

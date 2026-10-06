@@ -26,7 +26,7 @@
 //! there is exactly ONE place where an operation is validated and audited,
 //! however many forms can create one.
 
-use super::audit::{log_delete, log_insert, log_update, write_change};
+use super::audit::{ChangeStamp, WriteTx, begin, log_delete, log_insert, log_update, write_change};
 use super::{no_rows_to_not_found, validated_cover_link};
 use crate::error::{EcoschemeError, Result};
 use crate::models::{
@@ -60,7 +60,7 @@ use uuid::Uuid;
 /// The list is at its FINAL value already, so seams 3 and 4 add pages rather
 /// than reopening validation. Which of them a form offers is the form's
 /// business: this is what the decree admits.
-const OPERATION_PRACTICES: [&str; 5] = [
+pub const OPERATION_PRACTICES: [&str; 5] = [
     "sustainable_mowing",
     "communal_pasture",
     "flooded_biodiversity",
@@ -73,17 +73,16 @@ pub fn insert_cultural_operation(
     new: NewCulturalOperation,
     actor: Option<&str>,
 ) -> Result<CulturalOperationDetail> {
-    let tx = conn.transaction()?;
-    let detail = insert_cultural_operation_tx(&tx, new, actor)?;
+    let tx = begin(conn, actor)?;
+    let detail = insert_cultural_operation_tx(&tx, new)?;
     tx.commit()?;
     Ok(detail)
 }
 
 /// The insert itself, inside a transaction the caller owns.
 pub(super) fn insert_cultural_operation_tx(
-    tx: &Transaction,
+    tx: &WriteTx,
     new: NewCulturalOperation,
-    actor: Option<&str>,
 ) -> Result<CulturalOperationDetail> {
     validate_interval(&new.performed_on, new.performed_end_date.as_deref())?;
     validate_practice(&new.practice_code)?;
@@ -136,25 +135,16 @@ pub(super) fn insert_cultural_operation_tx(
         ],
     )?;
 
+    // The record is a register of its own, in whatever change set the caller
+    // opened — its own, or a soil cover's writing its maintenance line.
+    let stamp = tx.register("cultural_operation", &record.id, Some(&record.season_id))?;
+
     let mut plot_rows = Vec::new();
     for plot_id in plot_ids {
-        plot_rows.push(insert_plot_row(
-            tx,
-            &record.id,
-            &record.season_id,
-            &plot_id,
-            actor,
-        )?);
+        plot_rows.push(insert_plot_row(tx, &record.id, &plot_id, &stamp)?);
     }
 
-    log_insert(
-        tx,
-        "cultural_operation",
-        &record.id,
-        Some(&record.season_id),
-        actor,
-        &record,
-    )?;
+    log_insert(tx, &stamp, "cultural_operation", &record.id, &record)?;
     Ok(CulturalOperationDetail {
         record,
         plots: plot_rows,
@@ -168,18 +158,17 @@ pub fn update_cultural_operation(
     update: UpdateCulturalOperation,
     actor: Option<&str>,
 ) -> Result<CulturalOperationDetail> {
-    let tx = conn.transaction()?;
-    let detail = update_cultural_operation_tx(&tx, id, update, actor)?;
+    let tx = begin(conn, actor)?;
+    let detail = update_cultural_operation_tx(&tx, id, update)?;
     tx.commit()?;
     Ok(detail)
 }
 
 /// The correction itself, inside a transaction the caller owns.
 pub(super) fn update_cultural_operation_tx(
-    tx: &Transaction,
+    tx: &WriteTx,
     id: &str,
     update: UpdateCulturalOperation,
-    actor: Option<&str>,
 ) -> Result<CulturalOperationDetail> {
     validate_interval(&update.performed_on, update.performed_end_date.as_deref())?;
     validate_practice(&update.practice_code)?;
@@ -192,6 +181,7 @@ pub(super) fn update_cultural_operation_tx(
         )
         .optional()?
         .ok_or(EcoschemeError::NotFound)?;
+    let stamp = tx.register("cultural_operation", id, Some(&before.season_id))?;
     let plot_ids = validated_plots(tx, &before.farm_id, &update.plot_ids)?;
     let soil_cover_id = validated_cover_link(
         tx,
@@ -231,17 +221,9 @@ pub(super) fn update_cultural_operation_tx(
             after.updated_at
         ],
     )?;
-    log_update(
-        tx,
-        "cultural_operation",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    log_update(tx, &stamp, "cultural_operation", id, &before, &after)?;
 
-    let plot_rows = reconcile_plots(tx, &after, &plot_ids, actor)?;
+    let plot_rows = reconcile_plots(tx, &after, &plot_ids, &stamp)?;
     Ok(CulturalOperationDetail {
         record: after,
         plots: plot_rows,
@@ -253,19 +235,17 @@ pub fn soft_delete_cultural_operation(
     id: &str,
     actor: Option<&str>,
 ) -> Result<()> {
-    let tx = conn.transaction()?;
-    soft_delete_cultural_operation_tx(&tx, id, actor)?;
+    let tx = begin(conn, actor)?;
+    soft_delete_cultural_operation_tx(&tx, id)?;
     tx.commit()?;
     Ok(())
 }
 
 /// The withdrawal itself, inside a transaction the caller owns. Used by the
-/// cover register when a maintenance line stops being sent.
-pub(super) fn soft_delete_cultural_operation_tx(
-    tx: &Transaction,
-    id: &str,
-    actor: Option<&str>,
-) -> Result<()> {
+/// cover register when a maintenance line stops being sent, and for a record
+/// removed as a duplicate, which shares one change set with the verdict that
+/// says why (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_cultural_operation_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM cultural_operation WHERE id = ?1 AND deleted_at IS NULL",
@@ -274,6 +254,7 @@ pub(super) fn soft_delete_cultural_operation_tx(
         )
         .optional()?
         .ok_or(EcoschemeError::NotFound)?;
+    let stamp = tx.register("cultural_operation", id, Some(&before.season_id))?;
     let now = now_utc_iso();
     let mut after = before.clone();
     after.deleted_at = Some(now.clone());
@@ -284,11 +265,10 @@ pub(super) fn soft_delete_cultural_operation_tx(
     )?;
     write_change(
         tx,
+        &stamp,
         "cultural_operation",
         id,
-        Some(&before.season_id),
         "delete",
-        actor,
         json!({ "before": serde_json::to_value(&before)?, "after": serde_json::to_value(&after)? }),
     )?;
     Ok(())
@@ -343,18 +323,6 @@ pub fn list_cultural_operations_for_export(
     all_with_details(conn, records)
 }
 
-/// Whether any cultural operation hangs off this season — this module's second
-/// arm of the guard the shell chains before deleting one. Soft-deleted records
-/// count: their audit history is only reachable through the season.
-pub(super) fn season_has_operations(conn: &Connection, season_id: &str) -> Result<bool> {
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM cultural_operation WHERE season_id = ?1)",
-        [season_id],
-        |r| r.get(0),
-    )?;
-    Ok(held)
-}
-
 // --- reconciliation --------------------------------------------------------
 
 /// Plots carry no attributes of their own here — model 9.2 prints the plot's
@@ -364,7 +332,7 @@ fn reconcile_plots(
     tx: &Transaction,
     record: &CulturalOperation,
     desired: &[String],
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<Vec<CulturalOperationPlot>> {
     let current = plots_of_tx(tx, &record.id)?;
 
@@ -378,10 +346,9 @@ fn reconcile_plots(
             )?;
             log_delete(
                 tx,
+                stamp,
                 "cultural_operation_plot",
                 &existing.id,
-                Some(&record.season_id),
-                actor,
                 existing,
                 None::<&CulturalOperationPlot>,
             )?;
@@ -392,13 +359,7 @@ fn reconcile_plots(
     for plot_id in desired {
         match current.iter().find(|c| &c.plot_id == plot_id) {
             Some(existing) => rows.push(existing.clone()),
-            None => rows.push(insert_plot_row(
-                tx,
-                &record.id,
-                &record.season_id,
-                plot_id,
-                actor,
-            )?),
+            None => rows.push(insert_plot_row(tx, &record.id, plot_id, stamp)?),
         }
     }
     Ok(rows)
@@ -407,9 +368,8 @@ fn reconcile_plots(
 fn insert_plot_row(
     tx: &Transaction,
     cultural_operation_id: &str,
-    season_id: &str,
     plot_id: &str,
-    actor: Option<&str>,
+    stamp: &ChangeStamp,
 ) -> Result<CulturalOperationPlot> {
     let row = CulturalOperationPlot {
         id: Uuid::now_v7().to_string(),
@@ -421,14 +381,7 @@ fn insert_plot_row(
          VALUES (?1, ?2, ?3)",
         params![row.id, row.cultural_operation_id, row.plot_id],
     )?;
-    log_insert(
-        tx,
-        "cultural_operation_plot",
-        &row.id,
-        Some(season_id),
-        actor,
-        &row,
-    )?;
+    log_insert(tx, stamp, "cultural_operation_plot", &row.id, &row)?;
     Ok(row)
 }
 

@@ -24,6 +24,7 @@
   import { formatDate, formatNumber, t, tCode } from "../i18n.js";
   import { lookups } from "./lookups.svelte.js";
   import { confirmDialog, invoke } from "./backend.js";
+  import { checkSaved } from "./savedCheck.js";
   import { run } from "./notifications.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
@@ -133,11 +134,6 @@
       .then((loaded) => {
         if (practice !== practiceCode) return;
         coverTypes = loaded;
-        // A kind the new practice cannot be is cleared rather than carried
-        // over: an inert cover described as "sembrada" is a wrong record.
-        if (coverTypeCode && !loaded.some((entry) => entry.code === coverTypeCode)) {
-          coverTypeCode = "";
-        }
       })
       // A catalogue that cannot be read leaves the picker empty; it is a
       // typing aid, not a gate on recording the cover.
@@ -175,7 +171,7 @@
     editingId = null;
   }
 
-  /// The row the inspector is editing, so the delete button beside the form
+  /// The row the panel is editing, so the delete button beside the form
   /// knows which record it is about. Null while creating.
   const editing = $derived(records.find((d) => d.record.id === editingId) ?? null);
 
@@ -242,15 +238,19 @@
         : [],
     };
 
+    let savedId = editingId;
     if (editingId) {
       await invoke("update_soil_cover", { soilCoverId: editingId, update: payload });
     } else {
-      await invoke("create_soil_cover", {
-        record: { ...payload, season_id: seasonId, farm_id: farmId },
-      });
+      savedId = (
+        await invoke("create_soil_cover", {
+          record: { ...payload, season_id: seasonId, farm_id: farmId },
+        })
+      ).record.id;
     }
     hideForm();
     load();
+    await checkSaved("soil_cover", savedId);
   }
 
   function remove(record) {
@@ -327,12 +327,18 @@
     {#snippet inspector(formId)}
       <TzForm id={formId} onsubmit={submit}>
         <div class="form-grid">
+          <!-- The two practices' cover types never overlap (arts. 42 and 43), so
+               changing the practice clears the kind: an inert cover described
+               as "sembrada" is a wrong record. Only a change does — clearing
+               whenever the list loaded erased a stored kind this device's
+               catalogue lacks the moment the record was opened. -->
           <TzSelect
             label={t("cover.practice")}
             hint={t("cover.practice_hint")}
             items={codeItems(practices, "eco_practice")}
             required
             bind:value={practiceCode}
+            onchange={() => (coverTypeCode = "")}
           />
           <TzCombobox
             label={t("cover.type")}
@@ -342,6 +348,7 @@
               (entry) => entry.name,
               (entry) => entry.code,
             )}
+            catalogue
             bind:value={coverTypeCode}
           />
           <DateInput
@@ -416,6 +423,7 @@
                         (entry) => entry.name,
                         (entry) => entry.code,
                       )}
+                      catalogue
                       required
                       bind:value={animal.speciesCode}
                     />

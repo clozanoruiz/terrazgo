@@ -467,21 +467,36 @@ fn records_list_oldest_first_within_their_own_season_and_farm() {
     );
 }
 
+/// Deleting a book deletes its grazing records, and bringing it back restores each one
+/// whole, the rows belonging to it included (docs/sync.md → Deleting a book
+/// with its records). Core finds the register in the aggregate map; this pins
+/// that it finds THIS one.
 #[test]
-fn a_season_holding_a_grazing_reports_itself_in_use() {
-    // The shell chains this before soft-deleting a season: hiding the season
-    // would hide its register from a book that is read season by season.
+fn deleting_its_book_takes_a_grazing_and_bringing_it_back_restores_it_whole() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
+    let created = repo::insert_grazing_record(&mut conn, sample(&fx), None).unwrap();
+    let id = created.record.id.clone();
+    let before = serde_json::to_value(repo::get_grazing_record(&conn, &id).unwrap()).unwrap();
 
-    assert!(!repo::season_has_records(&conn, &fx.season_id).unwrap());
-    let detail = repo::insert_grazing_record(&mut conn, sample(&fx), None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    assert_eq!(
+        terrazgo_core::repository::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        1
+    );
+    assert!(matches!(
+        repo::get_grazing_record(&conn, &id),
+        Err(module_ecoscheme::EcoschemeError::NotFound)
+    ));
 
-    // Soft-deleted records still count: their audit history is only reachable
-    // through the season they belong to.
-    repo::soft_delete_grazing_record(&mut conn, &detail.record.id, None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    terrazgo_core::repository::restore_book(
+        &mut conn,
+        &fx.season_id,
+        &terrazgo_core::date::today_utc(),
+        None,
+    )
+    .unwrap();
+    let after = serde_json::to_value(repo::get_grazing_record(&conn, &id).unwrap()).unwrap();
+    terrazgo_testkit::assert_restored(&before, &after);
 }
 
 #[test]

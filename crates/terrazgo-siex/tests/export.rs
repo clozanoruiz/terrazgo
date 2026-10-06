@@ -18,8 +18,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use terrazgo_core::models::FarmEsFields;
 use terrazgo_siex::export_precheck;
 
@@ -642,6 +642,7 @@ fn precheck_lists_missing_farm_identity_fields() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )
@@ -672,6 +673,7 @@ fn precheck_flags_an_unmappable_province() {
                 siex_code: None,
                 province_code: Some("99".into()), // no such INE province
             }),
+            ..NewFarm::default()
         },
         None,
     )
@@ -700,6 +702,7 @@ fn precheck_flags_a_malformed_rea_code() {
                 siex_code: None,
                 province_code: Some("47".into()),
             }),
+            ..NewFarm::default()
         },
         None,
     )

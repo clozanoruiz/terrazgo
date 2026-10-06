@@ -7,6 +7,8 @@
 use crate::error::Result;
 use rusqlite::Connection;
 use rusqlite_migration::{M, Migrations};
+use terrazgo_core::merge::RowCaption;
+use terrazgo_core::sync::TableSync;
 
 /// The ordered migration steps this module contributes to the core's single
 /// global sequence. The shell's `composed_migrations()` collects these from
@@ -19,6 +21,32 @@ pub fn migration_set() -> Vec<M<'static>> {
         M::up(include_str!("../migrations/0002_seed_reference.sql")),
     ]
 }
+
+/// This module's half of the aggregate map (docs/sync.md → The aggregate map):
+/// what the merge does with each of its tables. Composed with core's and every
+/// other module's by the shell, whose contract test refuses a table nobody
+/// declared — the same division as [`BACKUP_SHAPE`].
+pub const SYNC_SHAPE: &[TableSync] = &[
+    TableSync::root("grazing_record"),
+    TableSync::child("grazing_plot", "grazing_record", "grazing_record_id"),
+    TableSync::child("grazing_animal", "grazing_record", "grazing_record_id"),
+    TableSync::root("cultural_operation"),
+    TableSync::child(
+        "cultural_operation_plot",
+        "cultural_operation",
+        "cultural_operation_id",
+    ),
+    TableSync::root("soil_cover"),
+    TableSync::child("soil_cover_plot", "soil_cover", "soil_cover_id"),
+];
+
+/// How a row of each of this module's tables is named to a person — see
+/// `module_phytosanitary::ROW_CAPTIONS`, whose half of the map this joins.
+pub const ROW_CAPTIONS: &[RowCaption] = &[
+    RowCaption::new("grazing_record", "started_on"),
+    RowCaption::new("cultural_operation", "performed_on"),
+    RowCaption::new("soil_cover", "established_on"),
+];
 
 /// The columns a current-version backup must carry for THIS module's tables.
 /// Composed with the core fingerprint and every other module's list by the
@@ -101,5 +129,8 @@ pub fn open_in_memory() -> Result<Connection> {
     // Tests run on the same connection configuration the app does.
     terrazgo_core::db::harden(&conn)?;
     migrations().to_latest(&mut conn)?;
+    // Every database is a replica of its own (terrazgo_core::open_in_memory).
+    terrazgo_core::sync::install_device(&conn, &terrazgo_core::sync::mint_device_id())?;
+    terrazgo_core::sync::install_shape(&conn, &[terrazgo_core::sync::CORE_SYNC_SHAPE, SYNC_SHAPE])?;
     Ok(conn)
 }

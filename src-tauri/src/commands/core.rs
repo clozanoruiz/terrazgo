@@ -3,12 +3,13 @@
 
 //! Commands over `terrazgo-core`: the farm registry (farms, plots,
 //! seasons, crops, operators, machinery, advisors), its lookups, water points,
-//! geometry rows, harvest and user profiles.
+//! geometry rows, harvest and user profiles — and the alert list, which core
+//! assembles from what every alert crate raises (`crate::alerts`).
 //!
 //! Split out of `commands.rs` (2026-08-13); the boundary machinery and the
 //! re-exports stay in the parent file.
 
-use super::{CmdResult, CommandError, active_actor, alert_config, reconcile_alerts};
+use super::{CmdResult, CommandError, active_actor, device_settings};
 use crate::state;
 use crate::state::AppState;
 use anyhow::anyhow;
@@ -42,6 +43,7 @@ use terrazgo_core::models::PlotDetail;
 use terrazgo_core::models::Premises;
 use terrazgo_core::models::PremisesDetail;
 use terrazgo_core::models::Season;
+use terrazgo_core::models::SeasonPage;
 use terrazgo_core::models::UpdateAdvisor;
 use terrazgo_core::models::UpdateCrop;
 use terrazgo_core::models::UpdateFarm;
@@ -61,6 +63,99 @@ use terrazgo_core::repository as core_repo;
 // ---------------------------------------------------------------------------
 // User profiles (managed from the Settings view)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Alerts — worked out when read, never stored (docs/data-model.md → "Alerts:
+// the settled design")
+// ---------------------------------------------------------------------------
+
+/// The Status view's alert list: the alerts, the records that could not be
+/// checked, and the alert crates that could not report at all.
+#[derive(serde::Serialize)]
+pub struct AlertList {
+    pub alerts: Vec<terrazgo_core::alerts::Alert>,
+    /// Records whose value a rule could not read, named, for the farmer to open
+    /// and correct. Every other record's alerts are in `alerts` regardless.
+    pub unchecked: Vec<terrazgo_core::alerts::UncheckedRecord>,
+    /// Alert crates that failed whole, with the detail a report needs. Not
+    /// empty means `alerts` is incomplete, and the screen says so rather than
+    /// letting it pass for the whole answer.
+    pub unavailable: Vec<crate::alerts::Unavailable>,
+}
+
+/// Every alert holding today, from every crate that raises them.
+///
+/// Worked out on every call: nothing is stored, so nothing can be stale — a
+/// save, an imported bundle or midnight passing all show here the next time
+/// the list is read, with no refresh to remember.
+#[tauri::command]
+pub fn list_alerts(
+    state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
+) -> CmdResult<AlertList> {
+    let settings = device_settings(&settings_state)?;
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    let today = today_utc();
+    let gathered = crate::alerts::gather(conn, &today, &settings);
+    let unchecked = gathered.report.unchecked_in_listing_order();
+    Ok(AlertList {
+        alerts: core_repo::list_alerts(conn, gathered.report.raised, &today)?,
+        unchecked,
+        unavailable: gathered.unavailable,
+    })
+}
+
+/// The kind a card's code names, or `NotFound` for a code no alert crate
+/// declares — a screen from another build, or a damaged request.
+fn alert_kind(code: &str) -> CmdResult<terrazgo_core::alerts::AlertKind> {
+    Ok(crate::alerts::kind_by_code(code).ok_or(terrazgo_core::CoreError::NotFound)?)
+}
+
+/// Mark an alert as seen, as the card showed it: its kind, its subject and the
+/// date it printed (`None` for a standing alert). The subject's table is not
+/// asked for: the kind names it. Seeing an alert is a write that syncs, so it
+/// carries the active profile like any other.
+#[tauri::command]
+pub fn acknowledge_alert(
+    state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
+    alert_type_code: String,
+    subject_id: String,
+    due_date: Option<String>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
+    let kind = alert_kind(&alert_type_code)?;
+    let mut db = state.db.lock()?;
+    Ok(core_repo::acknowledge_alert(
+        db.conn_mut()?,
+        kind,
+        &subject_id,
+        due_date.as_deref(),
+        actor.as_deref(),
+    )?)
+}
+
+/// Hide an alert while its deadline holds, named as for `acknowledge_alert`.
+#[tauri::command]
+pub fn dismiss_alert(
+    state: State<'_, AppState>,
+    settings_state: State<'_, state::SettingsState>,
+    alert_type_code: String,
+    subject_id: String,
+    due_date: Option<String>,
+) -> CmdResult<()> {
+    let actor = active_actor(&settings_state)?;
+    let kind = alert_kind(&alert_type_code)?;
+    let mut db = state.db.lock()?;
+    Ok(core_repo::dismiss_alert(
+        db.conn_mut()?,
+        kind,
+        &subject_id,
+        due_date.as_deref(),
+        actor.as_deref(),
+    )?)
+}
 
 #[tauri::command]
 pub fn list_user_profiles(state: State<'_, AppState>) -> CmdResult<Vec<UserProfile>> {
@@ -267,11 +362,30 @@ pub fn delete_plot(
 // Seasons, crops and the treatment record book
 // ---------------------------------------------------------------------------
 
+/// One page of the record book list (see the repository for why it pages).
 #[tauri::command]
-pub fn list_seasons(state: State<'_, AppState>) -> CmdResult<Vec<Season>> {
+pub fn list_seasons(state: State<'_, AppState>, limit: i64, offset: i64) -> CmdResult<SeasonPage> {
     let db = state.db.lock()?;
     let conn = db.conn()?;
-    Ok(core_repo::list_seasons(conn)?)
+    Ok(core_repo::list_seasons(conn, limit, offset)?)
+}
+
+/// One farm's live books, the latest ending first — what a screen picking any
+/// one of them offers: where records left in a removed book go back.
+#[tauri::command]
+pub fn list_farm_seasons(state: State<'_, AppState>, farm_id: String) -> CmdResult<Vec<Season>> {
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(core_repo::list_farm_seasons(conn, &farm_id)?)
+}
+
+/// One record book, by its season — what a book page opens on, and where it
+/// learns which farm it belongs to.
+#[tauri::command]
+pub fn get_season(state: State<'_, AppState>, season_id: String) -> CmdResult<Season> {
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(core_repo::get_season(conn, &season_id)?)
 }
 
 #[tauri::command]
@@ -304,34 +418,55 @@ pub fn update_season(
     )?)
 }
 
-/// Delete a season created by mistake. Only an empty season may go: core checks
-/// its own half (crops) and this command chains module-cue for the treatment
-/// half, since core may never reference a module table. Both refusals surface as
-/// the same `invalid.season_in_use`, so the frontend has one message to show.
+/// Delete a book with every record in it, in one change set (docs/sync.md →
+/// Deleting a book with its records). Every check is core's, and every
+/// register is found in the aggregate map, a module's included; the duplicate
+/// policies are passed so it can see a pair removed twice over in the book.
+/// Returns how many records went with it.
+///
+/// `async` for `export_backup`'s reason: it writes every record of the book,
+/// 2 s at 4 000 treatments, and on the main thread the window would freeze
+/// for it. The body stays synchronous.
 #[tauri::command]
-pub fn delete_season(
+pub async fn delete_season(
     state: State<'_, AppState>,
     season_id: String,
     settings_state: State<'_, state::SettingsState>,
-) -> CmdResult<()> {
+) -> CmdResult<usize> {
     let actor = active_actor(&settings_state)?;
     let mut db = state.db.lock()?;
-    let conn = db.conn_mut()?;
-    // Every module that owns season-scoped records gets a say: hiding the
-    // season would hide its register from a book that is read season by season.
-    // Core checks its own tables inside `soft_delete_season`; it may never
-    // reference a module's, which is why the chaining happens here.
-    if module_cue::repository::season_has_records(conn, &season_id)?
-        || module_fertilisation::repository::season_has_records(conn, &season_id)?
-        || module_ecoscheme::repository::season_has_records(conn, &season_id)?
-    {
-        return Err(terrazgo_core::error::CoreError::Invalid("season_in_use").into());
-    }
-    Ok(core_repo::soft_delete_season(
-        conn,
+    Ok(core_repo::delete_book(
+        db.conn_mut()?,
         &season_id,
+        &crate::duplicates::policies(),
         actor.as_deref(),
     )?)
+}
+
+/// What the confirmation before deleting a book says.
+#[derive(serde::Serialize)]
+pub struct BookDeletionPreview {
+    /// How many records go with it.
+    pub records: usize,
+    /// The last day it could be brought back, were it deleted today — a date
+    /// rather than a number of days, so the sentence counts one thing.
+    pub restorable_until: String,
+}
+
+/// What deleting a book would take, and until when it could be brought back.
+#[tauri::command]
+pub fn book_deletion_preview(
+    state: State<'_, AppState>,
+    season_id: String,
+) -> CmdResult<BookDeletionPreview> {
+    let db = state.db.lock()?;
+    Ok(BookDeletionPreview {
+        records: core_repo::count_book_records(db.conn()?, &season_id)?,
+        restorable_until: terrazgo_core::date::add_days(
+            &today_utc(),
+            core_repo::REMOVED_BOOK_DAYS,
+        )?,
+    })
 }
 
 #[tauri::command]
@@ -454,18 +589,27 @@ pub fn list_growing_environments(state: State<'_, AppState>) -> CmdResult<Vec<Lo
     Ok(core_repo::list_growing_environments(conn)?)
 }
 
+/// The licence levels a country's scheme defines. Empty for a country whose
+/// scheme is not written — a picker with nothing to offer, never Spain's.
 #[tauri::command]
-pub fn list_licence_levels(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
+pub fn list_licence_levels(
+    state: State<'_, AppState>,
+    country_code: String,
+) -> CmdResult<Vec<Lookup>> {
     let db = state.db.lock()?;
     let conn = db.conn()?;
-    Ok(core_repo::list_licence_levels(conn)?)
+    Ok(core_repo::list_licence_levels(conn, &country_code)?)
 }
 
+/// The GIP frameworks a country's scheme defines, on the same terms.
 #[tauri::command]
-pub fn list_gip_systems(state: State<'_, AppState>) -> CmdResult<Vec<Lookup>> {
+pub fn list_gip_systems(
+    state: State<'_, AppState>,
+    country_code: String,
+) -> CmdResult<Vec<Lookup>> {
     let db = state.db.lock()?;
     let conn = db.conn()?;
-    Ok(core_repo::list_gip_systems(conn)?)
+    Ok(core_repo::list_gip_systems(conn, &country_code)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -580,12 +724,13 @@ pub fn create_operator(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Operator> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    let operator = core_repo::insert_operator(conn, operator, actor.as_deref())?;
-    reconcile_alerts(conn, &config)?;
-    Ok(operator)
+    Ok(core_repo::insert_operator(
+        conn,
+        operator,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -597,12 +742,14 @@ pub fn update_operator(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Operator> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    let operator = core_repo::update_operator(conn, &operator_id, update, actor.as_deref())?;
-    reconcile_alerts(conn, &config)?;
-    Ok(operator)
+    Ok(core_repo::update_operator(
+        conn,
+        &operator_id,
+        update,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -612,12 +759,13 @@ pub fn delete_operator(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    core_repo::soft_delete_operator(conn, &operator_id, actor.as_deref())?;
-    reconcile_alerts(conn, &config)?;
-    Ok(())
+    Ok(core_repo::soft_delete_operator(
+        conn,
+        &operator_id,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -638,12 +786,13 @@ pub fn create_machinery(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<Machinery> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    let machinery = core_repo::insert_machinery(conn, machinery, actor.as_deref())?;
-    reconcile_alerts(conn, &config)?;
-    Ok(machinery)
+    Ok(core_repo::insert_machinery(
+        conn,
+        machinery,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -655,12 +804,14 @@ pub fn update_machinery(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<MachineryDetail> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    let detail = core_repo::update_machinery(conn, &machinery_id, update, actor.as_deref())?;
-    reconcile_alerts(conn, &config)?;
-    Ok(detail)
+    Ok(core_repo::update_machinery(
+        conn,
+        &machinery_id,
+        update,
+        actor.as_deref(),
+    )?)
 }
 
 #[tauri::command]
@@ -670,17 +821,17 @@ pub fn delete_machinery(
     settings_state: State<'_, state::SettingsState>,
 ) -> CmdResult<()> {
     let actor = active_actor(&settings_state)?;
-    let config = alert_config(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    core_repo::soft_delete_machinery(conn, &machinery_id, actor.as_deref())?;
-    reconcile_alerts(conn, &config)?;
-    Ok(())
+    Ok(core_repo::soft_delete_machinery(
+        conn,
+        &machinery_id,
+        actor.as_deref(),
+    )?)
 }
 
 // ---------------------------------------------------------------------------
-// Premises — the stores and vehicles models 3.4 and 3.5 treat. No alert
-// reconciliation: unlike machinery, a premises has no expiry to warn about.
+// Premises — the stores and vehicles models 3.4 and 3.5 treat.
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -752,7 +903,7 @@ pub fn create_premises(
 /// Correcting a premises, with the one guard that spans two crates.
 ///
 /// Core owns the thing and cannot see `non_field_treatment`, so the shell asks
-/// module-cue which registers already name this row before letting its
+/// module-phytosanitary which registers already name this row before letting its
 /// `kind_code` change — the season-deletion precedent. Turning a store into a
 /// vehicle while model 3.4 holds a record for it would print a lorry on the
 /// premises page, which is the state the record's own write path refuses.
@@ -766,8 +917,9 @@ pub fn update_premises(
     let actor = active_actor(&settings_state)?;
     let mut db = state.db.lock()?;
     let conn = db.conn_mut()?;
-    let kinds_in_use = module_cue::repository::subject_kinds_naming_premises(conn, &premises_id)?;
-    module_cue::premises_link::validate_kind_change(&kinds_in_use, &update.kind_code)?;
+    let kinds_in_use =
+        module_phytosanitary::repository::subject_kinds_naming_premises(conn, &premises_id)?;
+    module_phytosanitary::premises_link::validate_kind_change(&kinds_in_use, &update.kind_code)?;
     Ok(core_repo::update_premises(
         conn,
         &premises_id,

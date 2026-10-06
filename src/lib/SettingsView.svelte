@@ -16,9 +16,9 @@
   // declared once in settingsTree.js and rendered from there by both — the
   // nav.js arrangement, for the same reason.
   import {
+    formatDate,
     formatMode,
     formatModes,
-    formatUnit,
     languageTag,
     locale,
     locales,
@@ -29,16 +29,21 @@
   } from "../i18n.js";
   import { X } from "@lucide/svelte";
   import { confirmDialog, invoke } from "./backend.js";
+  import { formatSize } from "./byteSize.js";
+  import { exportFileName } from "./exportName.js";
   import { notify, run } from "./notifications.svelte.js";
   import NumberInput from "./NumberInput.svelte";
+  import { discardedSentences, erasedSentence } from "./purge.js";
   import AboutPanel from "./AboutPanel.svelte";
   import SettingsCatalogues from "./SettingsCatalogues.svelte";
+  import SettingsPeers from "./SettingsPeers.svelte";
   import SettingsProfiles from "./SettingsProfiles.svelte";
   import SettingsToc from "./SettingsToc.svelte";
   import Skeleton from "./Skeleton.svelte";
   import TzDialog from "./TzDialog.svelte";
   import TzSelect from "./TzSelect.svelte";
   import { searchSettings, settingsAnchor, settingsAnchors } from "./settingsTree.js";
+  import { answeredThisSession, rememberImport } from "./syncSession.js";
 
   // { settings, tile_cache_default_bytes } — the default rides along so an
   // unset cap can display its effective value without the frontend hardcoding
@@ -216,15 +221,6 @@
   // Preset cache sizes; the empty select value means "follow the default".
   const CACHE_PRESETS = [256 * MIB, 512 * MIB, 1024 * MIB, 2048 * MIB];
 
-  // Binary thresholds with the familiar GB/MB/kB labels, as before; only the
-  // number is now the reader's ("2,5 GB" in Castilian, "2.5 GB" in English)
-  // instead of a hardcoded decimal point.
-  function formatSize(bytes) {
-    if (bytes >= 1024 * MIB) return formatUnit(bytes / (1024 * MIB), "gigabyte");
-    if (bytes >= MIB) return formatUnit(Math.round(bytes / MIB), "megabyte", 0);
-    return formatUnit(Math.max(1, Math.round(bytes / 1024)), "kilobyte", 0);
-  }
-
   function changeCacheSize(value) {
     run(async () => {
       const settings = {
@@ -285,10 +281,13 @@
   // the official @tauri-apps/plugin-dialog JS wrapper uses, no npm package.
   function exportBackup() {
     run(async () => {
-      const stamp = new Date().toISOString().slice(0, 10);
+      // The stamp carries the time, not just the date: a same-day collision is
+      // renamed by the Android picker to "….db (1)" — the counter lands after
+      // the extension, and the import dialog's `.db` filter then hides the very
+      // file it just wrote. See exportName.js.
       const path = await invoke("plugin:dialog|save", {
         options: {
-          defaultPath: `terrazgo-backup-${stamp}.db`,
+          defaultPath: exportFileName(["terrazgo-backup"], "db"),
           filters: [{ name: "SQLite", extensions: ["db"] }],
         },
       });
@@ -311,9 +310,167 @@
       });
       const path = Array.isArray(selection) ? selection[0] : selection;
       if (!path) return;
-      if (!(await confirmDialog(t("backup.import_confirm")))) return;
+
+      // Read the file before asking about it, the way the sync import does —
+      // and here the question is sharper, because an import REPLACES rather
+      // than merges: whatever this book holds and the file does not is gone.
+      // That number is knowable in advance, so the warning states it instead of
+      // being generic. Validating first also means a damaged or foreign file is
+      // refused before anybody is asked to approve replacing everything.
+      const preview = await invoke("inspect_backup", { srcPath: path });
+      if (!(await confirmDialog(importWarning(preview)))) return;
       const summary = await invoke("import_backup", { srcPath: path });
       notify(t("message.backup_imported", { path: summary.safety_backup_path }));
+    });
+  }
+
+  /// What to ask before replacing the book with a backup.
+  ///
+  /// Three parts, and the middle one only when it applies: how much this book
+  /// holds that the file does not, whether any of it exists nowhere else, and
+  /// the plain warning that an import replaces everything. A backup too old to
+  /// count against — its log predates the change stamp — leaves the plain
+  /// warning on its own, which is what the screen always said.
+  function importWarning({ discarded }) {
+    const lost = discarded?.change_sets ?? 0;
+    if (lost === 0) return t("backup.import_confirm");
+    return [
+      t("backup.import_loss", { count: lost }),
+      discarded.own_change_sets > 0
+        ? t("backup.import_loss_own", { count: discarded.own_change_sets })
+        : null,
+      t("backup.import_confirm"),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  }
+
+  // --- Sync bundles --------------------------------------------------------
+  //
+  // Two file copies are a full sync (docs/sync.md → Transport): this device's
+  // bundle answers what the peer asked for and states what it holds, and the
+  // peer's reply does the same. The export answers every import since the app
+  // opened, not only the last, so one file copied to each of those devices is
+  // complete at each — syncSession.js keeps the list, outside this component
+  // because leaving Settings remounts it.
+
+  function exportSync() {
+    run(async () => {
+      // `.tzsync` inherits the duplicate-name rule the backup path learnt on
+      // Android: the stamp carries the time, so a collision needs two exports
+      // inside one second. See exportName.js.
+      const path = await invoke("plugin:dialog|save", {
+        options: {
+          defaultPath: exportFileName(["terrazgo-sync"], "tzsync"),
+          filters: [{ name: "Terrazgo", extensions: ["tzsync"] }],
+        },
+      });
+      if (!path) return;
+      const summary = await invoke("export_sync_bundle", {
+        destPath: path,
+        answering: answeredThisSession(),
+      });
+      notify(
+        summary.change_sets === 0
+          ? t("message.sync_nothing_to_send", { path: summary.path })
+          : t("message.sync_exported", {
+              count: summary.change_sets,
+              path: summary.path,
+              size: formatSize(summary.size_bytes),
+            }),
+      );
+    });
+  }
+
+  function importSync() {
+    run(async () => {
+      const selection = await invoke("plugin:dialog|open", {
+        options: {
+          multiple: false,
+          directory: false,
+          filters: [{ name: "Terrazgo", extensions: ["tzsync"] }],
+        },
+      });
+      const path = Array.isArray(selection) ? selection[0] : selection;
+      if (!path) return;
+
+      // Read the manifest before applying anything: a farmer choosing one file
+      // out of a folder of them should see whose it is, and a bundle from a
+      // holding this device has not joined is a question rather than a refusal
+      // with no way forward. A file that leaves out changes this device lacks
+      // is refused here, before any question — joining included.
+      const info = await invoke("inspect_sync_bundle", { srcPath: path });
+      const about = {
+        // The name somebody gave the sender, here or on the sender itself —
+        // never its id, which says nothing to a person deciding whether to
+        // apply a file.
+        device: info.device_label ?? t("sync.device_unnamed"),
+        // `created_at` is a full UTC instant and `formatDate` takes a date:
+        // the day is what tells one file in a folder from another, and the
+        // file name already carries the second it was stamped with.
+        created: formatDate(info.created_at.slice(0, 10)),
+        count: info.change_sets,
+      };
+      if (info.pairing !== "same") {
+        const asking =
+          info.pairing === "unpaired" ? "sync.pair_confirm" : "sync.join_other_confirm";
+        if (!(await confirmDialog(t(asking, about)))) return;
+        await invoke("join_sync_group", { groupId: info.group });
+      } else if (!(await confirmDialog(t("sync.import_confirm", about)))) {
+        return;
+      }
+
+      const summary = await invoke("import_sync_bundle", { srcPath: path });
+      rememberImport(summary.peer_seen);
+      // What the purge made of the file (docs/sync.md → An import meets the
+      // purge): what it erased here for good — a purge made elsewhere, and the
+      // one run here once the file applied — and the changes it left out,
+      // made to records erased for good. A file can carry nothing else and
+      // still bring these, so they are said even then.
+      const purge = [
+        erasedSentence(summary.purged, summary.erased),
+        ...discardedSentences(summary.discarded, null),
+      ]
+        .filter(Boolean)
+        .join(" ");
+      if (summary.change_sets_applied === 0) {
+        notify(purge || t("message.sync_nothing_new"));
+        return;
+      }
+      const device = summary.peer_label ?? t("sync.device_unnamed");
+      // Two sentences rather than one: each counts one thing, so each takes
+      // its own singular.
+      const applied =
+        t("message.sync_imported", { count: summary.change_sets_applied, device }) +
+        (summary.conflicts > 0
+          ? ` ${t("message.sync_conflicts_waiting", { count: summary.conflicts })}`
+          : "");
+      // What the Status view lists as possible duplicates now, said while the
+      // farmer is looking: nothing else will announce them. Null when the
+      // count could not be worked out — the import happened regardless.
+      const duplicates = summary.duplicates
+        ? ` ${t("message.sync_duplicates_waiting", { count: summary.duplicates, status: t("nav.status") })}`
+        : "";
+      // The same for records now in a removed book — written on the other
+      // device into a book merged or deleted here — which nothing else shows at
+      // all: no book page, print or export has them.
+      const strays = summary.strays
+        ? ` ${t("message.sync_strays_waiting", { count: summary.strays, status: t("nav.status") })}`
+        : "";
+      // A device nobody has named reads as "un dispositivo sin nombre" in every
+      // message about it, so the first import from it says where to name it.
+      const unnamed = summary.peer_label ? "" : ` ${t("message.sync_name_the_device")}`;
+      // A book the file wrote into prints a code no catalogue here names: the
+      // catalogues may need updating. "May" — only the books are read — and
+      // said after the import because nothing in it depends on them: updating
+      // afterwards names every record already received.
+      const catalogues = summary.catalogues_may_lag
+        ? ` ${t("message.sync_catalogues_may_lag", {
+            catalogues: t("settings.catalogues"),
+            settings: t("nav.settings"),
+          })}`
+        : "";
+      notify(applied + (purge ? ` ${purge}` : "") + strays + duplicates + unnamed + catalogues);
     });
   }
 </script>
@@ -415,7 +572,7 @@
               itv: info.itv_lead_default_days,
             })}
           </p>
-          <!-- Bounds match module-cue's validate_lead_days, which is the
+          <!-- Bounds match module-phytosanitary's validate_lead_days, which is the
                authority: the input keeps an out-of-range value from being sent
                at all, and the backend still refuses one that arrives another
                way. -->
@@ -494,7 +651,7 @@
         {#if loading}
           <Skeleton />
         {:else if info}
-          <!-- Bounds match module-cue's validate_phi_horizon_days. The ceiling
+          <!-- Bounds match module-phytosanitary's validate_phi_horizon_days. The ceiling
                is not cosmetic: this value IS the query's WHERE clause, so it is
                what keeps the tint from reading the whole record book. The
                placeholder is the bare number, not "Default: 90 days" — a number
@@ -549,6 +706,27 @@
             <button type="button" onclick={importBackup}>{t("actions.import_backup")}</button>
           {/if}
         </div>
+      {/if}
+
+      {#if shown("advanced.sync")}
+        <div class="view-head" id={settingsAnchor("advanced.sync")}>
+          <h4>{t("sync.title")}</h4>
+        </div>
+        <p>{t("sync.hint")}</p>
+        <div id="sync-actions" aria-label={t("sync.title")}>
+          {#if shown("sync_export")}
+            <button type="button" onclick={exportSync}>{t("actions.export_sync")}</button>
+          {/if}
+          {#if shown("sync_import")}
+            <button type="button" onclick={importSync}>{t("actions.import_sync")}</button>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Its own heading, like the two data panels: the table inside it is
+           the section, and a heading above an empty div would be furniture. -->
+      {#if shown("advanced.peers")}
+        <SettingsPeers anchorId={settingsAnchor("advanced.peers")} />
       {/if}
 
       {#if shown("advanced.maintenance")}

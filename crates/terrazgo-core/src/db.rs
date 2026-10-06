@@ -33,15 +33,43 @@ pub fn migrations() -> Migrations<'static> {
 /// Open an in-memory database with foreign keys enforced and the CORE migrations
 /// applied — enough for testing the core repository in isolation. The app opens
 /// its database through the shell's composed runner.
+///
+/// It writes as a freshly minted device, as every separate database in the app
+/// does: each in-memory database is a replica of its own.
 pub fn open_in_memory() -> Result<Connection> {
     let mut conn = Connection::open_in_memory()?;
     conn.pragma_update(None, "foreign_keys", true)?;
     harden(&conn)?;
     migrations().to_latest(&mut conn)?;
+    crate::sync::install_device(&conn, &crate::sync::mint_device_id())?;
+    crate::sync::install_shape(&conn, &[crate::sync::CORE_SYNC_SHAPE])?;
     Ok(conn)
 }
 
-/// Lock down the SQL features a database file can use against us.
+/// How many prepared statements a connection keeps ready to run.
+///
+/// rusqlite's own default is 16 — a number chosen by a library that cannot know
+/// the working set, and low enough that one bulk path would evict the
+/// statements `audit::begin` runs on every write. The working set is the named
+/// consts passed to [`crate::sql::cached_statement`], eight of them today, and
+/// `statement_cache.rs` fails if they outgrow this number. Four times the
+/// current need costs a few dozen `sqlite3_stmt` allocations, which is not a
+/// figure worth economising on.
+///
+/// Raising it is a decision, not a fix: the cache is an LRU keyed by SQL text,
+/// so a path whose text varies per row or per table will exhaust any capacity.
+/// That rule, and where such a path puts its statements instead, is on
+/// [`crate::sql::cached_statement`].
+///
+/// **The one setting in [`harden`] that cannot be read back**, unlike the
+/// `DbConfig` flags beside it — rusqlite keeps the cache's length and capacity
+/// behind its own `#[cfg(test)]`, so there is nothing to assert on a live
+/// connection and no test below covers this line. The budget is checked at the
+/// source instead, which is what `statement_cache.rs` exists for.
+pub const STATEMENT_CACHE_CAPACITY: usize = 32;
+
+/// Lock down the SQL features a database file can use against us — and size the
+/// prepared-statement cache.
 ///
 /// Applied to **every** connection the app opens, ours and imported alike, and
 /// it costs us nothing: the schema defines no views and no triggers, and the
@@ -66,12 +94,19 @@ pub fn open_in_memory() -> Result<Connection> {
 /// flags — only using them is refused. That is why `src-tauri/tests` carries a
 /// contract test asserting the composed schema defines neither: without it, a
 /// migration adding one would apply cleanly and fail at read time instead.
+///
+/// The cache capacity rides along here for the reason everything else does:
+/// it is connection state that does not travel in the file, so every open site
+/// has to apply it or nobody does — and there is already a contract test making
+/// sure every open site calls this function. A second function with the same
+/// rule would need a second test saying the same thing.
 pub fn harden(conn: &Connection) -> Result<()> {
     use rusqlite::config::DbConfig;
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_DEFENSIVE, true)?;
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_TRIGGER, false)?;
     conn.set_db_config(DbConfig::SQLITE_DBCONFIG_ENABLE_VIEW, false)?;
     conn.pragma_update(None, "trusted_schema", false)?;
+    conn.set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
     Ok(())
 }
 
@@ -179,6 +214,23 @@ mod reentrancy {
     thread_local! {
         /// Addresses of the `Database`s this thread currently holds a guard for.
         /// At most two in this app (the record book and the geo cache).
+        //
+        // A clippy false positive on Android, where this initializer is already
+        // `const`. That target has no native thread-local storage (its TLS is
+        // emulated), so std builds `thread_local!` there from its `os`
+        // implementation, which wraps even a `const { }` initializer in a lazy
+        // init function — and the lint takes that function for one it could make
+        // const. Desktop targets use the `native` implementation, which stores a
+        // `const` initializer directly, so the lint reads them correctly and
+        // stays on there. `expect` rather than `allow`: the day clippy stops
+        // misreading this, the Android lint run reports it can go.
+        #[cfg_attr(
+            target_os = "android",
+            expect(
+                clippy::missing_const_for_thread_local,
+                reason = "already const; std's os thread_local implementation adds a lazy init fn"
+            )
+        )]
         static HELD: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
     }
 

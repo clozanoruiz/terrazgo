@@ -89,12 +89,20 @@
   $effect(() => {
     let cancelled = false;
     (async () => {
-      const [{ default: maplibregl }, style] = await Promise.all([
+      // MapLibre is ESM-only since v6: the module namespace is the API, with no
+      // default export. Under a bundler it cannot locate its own worker, so the
+      // worker comes through Vite's worker pipeline and is handed over before
+      // any map exists. `?worker&url`, not plain `?url`: the worker imports a
+      // shared chunk that `?url` leaves out of a production build, and then no
+      // tile ever loads.
+      const [maplibregl, { default: workerUrl }, style] = await Promise.all([
         import("maplibre-gl"),
+        import("maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"),
         fetchStyle("openfreemap"),
         import("maplibre-gl/dist/maplibre-gl.css"),
       ]);
       if (cancelled) return;
+      maplibregl.setWorkerUrl(workerUrl);
       map = new maplibregl.Map({
         container,
         style,

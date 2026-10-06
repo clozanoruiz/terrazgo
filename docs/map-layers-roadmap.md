@@ -1,149 +1,142 @@
-# Map layers — roadmap and caching decisions
+# Map layers: roadmap and caching decisions
 
-> Status: decided 2026-07-11 (which layers are wanted and how WMS data is
-> cached); **nothing here is scheduled**. The service inventory and the
-> per-service details live in [agro-data-services.md](agro-data-services.md)
-> and [sigpac-integration.md](sigpac-integration.md); this document records
-> what will be built and in what order, so each layer arrives as a small,
-> known-shape task instead of reopening the design.
+This says which map layers are wanted, in what order, and how WMS data is
+cached. Phases 1 and 2 are built; phases 3 and 4 are not scheduled. The list of
+services and their details are in [agro-data-services.md](agro-data-services.md)
+and [sigpac-integration.md](sigpac-integration.md). Writing the order down here
+means each new layer is a small task of a known shape rather than a new design.
 
 ## The two decisions
 
 ### 1. WMS data is cached as grid-snapped tiles ("self-proxied WMTS")
 
-The geo cache and the `geo://` protocol are XYZ-shaped
-(`tiles/{source}/{z}/{x}/{y}`), and most of the wanted sources are WMS-only
-(verified 2026-07-11: Catastro WMS speaks EPSG:3857 but offers no WMTS;
-IDEE hydrography likewise; ITACYL is WMS/WCS-family). Options considered:
+The geo cache and the `geo://` protocol work in XYZ tiles
+(`tiles/{source}/{z}/{x}/{y}`), and most of the wanted sources only offer WMS:
+Catastro's WMS speaks EPSG:3857 but has no WMTS, IDEE hydrography is the same,
+and ITACYL is WMS/WCS. The options were:
 
-- **WMTS-only policy** — rejected: it would exclude Catastro, hydrography,
-  the MITECO zone layers and ITACYL, i.e. most of the wanted list.
-- **MapLibre `{bbox-epsg-3857}` pass-through** (the webview computes the
-  bbox, responses cached by URL in the `resource` table) — rejected:
-  float-formatted bbox strings make fragile cache keys, and the rows would
-  bypass the tile table's LRU size cap.
-- **Rust-side grid snapping** — **chosen.** The protocol path stays
-  `tiles/{id}/{z}/{x}/{y}`; the fetch layer computes the tile's EPSG:3857
-  bounding box from z/x/y (pure Web-Mercator arithmetic, no new crate) and
-  substitutes it into a `GetMap` URL template (`width=height=256`,
-  `crs=EPSG:3857`, `format=image/png`, `transparent=true` for overlays).
-  Responses are stored and served as ordinary XYZ tiles.
+- **Only accept WMTS.** Rejected: it would leave out Catastro, hydrography,
+  the MITECO zone layers and ITACYL, which is most of the list.
+- **Let MapLibre pass the bbox through** (`{bbox-epsg-3857}`, the webview
+  works out the bbox and the responses are cached by URL in the `resource`
+  table). Rejected: bbox strings with floats make unreliable cache keys, and
+  those rows would escape the tile table's size limit.
+- **Snap to the grid in Rust.** Chosen. The protocol path stays
+  `tiles/{id}/{z}/{x}/{y}`. The fetch layer works out the tile's EPSG:3857
+  bounding box from z/x/y (plain Web Mercator arithmetic, no new crate) and puts
+  it into a `GetMap` URL template (`width=height=256`, `crs=EPSG:3857`,
+  `format=image/png`, `transparent=true` for overlays). The responses are
+  stored and served as ordinary XYZ tiles.
 
-This is exactly what dedicated tile proxies (MapProxy, GeoWebCache) do,
-reduced to a few lines of arithmetic and with no proxy to deploy. Every WMS
-source becomes one more `TileSource` entry; the cache, the LRU cap, the
-offline behaviour and the frontend raster handling all apply unchanged.
+Tile proxies like MapProxy or GeoWebCache do the same thing. Here it is a few
+lines of arithmetic and there is no proxy to run. Each WMS source is one more
+`TileSource` entry, and the cache, its size limit, offline use and the
+frontend's raster handling all work as they are.
 
-Consequences:
+What follows from it:
 
-- The service-selection rule extends to: **MVT > WMTS > WMS-gridded** —
-  native tiles when the provider has them, grid-snapped `GetMap` only when
-  WMS is all there is.
-- A WMS source must support EPSG:3857 to qualify (checked at pre-flight;
-  Catastro and IDEE hydrography confirmed). Reprojection of map imagery is
-  out of scope, as it is for boundary imports.
-- The tile→bbox conversion is domain logic with a public source of truth
-  (the slippy-map / EPSG:3857 tiling scheme) — test-first, values cited.
-- Dated raster products (NDVI composites) carry their date in the cache key,
-  the same mechanism as SIGPAC's campaign-keyed tiles.
+- The service rule becomes **MVT, then WMTS, then WMS on a grid**: native tiles
+  when the provider has them, grid-snapped `GetMap` only when WMS is all there
+  is.
+- A WMS source has to support EPSG:3857 (check this before adding it; Catastro
+  and IDEE hydrography do). The app doesn't reproject map images, just as it
+  doesn't reproject imported boundaries.
+- Converting a tile to a bbox follows a public standard (the slippy-map /
+  EPSG:3857 tiling scheme), so it is written test-first with the values cited.
+- Dated rasters (NDVI composites) put their date in the cache key, the same way
+  SIGPAC tiles carry their campaign.
 
-Two consequences added 2026-08-12, after a raster/GeoTIFF review
-([stack-choices.md](stack-choices.md) §1):
+Two more, from the raster review in [stack-choices.md](stack-choices.md) §1:
 
-- **A farmer's own raster** (a drone orthomosaic, a scanned plan) follows the
-  same rule as everything else here: **Rust decodes and tiles it once on import
-  and serves XYZ through `geo://`**, rather than being read in the webview.
-  Client-side reading is not merely slower — on Android a dialog result is a
-  `content://` URI the webview cannot open at all, and an orthomosaic runs to
-  100 MB–2 GB. It needs a storage design pass before any code: a farm ortho is
-  derived-but-irreplaceable, so it belongs in neither the evictable tile cache
-  nor the backed-up app database as they stand.
-- **Recolouring a raster must happen in Rust.** maplibre-gl 5.24 has no
-  `raster-color`/`raster-array` (verified against the installed bundle), so
-  rendered tiles are baked — only opacity, hue-rotate, brightness, saturation
-  and contrast are available client-side. An adjustable NDVI ramp therefore
-  means caching the values and re-rendering locally, which also keeps the
-  adjustment working offline.
+- **A farmer's own raster** (a drone orthomosaic, a scanned plan) works like
+  everything else here: **Rust decodes it and cuts it into tiles once, on
+  import, and serves XYZ through `geo://`**. It is not read in the webview.
+  That would be slower, and on Android it can't work at all: the file dialog
+  returns a `content://` URI the webview can't open, and an orthomosaic can be
+  100 MB to 2 GB. It needs a storage design first. A farm's ortho is derived
+  data but can't be replaced, so it fits neither the tile cache (which evicts)
+  nor the app database (which is backed up) as they are today.
+- **Recolouring a raster has to happen in Rust.** maplibre-gl 6.9 has no
+  `raster-color` or `raster-array`, so rendered tiles are fixed images; on the
+  client only opacity, hue-rotate, brightness, saturation and contrast can be
+  changed. An adjustable NDVI colour ramp means caching the values and drawing
+  the tiles again locally, which also keeps it working offline.
 
-### 2. CDSE credentials are farmer-supplied
+### 2. Each farmer brings their own CDSE account
 
-For Copernicus Data Space Ecosystem APIs (NDVI overlays beyond CyL, and the
-per-plot Statistical API series), each user registers their own free CDSE
-account and enters it in settings (decided 2026-07-11; resolves
-agro-data-services.md open question 1 for CDSE). Grounds: the Sentinel data
-licence is free/full/open including commercial use with attribution — fully
-compatible with an AGPL app — but API access authenticates per account with
-per-account quotas, an AGPL binary cannot embed a shared secret, and the
-CDSE terms treat quota-bypass via multiple accounts as a breach. A
-farmer-supplied account makes each user a legitimate quota-holder; the free
-tier is ample for one farm. A server-side proxy remains a possible later
-addition for zero-friction onboarding, never a replacement.
+For the Copernicus Data Space Ecosystem APIs (NDVI overlays outside CyL, and
+the per-plot series from the Statistical API), each user signs up for their own
+free CDSE account and enters it in settings. This settles
+agro-data-services.md's open question 1 for CDSE. The reasons: the Sentinel
+data licence is free and open, commercial use included, with attribution, so it
+fits an AGPL app; but the API works per account with a quota per account, an
+AGPL binary can't hold a shared secret, and CDSE's terms count spreading use
+over several accounts to get round the quota as a breach. With their own
+account each user is a legitimate quota holder, and the free tier is plenty for
+one farm. A server-side proxy could be added later to make starting easier, but
+never instead of this.
 
-Prerequisite: the core **settings module** (which now has four customers:
-tile-cache cap, language roaming, CDSE credentials, and future API keys such
-as SIAR). How credentials are stored on-device (settings table vs platform
-keychain) is decided when that module is designed.
+Before this can be built, the credentials need a safe place on the device. The
+settings file is plain text and is not that place (architecture.md →
+"Device-local settings"), so this waits for a secrets store.
 
-## The wanted layers, in build order
+## The wanted layers, in order
 
-Order is by infrastructure readiness — each phase reuses everything the
-previous one built. Within a phase, order is free.
+The order follows what infrastructure is ready: each phase reuses what the
+previous one built. Within a phase the order doesn't matter.
 
-### Phase 1 — own data as overlays (no network, no new deps) — SHIPPED 2026-07-12
+### Phase 1: the farm's own data as overlays (built)
 
 | Layer | Source | Notes |
 | --- | --- | --- |
-| Treatment / PHI status | `list_phi_status` → module-cue `phi_status_for_farm` | Plots tinted by "in PHI window / harvest allowed" (red/green); derived on read, same window rule as the alerts |
-| Zone-flag tint | `list_zone_flags` (core `plot_zone_flag`) | Latest campaign's 'inside' per (plot, zone kind) — the chip rule — one translucent fill per zone kind, overlaps blend |
+| Treatment / PHI status | `list_phi_status` → module-phytosanitary `phi_status_for_farm` | Plots tinted red while in a PHI window, green when harvest is allowed. Worked out when read, with the same window rule as the alerts |
+| Zone-flag tint | `list_zone_flags` (core `plot_zone_flag`) | Latest campaign's 'inside' per (plot, zone kind), the same rule as the chips. One translucent fill per zone kind; where they overlap they blend |
 
-One `mapLayers.js` GeoJSON entry each, as predicted. What the panel grew was
-not grouping but two smaller contracts: `defaultVisible: false` (status tints
-start toggled off) and a per-layer `legend` shown while visible; grouping
-waits for a phase that actually overflows a flat list.
+Each is one GeoJSON entry in `mapLayers.js`. The layer panel needed two small
+additions: `defaultVisible: false` (status tints start off) and a `legend` per
+layer, shown while it is visible. Grouping layers can wait until a flat list
+gets too long.
 
-### Phase 2 — the rest of the Nube de SIGPAC MVT service — SHIPPED 2026-07-12
+### Phase 2: the rest of the Nube de SIGPAC MVT service (built)
 
 | Layer | Service layer | Notes |
 | --- | --- | --- |
-| Declared crops | `cultivo_declarado` | Dashed gold fill+line; campaign-keyed like recintos. **The fixed path serves the PREVIOUS campaign** (the running one's declarations are still open, per the service doc) — the layer label says so. The same dataset also ships as provincial GPKG downloads (current + previous campaign, CC BY 4.0) — the data path for the crop-prefill idea in [siex-export.md](siex-export.md) → "Farmer-side data paths"; the overlay here is only its display twin |
-| Landscape elements | `e_paisaje_area`, `_linea`, `_punto` | PAC conditionality (protected features); three tile services behind ONE toggle — the `mapLayers.js` contract grew `vectors()` (multi-source entry, style specs pick theirs via `sourceKey`). Sparse data: most tiles are 404-empty |
+| Declared crops | `cultivo_declarado` | Dashed gold fill and line, keyed by campaign like the recintos. **The fixed path serves the PREVIOUS campaign** (the current one's declarations are still open, per the service docs), and the layer label says so. The same data comes as provincial GPKG downloads (current and previous campaign, CC BY 4.0), which is what the crop prefill would read ([siex-export.md](siex-export.md) → "Farmer-side data paths"). The overlay only displays it |
+| Landscape elements | `e_paisaje_area`, `_linea`, `_punto` | PAC conditionality (protected features). Three tile services behind ONE toggle: `mapLayers.js` entries can have `vectors()` (several sources in one entry; each style spec picks its source with `sourceKey`). Data is sparse and most tiles are empty (404) |
 
-Pre-flight ran 2026-07-12 against live tiles: source-layer names equal the
-path names; attribute keys match the download-service models (declared crops:
+Facts about the live service: the source-layer names are the same as the path
+names; the attribute keys match the download service's models (declared crops:
 `parc_producto`, `parc_sistexp`, `parc_supcult`, `exp_ano`…; landscape:
-`tipo_elemento`); pbf z12–15; empty tiles answer 404 (cached as empty, the
-recinto rule). Live-verified end-to-end in the real app: all four sources
-stream through `geo://` with campaign-keyed cache rows.
+`tipo_elemento`); tiles are pbf at z12–15; empty tiles answer 404 and are cached
+as empty, as for recintos.
 
-### Phase 3 — public WMS overlays through grid snapping (needs decision 1 implemented once)
+### Phase 3: public WMS overlays through grid snapping (needs decision 1 built once)
 
-| Layer | Provider / service | Pre-flight checks |
+| Layer | Provider / service | Check before adding |
 | --- | --- | --- |
-| Cadastral parcels | Catastro WMS (3857 confirmed) | Layer names, scale limits, attribution wording; pairs with the future SIGPAC↔catastro crosswalk |
-| Hydrography | IDEE `wms-inspire/hidrografia` (3857 confirmed) | Which sublayers matter (watercourses, water points); regulatory hook: phyto buffer strips near water |
-| Nitrate-vulnerable zones | MITECO WMS | **Endpoint not yet pinned** (2026-07-11 probe missed); licence + 3857 check |
-| Natura 2000 | MITECO WMS | Same; display-only — the stored truth remains `plot_zone_flag`, this draws the boundary pixels |
-| Soil cartography (CyL) | ITACYL Atlas / IDECyL WMS | Layer selection, licence per layer, 3857 check; regional-first per the inventory's open direction |
-| NDVI mosaic (CyL) | ITACYL Sentinel-2 series | Endpoint to pin down; date-keyed caching |
+| Cadastral parcels | Catastro WMS (supports 3857) | Layer names, scale limits, attribution wording. Goes with a future SIGPAC↔catastro crosswalk |
+| Hydrography | IDEE `wms-inspire/hidrografia` (supports 3857) | Which sublayers matter (watercourses, water points). Rule it supports: phyto buffer strips near water |
+| Nitrate-vulnerable zones | MITECO WMS | **Endpoint not found yet**; licence and 3857 to check |
+| Natura 2000 | MITECO WMS | Same. Display only: what the app relies on is still `plot_zone_flag`, this just draws the boundaries |
+| Soil maps (CyL) | ITACYL Atlas / IDECyL WMS | Which layers, licence per layer, 3857. Regional first, as the inventory leans |
+| NDVI mosaic (CyL) | ITACYL Sentinel-2 series | Endpoint still to find; cache keyed by date |
 
-### Phase 4 — CDSE (needs decision 2 + settings module)
+### Phase 4: CDSE (needs decision 2 and a secrets store)
 
-| Capability | API | Notes |
+| What | API | Notes |
 | --- | --- | --- |
-| NDVI overlay (national) | Sentinel Hub OGC (WMS/WMTS, evalscript) | Rides the same gridding; per-user OAuth token through the terrazgo-geo seam |
-| NDVI per-plot time series | Statistical API / openEO | Not a map layer: synced user data by the zone-flag precedent; needs its own schema design (first per-plot time series) |
+| NDVI overlay (national) | Sentinel Hub OGC (WMS/WMTS, evalscript) | Uses the same grid snapping; a per-user OAuth token through `terrazgo-geo` |
+| NDVI series per plot | Statistical API / openEO | Not a map layer. Synced user data, like zone flags, and it needs its own schema (the first time series per plot) |
 
-Attribution "Contains modified Copernicus Sentinel data [year]" while
-active.
+Attribution "Contains modified Copernicus Sentinel data [year]" while it is on.
 
-## Standing rules that apply to every layer
+## Rules for every layer
 
-- All fetching through terrazgo-geo's cache-through seam; the webview only
-  ever sees `geo://`.
-- Attribution visible while the layer is active (OpenFreeMap/PNOA/SIGPAC
-  precedent).
-- A new overlay = one source-registry entry + one `mapLayers.js` entry +
-  one row in [map-data-sources.md](map-data-sources.md) (the inventory);
-  anything that needs more than that is a design smell to stop on.
-- Dated/campaign products record their version in the cache key and the UI
-  says how fresh the data is.
+- All fetching goes through `terrazgo-geo`'s cache; the webview only ever sees
+  `geo://`.
+- Attribution shows while the layer is on (as for OpenFreeMap, PNOA, SIGPAC).
+- A new overlay is one entry in the source registry, one in `mapLayers.js` and
+  one row in [map-data-sources.md](map-data-sources.md). If it needs more than
+  that, stop and rethink it.
+- Dated or campaign data keeps its version in the cache key, and the UI says how
+  recent it is.

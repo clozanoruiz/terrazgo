@@ -6,15 +6,15 @@
   // The SIGPAC/REGA fieldsets only apply to Spanish farms.
   import TzTooltip from "./TzTooltip.svelte";
   import { TriangleAlert } from "@lucide/svelte";
-  import { formatCoordinates, formatNumber, formatPercent, t, tCode } from "../i18n.js";
+  import { formatCoordinates, formatDate, formatNumber, formatPercent, t, tCode } from "../i18n.js";
   import { confirmDialog, invoke } from "./backend.js";
   import { sortedBy } from "./collate.js";
   import { lookups, loadLookups } from "./lookups.svelte.js";
   import TzCheckbox from "./TzCheckbox.svelte";
   import NumberInput from "./NumberInput.svelte";
-  import DateInput from "./DateInput.svelte";
   import MapCanvas from "./MapCanvas.svelte";
   import { notify, run } from "./notifications.svelte.js";
+  import { setPageTitle } from "./pageTitle.svelte.js";
   import RegistryHint from "./RegistryHint.svelte";
   import Skeleton from "./Skeleton.svelte";
   import TzSelect from "./TzSelect.svelte";
@@ -22,6 +22,9 @@
   import TextInput from "./TextInput.svelte";
   import TzForm from "./TzForm.svelte";
   import TzWorkspace from "./TzWorkspace.svelte";
+  import TzFormDialog from "./TzFormDialog.svelte";
+  import FarmForm from "./FarmForm.svelte";
+  import { emptyFarmDraft, farmDraftFrom, farmPayload } from "./farmDraft.js";
   import { resizableColumns } from "./columnResize.js";
   import { opensRow } from "./tableRow.js";
 
@@ -50,6 +53,10 @@
   // Session-wide reference data (lib/lookups.svelte.js).
   const countries = $derived(lookups.countries);
   let farm = $state(null);
+
+  /// Whether the holding's own fields are open. The page is a container for its
+  /// sections; the farm is one more record you open, like the plots under it.
+  let farmFormOpen = $state(false);
   let plots = $state([]);
   // Active SIGPAC boundary per plot id (from geo_feature) — drives the
   // verified badge and the declared-vs-official discrepancy display.
@@ -57,48 +64,33 @@
   // Latest-campaign 'inside' zone flags per plot id — the compliance chips.
   let zoneFlags = $state({});
 
-  // Farm edit form fields (the form is the source of truth on save).
-  let name = $state("");
-  let ownerName = $state("");
-  let ownerTaxId = $state("");
-  let countryCode = $state("");
-  let locationText = $state("");
-  let latitude = $state("");
-  let longitude = $state("");
-  let regaCode = $state("");
-  let reaCode = $state("");
-  let provinceCode = $state("");
-
-  // Model 1.1's contact block and the "titular o representante" block. The
-  // representative is optional: a blank name means there is none, which is the
-  // common case (the holder signs their own book).
-  let address = $state("");
-  let postalCode = $state("");
-  let phoneFixed = $state("");
-  let phoneMobile = $state("");
-  let email = $state("");
-  // Model 1.1's "Fecha de apertura del cuaderno". Blank prints the model's
-  // ruled line, so the page stays hand-fillable for a book nobody dated.
-  let openedOn = $state("");
-  let siexCode = $state("");
-  let repName = $state("");
-  let repTaxId = $state("");
-  let repKind = $state("");
-  let repAddress = $state("");
-  let repLocality = $state("");
-  let repProvince = $state("");
-  let repPostalCode = $state("");
-  let repPhone = $state("");
-  let repEmail = $state("");
+  /// The holding's own fields, as one object (lib/farmDraft.js) rather than as
+  /// twenty-six `$state` locals. That is what lets the farms list and this
+  /// page render the SAME form: the shape travels, the component that draws it
+  /// does not care which screen it is on.
+  let farmDraft = $state(emptyFarmDraft());
 
   // Advisory (official model 1.4): the advisor entities live in the catalogue,
   // this panel only states which of them advise THIS holding, and under which
   // GIP framework.
   let advisors = $state([]);
   let farmAdvisors = $state([]);
-  const gipSystems = $derived(lookups.gipSystems);
+  // NOT session-wide: the GIP frameworks are one country's scheme, so they
+  // follow this holding's country. Read off the STORED farm and never off the
+  // form's draft: the country is fixed at creation so the two agree, but
+  // `saveFarmAdvisor` writes on the select's change rather than on a submit,
+  // and a panel the reader is still typing into is not a source of stored
+  // facts.
+  let gipSystems = $state([]);
   let newAdvisorId = $state("");
   let newGipCode = $state("");
+
+  $effect(() => {
+    const country = farm?.country_code;
+    run(async () => {
+      gipSystems = country ? await invoke("list_gip_systems", { countryCode: country }) : [];
+    });
+  });
 
   const linkableAdvisors = $derived(
     advisors.filter((a) => !farmAdvisors.some((d) => d.advisor.id === a.id)),
@@ -112,10 +104,10 @@
   // half). A farm asset, not a season record — hence this view and not a
   // record-book tab.
   let waterPoints = $state([]);
-  // Plot ids the farmer has declared free of abstraction points. A stored
-  // negative, like an 'outside' zone flag: it proves the question was asked,
-  // which a blank cell cannot.
-  let waterDeclared = $state(new Set());
+  // The date each plot was declared free of abstraction points, by plot id. A
+  // stored negative, like an 'outside' zone flag: it proves the question was
+  // asked, which a blank cell cannot.
+  let waterDeclared = $state({});
   let waterFormOpen = $state(false);
   let editingWaterPointId = $state(null);
   let waterPlotId = $state("");
@@ -131,35 +123,17 @@
   let plotName = $state("");
   let plotArea = $state("");
   let sigpac = $state({});
+  // The plot's "no abstraction points" answer, and the one it had when the
+  // panel opened: only a change is sent, because restating a standing
+  // declaration re-dates it, and renaming a plot is not a new check.
+  let plotNoWater = $state(false);
+  let plotNoWaterWas = false;
 
+  /// Also names the page in the shell's band, on load and after a rename alike.
   function fillFarmForm(detail) {
     farm = detail.farm;
-    name = detail.farm.name;
-    ownerName = detail.farm.owner_name ?? "";
-    ownerTaxId = detail.farm.owner_tax_id ?? "";
-    countryCode = detail.farm.country_code;
-    locationText = detail.farm.location_text ?? "";
-    latitude = detail.farm.latitude ?? "";
-    longitude = detail.farm.longitude ?? "";
-    address = detail.farm.address ?? "";
-    postalCode = detail.farm.postal_code ?? "";
-    phoneFixed = detail.farm.phone_fixed ?? "";
-    phoneMobile = detail.farm.phone_mobile ?? "";
-    openedOn = detail.farm.opened_on ?? "";
-    email = detail.farm.email ?? "";
-    regaCode = detail.es?.rega_code ?? "";
-    reaCode = detail.es?.rea_code ?? "";
-    siexCode = detail.es?.siex_code ?? "";
-    provinceCode = detail.es?.province_code ?? "";
-    repName = detail.representative?.full_name ?? "";
-    repTaxId = detail.representative?.tax_id ?? "";
-    repKind = detail.representative?.representation_kind ?? "";
-    repAddress = detail.representative?.address ?? "";
-    repLocality = detail.representative?.locality ?? "";
-    repProvince = detail.representative?.province ?? "";
-    repPostalCode = detail.representative?.postal_code ?? "";
-    repPhone = detail.representative?.phone ?? "";
-    repEmail = detail.representative?.email ?? "";
+    farmDraft = farmDraftFrom(detail);
+    setPageTitle(detail.farm.name);
   }
 
   run(async () => {
@@ -180,7 +154,7 @@
       invoke("list_water_declarations", { farmId }),
     ]);
     waterPoints = points;
-    waterDeclared = new Set(declarations.map((d) => d.plot_id));
+    waterDeclared = Object.fromEntries(declarations.map((d) => [d.plot_id, d.declared_on]));
   }
 
   async function reloadPlots() {
@@ -211,54 +185,9 @@
 
   // --- farm edit -------------------------------------------------------------
 
-  function collectFarmEs() {
-    if (countryCode !== "es") return null;
-    const rega = regaCode.trim() || null;
-    const rea = reaCode.trim() || null;
-    const siex = siexCode.trim() || null;
-    const province = provinceCode.trim() || null;
-    return rega || rea || siex || province
-      ? { rega_code: rega, rea_code: rea, siex_code: siex, province_code: province }
-      : null;
-  }
-
-  /// The name is what makes a representative exist: with it blank the whole
-  /// block is submitted as null, which removes any stored row.
-  function collectRepresentative() {
-    const fullName = repName.trim();
-    if (!fullName) return null;
-    return {
-      full_name: fullName,
-      tax_id: repTaxId.trim() || null,
-      representation_kind: repKind.trim() || null,
-      address: repAddress.trim() || null,
-      locality: repLocality.trim() || null,
-      province: repProvince.trim() || null,
-      postal_code: repPostalCode.trim() || null,
-      phone: repPhone.trim() || null,
-      email: repEmail.trim() || null,
-    };
-  }
-
   async function submitFarm() {
-    const update = {
-      name: name.trim(),
-      owner_name: ownerName.trim() || null,
-      owner_tax_id: ownerTaxId.trim() || null,
-      location_text: locationText.trim() || null,
-      address: address.trim() || null,
-      postal_code: postalCode.trim() || null,
-      phone_fixed: phoneFixed.trim() || null,
-      phone_mobile: phoneMobile.trim() || null,
-      email: email.trim() || null,
-      opened_on: openedOn || null,
-      latitude: numberOrNull(latitude),
-      longitude: numberOrNull(longitude),
-      country_code: countryCode,
-      es: collectFarmEs(),
-      representative: collectRepresentative(),
-    };
-    fillFarmForm(await invoke("update_farm", { farmId, update }));
+    fillFarmForm(await invoke("update_farm", { farmId, update: farmPayload(farmDraft) }));
+    farmFormOpen = false;
   }
 
   function deleteFarm() {
@@ -366,21 +295,11 @@
     });
   }
 
-  /// Saves on change, like the advisor's framework select: the checkbox IS the
-  /// statement. Recording a point withdraws the declaration on the backend, so
-  /// the two can never both stand.
-  function toggleWaterDeclaration(plotId, declared) {
-    run(async () => {
-      await invoke("set_water_declaration", { plotId, declared });
-      await reloadWater();
-    });
-  }
-
   function plotNameOf(plotId) {
     return plots.find((p) => p.plot.id === plotId)?.plot.name ?? "";
   }
 
-  /// The point the inspector is showing, so its delete button knows which one
+  /// The point the panel is showing, so its delete button knows which one
   /// it is about. Null while creating.
   const editingWaterPoint = $derived(
     waterPoints.find((point) => point.id === editingWaterPointId) ?? null,
@@ -396,6 +315,8 @@
     for (const field of SIGPAC_FIELDS) next[field] = es?.[field] ?? "";
     sigpac = next;
     sigpacLookup = null;
+    plotNoWaterWas = Boolean(plot && waterDeclared[plot.id]);
+    plotNoWater = plotNoWaterWas;
     plotFormOpen = true;
   }
 
@@ -478,6 +399,12 @@
     } else {
       plotId = (await invoke("create_plot", { plot: { farm_id: farmId, ...payload } })).id;
     }
+    // Recording a point withdraws the declaration on the backend, and declaring
+    // one while the plot holds points is refused, so the two never both stand.
+    if (plotNoWater !== plotNoWaterWas) {
+      await invoke("set_water_declaration", { plotId, declared: plotNoWater });
+      await reloadWater();
+    }
     // A successful in-form lookup means the response is already cached, so
     // storing the official boundary now works offline too. Skipped if the
     // reference was edited after the lookup.
@@ -508,75 +435,58 @@
     return parts.some((p) => p) ? parts.map((p) => p ?? "·").join(":") : null;
   }
 
-  /// The plot the inspector is editing, so the delete button and the two
+  /// The plot the panel is editing, so the delete button and the two
   /// per-plot actions beside the form know which one they are about. Null
   /// while creating.
   const editingPlot = $derived(plots.find(({ plot }) => plot.id === editingPlotId) ?? null);
+
+  /// A plot holding points cannot be declared free of them, so its box is
+  /// disabled and says why.
+  const editingPlotHasWater = $derived(
+    Boolean(editingPlotId) && waterPoints.some((point) => point.plot_id === editingPlotId),
+  );
 </script>
 
 <section class="view">
-  <a href="#/farms">{t("farms.back")}</a>
-
   {#if farm}
+    <!-- The holding's name is the shell band's title, beside the way back to the
+         farms list, so this band labels the section like every other band on
+         the page. -->
     <div class="view-head">
-      <h2>{farm.name}</h2>
-      <button type="button" class="btn-danger" onclick={deleteFarm}>{t("farm.delete")}</button>
+      <h2>{t("farm.section")}</h2>
+      <!-- Grouped, because .view-head is `space-between`: three loose children
+           would strand Edit in the middle of the band instead of putting the
+           section's label at one end and what you can do to it at the other. -->
+      <div class="head-actions">
+        <button type="button" onclick={() => (farmFormOpen = true)}>{t("form.edit")}</button>
+        <button type="button" class="btn-danger" onclick={deleteFarm}>{t("farm.delete")}</button>
+      </div>
     </div>
 
-    <TzForm onsubmit={submitFarm}>
-      <div class="form-grid">
-        <TextInput label={t("farm.name")} required bind:value={name} />
-        <TextInput label={t("farm.owner")} bind:value={ownerName} />
-        <TextInput label={t("farm.owner_tax_id")} bind:value={ownerTaxId} />
-        <TzSelect
-          label={t("farm.country")}
-          items={codeItems(countries, "country")}
-          bind:value={countryCode}
-        />
-        <TextInput label={t("farm.address")} bind:value={address} />
-        <TextInput label={t("farm.location")} bind:value={locationText} />
-        <TextInput label={t("farm.postal_code")} bind:value={postalCode} />
-        <TextInput label={t("farm.phone_fixed")} bind:value={phoneFixed} />
-        <TextInput label={t("farm.phone_mobile")} bind:value={phoneMobile} />
-        <TextInput label={t("farm.email")} type="email" bind:value={email} />
-        <DateInput
-          label={t("farm.opened_on")}
-          hint={t("farm.opened_on_hint")}
-          bind:value={openedOn}
-        />
-        <NumberInput label={t("farm.latitude")} min={-90} max={90} bind:value={latitude} />
-        <NumberInput label={t("farm.longitude")} min={-180} max={180} bind:value={longitude} />
-      </div>
-      {#if countryCode === "es"}
-        <fieldset class="es-only">
-          <legend>{t("farm.es_section")}</legend>
-          <div class="form-grid">
-            <TextInput label={t("farm.siex")} bind:value={siexCode} />
-            <TextInput label={t("farm.rea")} bind:value={reaCode} />
-            <TextInput label={t("farm.rega")} bind:value={regaCode} />
-            <TextInput label={t("farm.province")} bind:value={provinceCode} />
-          </div>
-        </fieldset>
-      {/if}
-      <fieldset>
-        <legend>{t("farm.representative_section")}</legend>
-        <p class="detail">{t("farm.representative_hint")}</p>
-        <div class="form-grid">
-          <TextInput label={t("farm.rep_name")} bind:value={repName} />
-          <TextInput label={t("farm.rep_tax_id")} bind:value={repTaxId} />
-          <TextInput label={t("farm.rep_kind")} bind:value={repKind} />
-          <TextInput label={t("farm.rep_address")} bind:value={repAddress} />
-          <TextInput label={t("farm.rep_locality")} bind:value={repLocality} />
-          <TextInput label={t("farm.rep_province")} bind:value={repProvince} />
-          <TextInput label={t("farm.rep_postal_code")} bind:value={repPostalCode} />
-          <TextInput label={t("farm.rep_phone")} bind:value={repPhone} />
-          <TextInput label={t("farm.rep_email")} type="email" bind:value={repEmail} />
-        </div>
-      </fieldset>
+    <!-- The holding's own fields open in the same panel its plots and its water
+         points do. They used to be an always-open form wedged between the back
+         link and four sections, which made the one screen in the app where
+         editing did not mean opening something. -->
+    <TzFormDialog
+      open={farmFormOpen}
+      title={farm.name}
+      onclose={() => (farmFormOpen = false)}
+      body={farmFields}
+      actions={farmActions}
+    />
+
+    {#snippet farmFields(formId)}
+      <FarmForm bind:draft={farmDraft} {countries} onsubmit={submitFarm} {formId} />
+    {/snippet}
+
+    {#snippet farmActions(formId)}
       <div class="form-actions">
-        <button type="submit">{t("form.save")}</button>
+        <button type="submit" form={formId}>{t("form.save")}</button>
+        <button type="button" class="btn-cancel" onclick={() => (farmFormOpen = false)}>
+          {t("form.cancel")}
+        </button>
       </div>
-    </TzForm>
+    {/snippet}
 
     <div class="view-head">
       <h3>{t("farm.advisors_section")}</h3>
@@ -722,6 +632,7 @@
                   <th>{t("column.sigpac")}</th>
                   <th class="col-num">{t("column.official_area")}</th>
                   <th>{t("column.zones")}</th>
+                  <th>{t("water_points.none_column")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -758,6 +669,11 @@
                         </TzTooltip>
                       {/each}
                     </td>
+                    <!-- When the farmer checked, rather than a bare tick: blank
+                         still means the question was never asked. -->
+                    <td class="col-muted">
+                      {waterDeclared[plot.id] ? formatDate(waterDeclared[plot.id]) : ""}
+                    </td>
                   </tr>
                 {/each}
               </tbody>
@@ -782,10 +698,21 @@
           </div>
         {/if}
 
-        <TzForm id={formId} onsubmit={submitPlot}>
+        <TzForm
+          id={formId}
+          onsubmit={submitPlot}
+          anchors={{ "invalid.plot_has_water_points": "water_none" }}
+        >
           <div class="form-grid">
             <TextInput label={t("plot.name")} required bind:value={plotName} />
             <NumberInput label={t("plot.area")} min={0.01} bind:value={plotArea} />
+            <TzCheckbox
+              label={t("water_points.none_column")}
+              name="water_none"
+              hint={editingPlotHasWater ? t("plot.water_none_has_points") : ""}
+              disabled={editingPlotHasWater}
+              bind:checked={plotNoWater}
+            />
           </div>
           {#if farm.country_code === "es"}
             <fieldset class="es-only">
@@ -969,40 +896,6 @@
         {/snippet}
       </TzWorkspace>
 
-      <!-- The stored negatives: one row per plot saying the farmer looked and
-           found nothing. `rows-static` because the checkbox IS the row — there
-           is no record here to open, and a row that offers to be clicked and
-           then does nothing is a worse row than a plain one. -->
-      {#if plots.length > 0}
-        <div class="table-wrap water-declarations">
-          <table class="data-table rows-static">
-            <thead>
-              <tr>
-                <th>{t("column.plot")}</th>
-                <th>{t("water_points.none_column")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each plots as { plot } (plot.id)}
-                {@const hasPoints = waterPoints.some((p) => p.plot_id === plot.id)}
-                <tr>
-                  <td class="col-name">{plot.name}</td>
-                  <td>
-                    <TzCheckbox
-                      label={t("water_points.none_on", { plot: plot.name })}
-                      labelHidden
-                      disabled={hasPoints}
-                      checked={waterDeclared.has(plot.id)}
-                      onchange={(next) => toggleWaterDeclaration(plot.id, next)}
-                    />
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-
       <div class="view-head">
         <h3>{t("farm.map_title")}</h3>
         <a href={mapHref()}>{t("farm.open_map")}</a>
@@ -1050,12 +943,6 @@
     align-items: center;
     gap: var(--space-3);
     padding-bottom: var(--space-2);
-  }
-  /* The declarations follow the points in the same section, and two tables
-     whose header rows touch read as one table with a stray heading in the
-     middle. This is the gap that says they are two answers to one question. */
-  .water-declarations {
-    margin-top: var(--space-5);
   }
   .zone-chip {
     align-self: center;

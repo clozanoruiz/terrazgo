@@ -92,7 +92,7 @@ export const MAP_LAYERS = [
   },
   // Treatment / PHI status — plots tinted by whether a phytosanitary
   // treatment's PHI window (plazo de seguridad) contains today. Derived on
-  // read by module-cue; red = harvest restricted, green = treated and clear.
+  // read by module-phytosanitary; red = harvest restricted, green = treated and clear.
   // Untreated plots carry no tint. One feature per plot: when a plot stores
   // several boundary sources they overlap anyway, and stacked translucent
   // fills would double the tint.
@@ -336,17 +336,19 @@ export const MAP_LAYERS = [
   // SIGPAC recinto boundaries — the official parcel fabric under the user's
   // own plots. Vector tiles served cache-first by the Rust geo:// protocol
   // (source id sigpac-recintos in terrazgo-geo's registry); the service
-  // publishes pbf at z12–15, single source-layer "recinto".
+  // publishes pbf at z12–15, single source-layer "recinto". Drawn from z13:
+  // the service's z12 set has holes where recintos are dense, and a hole reads
+  // as an empty tile (the reasoning is on the registry entry).
   {
     id: "sigpac-recintos",
     labelKey: "map.layer.sigpac_recintos",
-    minZoom: 12,
+    minZoom: 13,
     selectable: false,
     vector(base) {
       return {
         type: "vector",
         tiles: [`${base}tiles/sigpac-recintos/{z}/{x}/{y}`],
-        minzoom: 12,
+        minzoom: 13,
         maxzoom: 15,
         attribution: "SIGPAC © FEGA (CC BY 4.0)",
       };

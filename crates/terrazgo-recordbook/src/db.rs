@@ -6,7 +6,7 @@
 //! The book owns no tables — it is a read model. But it reads core AND every
 //! module that contributes a section, so the set of migrations it needs is the
 //! same composition the shell performs at startup, and nothing smaller. Before
-//! a second module joined, the tests borrowed `module_cue::open_in_memory` and
+//! a second module joined, the tests borrowed `module_phytosanitary::open_in_memory` and
 //! that happened to be enough; it stopped being enough the moment section 8
 //! arrived, with a failure ("no such table") that named a missing table rather
 //! than the missing composition.
@@ -32,7 +32,7 @@ use rusqlite_migration::Migrations;
 /// it when the third module joined.
 pub fn migrations() -> Migrations<'static> {
     let mut steps = terrazgo_core::migration_set();
-    steps.extend(module_cue::migration_set());
+    steps.extend(module_phytosanitary::migration_set());
     steps.extend(module_fertilisation::migration_set());
     steps.extend(module_ecoscheme::migration_set());
     Migrations::new(steps)
@@ -49,5 +49,16 @@ pub fn open_in_memory() -> Result<Connection> {
     migrations()
         .to_latest(&mut conn)
         .map_err(|e| crate::error::RecordbookError::Internal(e.to_string()))?;
+    // Every database is a replica of its own (terrazgo_core::open_in_memory).
+    terrazgo_core::sync::install_device(&conn, &terrazgo_core::sync::mint_device_id())?;
+    terrazgo_core::sync::install_shape(
+        &conn,
+        &[
+            terrazgo_core::sync::CORE_SYNC_SHAPE,
+            module_phytosanitary::SYNC_SHAPE,
+            module_fertilisation::SYNC_SHAPE,
+            module_ecoscheme::SYNC_SHAPE,
+        ],
+    )?;
     Ok(conn)
 }

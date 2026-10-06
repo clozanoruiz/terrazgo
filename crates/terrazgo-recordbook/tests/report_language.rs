@@ -20,8 +20,8 @@ mod common;
 
 use common::db;
 
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 use serde_json::Value;
 use terrazgo_core::models::{FarmEsFields, NewZoneFlag, PlotEsFields};
@@ -40,18 +40,6 @@ struct Fixture {
 }
 
 fn fixture(conn: &mut Connection, province: &str) -> Fixture {
-    let season = repo::insert_season(
-        conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
-
     let farm = repo::insert_farm(
         conn,
         NewFarm {
@@ -65,6 +53,18 @@ fn fixture(conn: &mut Connection, province: &str) -> Fixture {
                 siex_code: None,
                 province_code: Some(province.into()),
             }),
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+    let season = repo::insert_season(
+        conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -183,6 +183,7 @@ fn fixture(conn: &mut Connection, province: &str) -> Fixture {
             measure_intensity_value: None,
             measure_intensity_unit_code: None,
             measure_registration_number: None,
+            measure_basic_substance_code: None,
             phi_days_used: None,
             notes: None,
         },
@@ -237,17 +238,6 @@ fn a_holding_in_a_castilian_only_region_is_offered_castilian_alone() {
 #[test]
 fn a_holding_with_no_province_anywhere_keeps_every_language_on_offer() {
     let mut conn = db();
-    let season = repo::insert_season(
-        &mut conn,
-        NewSeason {
-            campaign_year: 2026,
-            label: "2025/2026".into(),
-            starts_on: None,
-            ends_on: None,
-        },
-        None,
-    )
-    .unwrap();
     let farm = repo::insert_farm(
         &mut conn,
         NewFarm {
@@ -256,6 +246,18 @@ fn a_holding_with_no_province_anywhere_keeps_every_language_on_offer() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
+        },
+        None,
+    )
+    .unwrap();
+    let season = repo::insert_season(
+        &mut conn,
+        NewSeason {
+            farm_id: farm.id.clone(),
+            starts_on: "2025-09-01".into(),
+            ends_on: "2026-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -281,6 +283,7 @@ fn a_plots_sigpac_province_answers_when_the_farm_block_is_blank() {
             owner_tax_id: None,
             country_code: "es".into(),
             es: None,
+            ..NewFarm::default()
         },
         None,
     )
@@ -633,6 +636,7 @@ fn the_interval_and_the_total_are_notation_but_their_footnotes_translate() {
             measure_intensity_value: None,
             measure_intensity_unit_code: None,
             measure_registration_number: None,
+            measure_basic_substance_code: None,
             phi_days_used: None,
             notes: None,
         },

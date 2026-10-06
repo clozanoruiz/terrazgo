@@ -11,7 +11,7 @@ workspace = true
 
 # DEV-DEPENDENCY ONLY, and CORE-ONLY. The second half is the design, not an
 # accident of what the first extraction happened to need: a testkit that grew a
-# `module-cue` dependency would be a back door between modules, and the module
+# `module-phytosanitary` dependency would be a back door between modules, and the module
 # crates' own `the_module_runs_on_core_alone` tests would go on passing while it
 # was open. See the crate's `//!` docs.
 #

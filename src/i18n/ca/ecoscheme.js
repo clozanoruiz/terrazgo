@@ -28,9 +28,10 @@ export default {
   "cultural_operation_kind.mowing": "Sega",
   "cultural_operation_kind.brush_cutting": "Esbrossada",
   "cultural_operation_kind.drainage": "Manteniment del drenatge",
-  "cultural_operation_kind.pruning": "Poda",
+  "cultural_operation_kind.green_pruning_with_cleaning":
+    "Poda en verd, inclosa la neteja de tiges, xucladors i vergues",
   "cultural_operation_kind.thinning": "Aclarida",
-  "cultural_operation_kind.staking": "Entutorat",
+  "cultural_operation_kind.staking": "Entutorat, guiatge i lligat de tiges",
   "cultural_operation_kind.grafting": "Empelt",
   "cultural_operation_kind.pruning_removal": "Eliminació de restes de poda",
   "cultural_operation_kind.green_pruning": "Poda en verd",

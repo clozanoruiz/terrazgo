@@ -42,6 +42,12 @@ export default {
   "irrigation.water_section": "Irrigation water",
   "irrigation.water_hint":
     "The water's nitrogen and phosphorus content is recorded only when the basin authority or irrigators' community supplies it; from your own analyses it is voluntary.",
+  "irrigation.practices_section": "Good practices",
+  "irrigation.practices_hint":
+    "The printed model has no column for them; the digital record book accepts them.",
+  "irrigation.practices_none": "None selected",
+  "irrigation.practices_selected.one": "1 selected",
+  "irrigation.practices_selected.other": "{count} selected",
   "irrigation.nitric_n": "Nitric N (mg/l)",
   "irrigation.soluble_p2o5": "Soluble P₂O₅ (mg/l)",
   "irrigation.plots_section": "Irrigated plots",
@@ -106,9 +112,10 @@ export default {
   "material.add_nutrient": "Add nutrient",
   "material.fill": "Fill from the catalogue",
   "material.fill_hint":
-    "Takes the composition the catalogue publishes for the chosen product, leaving any line you already entered untouched. Check it against the label: heavy metals are never filled in, because the catalogue mixes percentages and mg/kg in the same columns.",
+    "Takes the composition the catalogue publishes for the chosen product and, for a liquid, its density, leaving anything you already entered untouched. Check it against the label: heavy metals are never filled in, because the catalogue mixes percentages and mg/kg in the same columns.",
   "material.filled.one": "One composition line added.",
   "material.filled.other": "{count} composition lines added.",
+  "material.filled_density": "Density taken from the catalogue: {density} kg/L.",
   "material.filled_none": "The catalogue adds nothing that was not already recorded.",
   "material.supplier_registry": "Registry",
   "material.supplier_number": "Identification no.",

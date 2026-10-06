@@ -96,9 +96,9 @@ struct Vendored {
     /// code, so their label is the third column, not the second.
     label_header: &'static str,
     /// Attribute headers that qualify the code for upsert identity, for
-    /// catalogues that legitimately repeat a code (one row per ámbito, one
-    /// row per SIGPAC uso, one row per crop cross-reference). Empty for
-    /// everything else: the code alone is the identity.
+    /// catalogues that legitimately repeat a code (one row per SIGPAC uso, one
+    /// row per crop cross-reference, one per province). Empty for everything
+    /// else: the code alone is the identity.
     identity_attrs: &'static [&'static str],
     /// The file's complete header row, in order, as this app version was built
     /// against it — the pinned shape contract, checked by [`validate_shape`]
@@ -119,8 +119,10 @@ struct Vendored {
 }
 
 /// The vendored SIEX snapshot (treatment catalogues fetched 2026-07-14; the
-/// rest 2026-08-05, re-checked in full 2026-09-04 — only `PRODUCTOS` had moved,
-/// per `GET https://www11.fega.es/bdcsixwsp/catalogos/{id}`).
+/// rest 2026-08-05, re-checked in full 2026-09-04 — only `PRODUCTOS` had moved —
+/// and 2026-10-06, when `BUENAS_PRACTICAS_AMBITOS`, `DETALLE_MATERIAL_FERT`,
+/// `PRODUCTOS` and `TIPO_LABOR` had, per
+/// `GET https://www11.fega.es/bdcsixwsp/catalogos/{id}`).
 ///
 /// Selection rule: **a catalogue is vendored when a named part of the app
 /// reads it** — the record book's coded fields, the declared-crops prefill,
@@ -133,7 +135,7 @@ struct Vendored {
 ///
 /// Refreshing = replacing the files and re-releasing; the importer detects it
 /// by content digest (see [`snapshot_digest`]).
-const VENDORED: [Vendored; 49] = [
+const VENDORED: [Vendored; 50] = [
     Vendored {
         id: "AUTORIZACION_EXCP",
         csv: include_bytes!("../catalogues/AUTORIZACION_EXCP.csv"),
@@ -150,15 +152,20 @@ const VENDORED: [Vendored; 49] = [
         ],
     },
     Vendored {
+        // One row per practice, with one SI/NO column per ámbito it may be
+        // claimed in. A practice keeps its code and its wording in every
+        // ámbito, so the code alone is the identity.
         id: "BUENAS_PRACTICAS_AMBITOS",
         csv: include_bytes!("../catalogues/BUENAS_PRACTICAS_AMBITOS.csv"),
         code_header: "Código SIEX",
         label_header: "Buenas prácticas",
-        identity_attrs: &["Ámbito"],
+        identity_attrs: &[],
         headers: &[
             "Código SIEX",
             "Buenas prácticas",
-            "Ámbito",
+            "Ámbito Fitosanitario",
+            "Ámbito Fertilización",
+            "Ámbito Riego",
             "Fecha de alta",
             "Fecha de modificación",
             "Fecha de baja",
@@ -239,7 +246,7 @@ const VENDORED: [Vendored; 49] = [
     },
     Vendored {
         // Keyed on `C_FERTILIZANTE` (column 2); column 0 is the parent
-        // MAT_FERTI code. 40 columns, no lifecycle dates. Labelled from
+        // MAT_FERTI code. 41 columns, no lifecycle dates. Labelled from
         // `D_FERTILIZANTE_2` rather than the provider's own `descripcion`
         // column: it is the only name column populated on every row (the 83
         // "PERSONALIZADO" rows leave the others blank).
@@ -289,6 +296,7 @@ const VENDORED: [Vendored; 49] = [
             "Hierro (Fe)",
             "Estado de agregación",
             "% Corg",
+            "Densidad (g/cm3)",
         ],
     },
     Vendored {
@@ -739,6 +747,30 @@ const VENDORED: [Vendored; 49] = [
         ],
     },
     Vendored {
+        // The basic substances of Reglamento (CE) 1107/2009 art. 23 — vinegar,
+        // whey, nettle… — which a treatment uses as the non-chemical measure
+        // `TIPO_MEDIDA_FITOSANITARIA` 11 rather than as an authorised product.
+        // Read by `treatment_record.measure_basic_substance_code`. Published
+        // 2026-09-29; the 2027 data model (Anexo 03) asks which one was used.
+        // `Fecha de aprobación` is the EU approval date, already ISO, and rides
+        // in attrs.
+        id: "SUSTANCIAS_BASICAS",
+        csv: include_bytes!("../catalogues/SUSTANCIAS_BASICAS.csv"),
+        code_header: "Código SIEX",
+        label_header: "Sustancia básica",
+        identity_attrs: &[],
+        headers: &[
+            "Código SIEX",
+            "Sustancia básica",
+            "Función",
+            "Fecha de aprobación",
+            "Número CAS",
+            "Fecha de alta",
+            "Fecha de modificación",
+            "Fecha de baja",
+        ],
+    },
+    Vendored {
         id: "SUST_ACTIVAS",
         csv: include_bytes!("../catalogues/SUST_ACTIVAS.csv"),
         code_header: "Código SIEX",
@@ -924,6 +956,11 @@ pub struct CatalogueCode {
     pub added_on: Option<String>,
     pub modified_on: Option<String>,
     pub retired_on: Option<String>,
+    /// Whether a picker may offer it for a new choice: neither retired by the
+    /// authority (`retired_on`) nor gone from the provider's current file
+    /// (`absent_since`, ours). A code that is not offered still names the
+    /// records that carry it.
+    pub offered: bool,
 }
 
 /// Import the vendored snapshot on the first run of each app version.
@@ -1263,13 +1300,64 @@ pub fn vendored_key_headers(catalogue_id: &str) -> Option<(&'static str, &'stati
         .map(|v| (v.code_header, v.label_header))
 }
 
-/// One offer in a catalogue-backed picker: the code the row stores, and the
+/// One code in a catalogue-backed picker: the code the row stores, and the
 /// name the farmer reads. The modules' own catalogue helpers re-export this
 /// rather than defining it again.
 #[derive(Debug, Clone, Serialize)]
 pub struct CataloguePick {
     pub code: String,
     pub name: String,
+    /// Whether the picker may offer it — see [`CatalogueCode::offered`]. A code
+    /// that is not offered is listed so a picker can still name it on the
+    /// record that carries it.
+    pub offered: bool,
+}
+
+/// Every code this device holds in one catalogue, once each, in the
+/// provider's order — what a picker offers, and what it can still name.
+///
+/// `keep` narrows the rows before they are counted (a practice's ámbito, a
+/// material's kind); `name` says how the farmer reads one. A code held in
+/// several rows (the composite-identity catalogues) is listed once, offered
+/// while any of its rows is live, and named after a live row when it has one.
+///
+/// Lists hold the codes a picker no longer offers because a record may still
+/// carry one: a code the authority retired since, or one only another device's
+/// newer catalogue had when the record was written there (docs/sync.md → What
+/// stays device-local). A picker that dropped them showed such a record's
+/// field as empty.
+pub fn held_picks(
+    conn: &Connection,
+    catalogue_id: &str,
+    keep: impl Fn(&CatalogueCode) -> bool,
+    name: impl Fn(&CatalogueCode) -> String,
+) -> Result<Vec<CataloguePick>> {
+    let mut picks: Vec<CataloguePick> = Vec::new();
+    // Where each code already sits in `picks`.
+    let mut position: HashMap<String, usize> = HashMap::new();
+    for row in all_codes(conn, catalogue_id)? {
+        if !keep(&row) {
+            continue;
+        }
+        match position.get(&row.code) {
+            Some(&at) => {
+                let pick = &mut picks[at];
+                if row.offered && !pick.offered {
+                    pick.name = name(&row);
+                    pick.offered = true;
+                }
+            }
+            None => {
+                position.insert(row.code.clone(), picks.len());
+                picks.push(CataloguePick {
+                    name: name(&row),
+                    offered: row.offered,
+                    code: row.code,
+                });
+            }
+        }
+    }
+    Ok(picks)
 }
 
 /// Which catalogue names the classes of building a holding can hold. Core's
@@ -1293,13 +1381,7 @@ pub fn premises_classes(conn: &Connection, country_code: &str) -> Result<Vec<Cat
     let Some(catalogue_id) = premises_class_catalogue(country_code) else {
         return Ok(Vec::new());
     };
-    Ok(active_codes(conn, catalogue_id)?
-        .into_iter()
-        .map(|row| CataloguePick {
-            code: row.code,
-            name: row.label,
-        })
-        .collect())
+    held_picks(conn, catalogue_id, |_| true, |row| row.label.clone())
 }
 
 /// The offerable codes of one catalogue, in file order (providers publish their
@@ -1341,7 +1423,8 @@ fn codes_where(
     params: &[&dyn rusqlite::ToSql],
 ) -> Result<Vec<CatalogueCode>> {
     let sql = format!(
-        "SELECT id, catalogue_id, code, label, attrs, added_on, modified_on, retired_on
+        "SELECT id, catalogue_id, code, label, attrs, added_on, modified_on, retired_on,
+                retired_on IS NULL AND absent_since IS NULL
          FROM catalogue_code WHERE {filter} ORDER BY id"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -1358,12 +1441,13 @@ fn codes_where(
                 r.get::<_, Option<String>>(5)?,
                 r.get::<_, Option<String>>(6)?,
                 r.get::<_, Option<String>>(7)?,
+                r.get::<_, bool>(8)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     raw.into_iter()
         .map(
-            |(id, catalogue_id, code, label, attrs, added_on, modified_on, retired_on)| {
+            |(id, catalogue_id, code, label, attrs, added_on, modified_on, retired_on, offered)| {
                 let attrs = attrs.as_deref().map(serde_json::from_str).transpose()?;
                 Ok(CatalogueCode {
                     id,
@@ -1374,6 +1458,7 @@ fn codes_where(
                     added_on,
                     modified_on,
                     retired_on,
+                    offered,
                 })
             },
         )

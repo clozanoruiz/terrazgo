@@ -35,9 +35,52 @@
   // docs/frontend-conventions.md → "Forbidden Bits UI components".
   //
   // eslint-disable-next-line no-restricted-imports
-  import { Dialog } from "bits-ui";
+  import { BitsConfig, Dialog } from "bits-ui";
   import { X } from "@lucide/svelte";
   import { t } from "../i18n.js";
+
+  // WHERE A DROPDOWN INSIDE THIS PANEL GOES, AND WHY IT IS NOT <body>.
+  // The stacking ladder (styles.css) runs --z-popover: 32 under --z-modal: 40,
+  // deliberately: a popover has to outrank the view's sticky bands and must NOT
+  // outrank the shell's own top band. Portalled to <body>, an owned control's
+  // `.tz-popover` is therefore a SIBLING of this panel at a lower step, and every
+  // select, combobox, catalogue picker and date picker opened inside a form here
+  // would paint UNDERNEATH it. The About panel never met this, holding no
+  // controls; a register's form holds dozens.
+  //
+  // Raising the popover past the modal would cost two rungs to fix one screen —
+  // --z-tooltip sits between them — and the cost would land on all 78 TzSelect
+  // sites, including every one that never meets a dialog. And it could not be
+  // done in a stylesheet anyway: use-floating-layer copies the CONTENT's
+  // computed z-index onto the floating wrapper it positions, so there is no
+  // outer element left at a neutral step for a selector to raise.
+  //
+  // So the layers move instead of the ladder. A nested BitsConfig retargets the
+  // portal for this subtree only; createConfigResolver walks current level →
+  // parent → undefined, so `defaultLocale` keeps coming from the shell's config
+  // and nothing outside this panel changes. Inside .tz-dialog's own stacking
+  // context a descendant at 32 paints above the panel's content, which is all
+  // that was ever wanted.
+  //
+  // Three details are load-bearing:
+  //
+  //   * the target is .tz-dialog, NEVER .tz-dialog-body — the body is
+  //     `overflow-y: auto` and would clip a dropdown at its edge;
+  //   * `?? undefined` and not `?? null`. undefined falls through to the shell's
+  //     "body"; null is a value, and portal.svelte throws
+  //     `Unknown portal target type: null` on it while the panel is closed;
+  //   * .tz-dialog carries no `transform`. A transform establishes the
+  //     containing block for `position: fixed` descendants, and the floating
+  //     wrapper is fixed by default — so the panel is centred with
+  //     `inset: 0; margin: auto` and the wrapper keeps resolving against the
+  //     viewport exactly as it does from <body>.
+  //
+  // What did NOT need solving: Escape ordering, outside-click and focus are
+  // stack-managed by bits-ui through globalThis registries and a focus-scope
+  // manager, none of which consults the portal target. An open select takes the
+  // Escape before the panel does, unaided.
+  let dialogEl = $state(null);
+  let bodyEl = $state(null);
 
   let {
     open = $bindable(false),
@@ -55,8 +98,36 @@
     /// window jumping rather than as the content changing. A phone dialog is
     /// already full-height, so this only ever applies on wide screens.
     fill = false,
+    /// Wide enough for a form rather than for a paragraph. See the `.tz-dialog.wide`
+    /// rule for the arithmetic; orthogonal to `fill`, and a caller wants one or
+    /// the other rather than both.
+    wide = false,
+    /// The pinned bar at the foot of the panel: a form's own Save and Cancel,
+    /// and Delete at the trailing edge. A third flex item beside the head and
+    /// the body, so it stays put while the body scrolls under it.
+    footer = null,
+    /// Whether a click on the overlay closes the panel. True for something you
+    /// are reading, which you dismiss by looking away from it. False for
+    /// something you are filling in: a stray click beside a correction form is
+    /// not a decision to discard it, and this panel has a close button, a
+    /// Cancel and an Escape that all are. Escape is unaffected either way.
+    dismissible = true,
     children,
   } = $props();
+
+  /// Focus lands on the panel itself, never on the first control inside it.
+  ///
+  /// bits-ui's focus scope takes the first TABBABLE element on open, which here
+  /// is the close button — where Enter, the reflex after opening anything,
+  /// shuts the panel. Cancel would be no better for the same reason, and the
+  /// first field is worse on a phone, where it raises the soft keyboard over a
+  /// form nobody has read yet. The panel's own box is what the ARIA practices
+  /// allow instead, and it is what a screen reader needs: the title first, then
+  /// the content, rather than the way out.
+  function focusPanel(event) {
+    event.preventDefault();
+    bodyEl?.focus();
+  }
 
   function handleOpenChange(next) {
     open = next;
@@ -80,9 +151,12 @@
          text. Inline styles beat any selector, so CSS alone could not have
          fixed this without `!important`. -->
     <Dialog.Content
+      bind:ref={dialogEl}
       preventScroll={false}
       preventOverflowTextSelection={false}
-      class="tz-dialog {fill ? 'fill' : ''}"
+      onOpenAutoFocus={focusPanel}
+      onInteractOutside={dismissible ? undefined : (event) => event.preventDefault()}
+      class="tz-dialog {fill ? 'fill' : ''} {wide ? 'wide' : ''} {footer ? 'has-foot' : ''}"
     >
       <div class="tz-dialog-head">
         <Dialog.Title class="tz-dialog-title">{title}</Dialog.Title>
@@ -90,9 +164,17 @@
           <X />
         </Dialog.Close>
       </div>
-      <div class="tz-dialog-body">
-        {@render children?.()}
+      <!-- tabindex so a caller can park focus on the panel itself rather than
+           on the first control bits-ui would otherwise reach, which here is the
+           close button. -->
+      <div class="tz-dialog-body" tabindex="-1" bind:this={bodyEl}>
+        <BitsConfig defaultPortalTo={dialogEl ?? undefined}>
+          {@render children?.()}
+        </BitsConfig>
       </div>
+      {#if footer}
+        <div class="tz-dialog-foot">{@render footer()}</div>
+      {/if}
     </Dialog.Content>
   </Dialog.Portal>
 </Dialog.Root>

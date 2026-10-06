@@ -8,20 +8,14 @@
 //! is neither — turning a catalogue into the list a picker offers.
 
 use rusqlite::Connection;
-use serde::Serialize;
-use terrazgo_core::catalogue::active_codes;
+use terrazgo_core::catalogue::held_picks;
 
 use crate::error::Result;
 use crate::siex;
 
-/// One offer in a catalogue-backed picker: the code the record stores, and the
-/// name the farmer reads. Deliberately the same shape the other modules'
-/// pickers use, so one Svelte component serves them all.
-#[derive(Debug, Clone, Serialize)]
-pub struct CataloguePick {
-    pub code: String,
-    pub name: String,
-}
+/// One code in a catalogue-backed picker — core's type, the one every module's
+/// picker list returns, so one Svelte component serves them all.
+pub use terrazgo_core::catalogue::CataloguePick;
 
 /// The animals a grazing can name (FEGA `ESPECIE_ANIMAL`, 198 species from
 /// bovinos to camellos). Model 9.1's "Especie animal que pasta";
@@ -35,13 +29,12 @@ pub fn animal_species(conn: &Connection, country_code: &str) -> Result<Vec<Catal
     let Some(catalogue_id) = siex::animal_species_catalogue(country_code) else {
         return Ok(Vec::new());
     };
-    Ok(active_codes(conn, catalogue_id)?
-        .into_iter()
-        .map(|row| CataloguePick {
-            code: row.code,
-            name: row.label,
-        })
-        .collect())
+    Ok(held_picks(
+        conn,
+        catalogue_id,
+        |_| true,
+        |row| row.label.clone(),
+    )?)
 }
 
 /// Where a cultural operation's plant residue went (FEGA `DEST_RES_VEG`, nine
@@ -55,13 +48,12 @@ pub fn residue_destinations(conn: &Connection, country_code: &str) -> Result<Vec
     let Some(catalogue_id) = siex::residue_destination_catalogue(country_code) else {
         return Ok(Vec::new());
     };
-    Ok(active_codes(conn, catalogue_id)?
-        .into_iter()
-        .map(|row| CataloguePick {
-            code: row.code,
-            name: row.label,
-        })
-        .collect())
+    Ok(held_picks(
+        conn,
+        catalogue_id,
+        |_| true,
+        |row| row.label.clone(),
+    )?)
 }
 
 /// What a cover is made of (FEGA `TIPO_COBERTURA_SUELO`, six kinds).
@@ -93,14 +85,12 @@ pub fn cover_types(
         "inert_cover" => Some(siex::INERT_COVER_TYPES),
         _ => None,
     };
-    Ok(active_codes(conn, catalogue_id)?
-        .into_iter()
-        .filter(|row| wanted.is_none_or(|codes| codes.contains(&row.code.as_str())))
-        .map(|row| CataloguePick {
-            code: row.code,
-            name: row.label,
-        })
-        .collect())
+    Ok(held_picks(
+        conn,
+        catalogue_id,
+        |row| wanted.is_none_or(|codes| codes.contains(&row.code.as_str())),
+        |row| row.label.clone(),
+    )?)
 }
 
 #[cfg(test)]
@@ -121,6 +111,7 @@ mod tests {
         // number that drops here means the snapshot lost rows, not that FEGA
         // retired a species (docs/maintenance.md §1).
         assert_eq!(picks.len(), 198);
+        assert!(picks.iter().all(|pick| pick.offered));
         assert!(
             picks.iter().any(|p| p.code == "03" && p.name == "Ovinos"),
             "sheep are the species a Spanish extensive grazing is most likely to name"
@@ -133,6 +124,25 @@ mod tests {
         assert!(animal_species(&conn, "fr").unwrap().is_empty());
         assert!(residue_destinations(&conn, "fr").unwrap().is_empty());
         assert!(cover_types(&conn, "fr", "plant_cover").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_retired_cover_type_is_listed_and_not_offered() {
+        // A picker must still name the code a record already carries when it
+        // no longer offers it: retired by the authority since, or held only by
+        // another device's newer catalogue (docs/sync.md → What stays
+        // device-local).
+        let conn = db();
+        conn.execute(
+            "UPDATE catalogue_code SET retired_on = '2026-01-01'
+             WHERE catalogue_id = 'TIPO_COBERTURA_SUELO' AND code = '2'",
+            [],
+        )
+        .unwrap();
+        let plant = cover_types(&conn, "es", "plant_cover").unwrap();
+        let sown = plant.iter().find(|pick| pick.code == "2").unwrap();
+        assert!(!sown.offered);
+        assert!(plant.iter().any(|pick| pick.code == "3" && pick.offered));
     }
 
     #[test]

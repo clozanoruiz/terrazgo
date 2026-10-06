@@ -19,8 +19,14 @@
 use rusqlite::Connection;
 use terrazgo_core::models::{NewFarm, NewOperator, NewPlot, NewSeason};
 
+mod devices;
+
+pub use devices::{
+    A, B, C, D, Device, a_sown_record, later, one_book, plots_sown, rename, shared_farm,
+    sowing_state, sown_plots, sync, sync_both, try_sync,
+};
 pub use terrazgo_testkit::{
-    CoreFixture, FarmWithPlots, PlotSpec, TempFile, farm_with_plots, last_change,
+    CoreFixture, FarmWithPlots, PlotSpec, TempDir, TempFile, farm_with_plots, last_change,
 };
 
 /// A migrated in-memory database at core's schema.
@@ -49,10 +55,8 @@ pub fn db_with_catalogues() -> Connection {
 pub fn new_farm(name: &str) -> NewFarm {
     NewFarm {
         name: name.into(),
-        owner_name: None,
-        owner_tax_id: None,
         country_code: "es".into(),
-        es: None,
+        ..NewFarm::default()
     }
 }
 
@@ -69,12 +73,16 @@ pub fn new_plot(farm_id: &str, name: &str) -> NewPlot {
 // Shared by more than one of the repository_*.rs files
 // ---------------------------------------------------------------------------
 
-pub fn new_season(campaign_year: i64, label: &str) -> NewSeason {
+/// A season of `farm_id` running September to August into `year`, so its dates
+/// alone name it "{year-1}/{year}". Any other `label` is kept as the farmer's
+/// own name for it, which is how a test pins a name it asserts on.
+pub fn new_season(farm_id: &str, year: i64, label: &str) -> NewSeason {
+    let dated = format!("{}/{year}", year - 1);
     NewSeason {
-        campaign_year,
-        label: label.into(),
-        starts_on: None,
-        ends_on: None,
+        farm_id: farm_id.into(),
+        starts_on: format!("{}-09-01", year - 1),
+        ends_on: format!("{year}-08-31"),
+        custom_label: (label != dated).then(|| label.to_string()),
     }
 }
 

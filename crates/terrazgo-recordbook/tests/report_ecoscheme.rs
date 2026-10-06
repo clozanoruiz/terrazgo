@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use module_cue::repository as repo;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 use terrazgo_recordbook::{ReportLanguage, render_cuaderno};
 
@@ -1072,7 +1072,7 @@ fn a_cover_operation_that_names_no_cover_still_reaches_the_operations_tab() {
         &mut conn,
         &fx,
         "inert_cover",
-        "pruning",
+        "green_pruning_with_cleaning",
         "2026-02-20",
         vec![fx.wheat_plot_id.clone()],
     );
@@ -1154,4 +1154,134 @@ fn a_book_with_no_cover_prints_94_and_95_empty() {
     )
     .unwrap();
     assert_eq!(pdf.warnings, Vec::<String>::new());
+}
+
+// ---------------------------------------------------------------------------
+// No annotation may vanish from the book
+// ---------------------------------------------------------------------------
+
+/// Every eco-scheme practice reaches a printed section-9 table.
+///
+/// The failure this exists for is the worst one this app has: a record the
+/// farmer made, stored correctly, absent from the document an inspection
+/// reads. Section 9's collation dispatches on `practice_code` and ends in a
+/// `_ => {}` that discards — so a seventh practice added to the register
+/// without a printed home would be annotated, saved, and silently dropped.
+///
+/// Nothing is dropped today, which is exactly why this is a test and not a
+/// fix: the guard makes the omission fail at the moment someone adds a
+/// practice, which is when the decision about where it prints is actually in
+/// front of them.
+///
+/// A practice's home is the most specific register that accepts it: the cover
+/// register owns `plant_cover` and `inert_cover` (a cultural operation naming
+/// one is *maintenance on* a cover, and prints as a column of the cover's own
+/// row), the cultural-operation register owns the rest, and grazing owns what
+/// neither claims. The list is read from the seeded rows, so a new practice is
+/// checked the day it is seeded.
+#[test]
+fn every_eco_scheme_practice_reaches_a_printed_section_nine_table() {
+    const SECTION_NINE: [&str; 6] = [
+        "grazing",
+        "mowing",
+        "communal",
+        "flooded",
+        "plant_covers",
+        "inert_covers",
+    ];
+
+    let practices = {
+        let conn = db();
+        let mut stmt = conn.prepare("SELECT code FROM eco_practice").unwrap();
+        let rows: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        rows
+    };
+    assert!(
+        practices.len() >= 6,
+        "the seeded practice list is {practices:?}, so the reader is broken"
+    );
+
+    for practice in practices {
+        let mut conn = db();
+        let fx = fixture(&mut conn);
+
+        if module_ecoscheme::repository::COVER_PRACTICES.contains(&practice.as_str()) {
+            insert_cover(&mut conn, &fx, &practice, "2026-02-01", None, Vec::new());
+        } else if module_ecoscheme::repository::OPERATION_PRACTICES.contains(&practice.as_str()) {
+            insert_operation(
+                &mut conn,
+                &fx,
+                &practice,
+                "mowing",
+                "2026-05-12",
+                vec![fx.wheat_plot_id.clone()],
+            );
+        } else if module_ecoscheme::repository::GRAZING_PRACTICES.contains(&practice.as_str()) {
+            // Built inline rather than through `insert_grazing`, which names
+            // `extensive_grazing`: a helper that ignored the practice under
+            // test would print a row for the WRONG one and pass.
+            use module_ecoscheme::models::{GrazingAnimal, NewGrazingRecord};
+            module_ecoscheme::repository::insert_grazing_record(
+                &mut conn,
+                NewGrazingRecord {
+                    season_id: fx.season_id.clone(),
+                    farm_id: fx.farm_id.clone(),
+                    practice_code: practice.clone(),
+                    plot_group_ref: None,
+                    soil_cover_id: None,
+                    started_on: "2026-04-01".into(),
+                    ended_on: Some("2026-04-30".into()),
+                    notes: None,
+                    plot_ids: vec![fx.wheat_plot_id.clone()],
+                    animals: vec![GrazingAnimal {
+                        id: String::new(),
+                        grazing_record_id: String::new(),
+                        species_code: "ovino".into(),
+                        rega_code: "Ovino".into(),
+                        animal_count: 120,
+                    }],
+                },
+                None,
+            )
+            .unwrap();
+        } else {
+            panic!(
+                "no register accepts `{practice}`, so a farmer cannot record it \
+                 at all -- it is seeded and unreachable"
+            );
+        }
+
+        let doc = inputs(&conn, &fx);
+        let printed: usize = SECTION_NINE
+            .iter()
+            .map(|table| doc[table].as_array().map(Vec::len).unwrap_or(0))
+            .sum();
+        assert_eq!(
+            printed, 1,
+            "a `{practice}` record printed in {printed} section-9 tables; it \
+             must reach exactly one, or the annotation is lost"
+        );
+    }
+}
+
+/// The cover pages split the register with `== "inert_cover"` / else, so a
+/// THIRD cover practice would silently print on the plant-cover page — a row in
+/// the wrong table, which the test above cannot see because it only asks that a
+/// record reaches exactly one.
+///
+/// The split is correct only while there are exactly two, so the assumption is
+/// pinned where it is made. A third cover practice is a decision about which
+/// page it belongs on, not a value to add and discover later.
+#[test]
+fn the_cover_pages_assume_exactly_two_cover_practices() {
+    assert_eq!(
+        module_ecoscheme::repository::COVER_PRACTICES.len(),
+        2,
+        "the cover pages split on `== \"inert_cover\"` / else; a third practice \
+         needs that split replaced before it can be offered"
+    );
 }

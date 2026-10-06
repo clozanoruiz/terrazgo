@@ -10,19 +10,14 @@
 
 use rusqlite::Connection;
 use serde::Serialize;
-use terrazgo_core::catalogue::active_codes;
+use terrazgo_core::catalogue::{CatalogueCode, all_codes, held_picks};
 
 use crate::error::Result;
 use crate::siex;
 
-/// One offer in a catalogue-backed picker: the code the record stores, and the
-/// name the farmer reads. Deliberately the same shape module-cue's picker uses,
-/// so one Svelte component serves both.
-#[derive(Debug, Clone, Serialize)]
-pub struct CataloguePick {
-    pub code: String,
-    pub name: String,
-}
+/// One code in a catalogue-backed picker — core's type, the one every module's
+/// picker list returns, so one Svelte component serves them all.
+pub use terrazgo_core::catalogue::CataloguePick;
 
 /// Anexo III C.d's first level: the kind of material (FEGA `MAT_FERTI`, 24
 /// values from "Estiércol sólido de ovino" to "Lodos EDAR").
@@ -77,6 +72,21 @@ pub struct CompositionLine {
     pub nutrient_code: String,
     pub percentage: f64,
 }
+
+/// What the catalogue publishes about one named product that the material form
+/// can take instead of copying it off the sack — see [`material_proposal`].
+#[derive(Debug, Clone, Serialize)]
+pub struct MaterialProposal {
+    pub composition: Vec<CompositionLine>,
+    /// For a liquid product only, in kg/L — `fertiliser_material.density_kg_l`.
+    pub density_kg_l: Option<f64>,
+}
+
+/// The `DETALLE_MATERIAL_FERT` columns the density proposal reads. Grams per
+/// cubic centimetre is kilograms per litre, so the figure needs no conversion.
+const DENSITY_COLUMN: &str = "Densidad (g/cm3)";
+const AGGREGATION_COLUMN: &str = "Estado de agregación";
+const LIQUID: &str = "Líquido";
 
 /// The columns of `DETALLE_MATERIAL_FERT` that can be read as a percentage of
 /// the material, paired with the nutrient catalogue code they answer.
@@ -137,7 +147,7 @@ const COMPOSITION_COLUMNS: &[(&str, &str, &str)] = &[
 
 /// The numeric columns [`COMPOSITION_COLUMNS`] deliberately leaves out, each
 /// with the reason, so the exclusion is a stated decision rather than an
-/// oversight — and so `every_numeric_column_is_mapped_or_declared_unmapped`
+/// oversight — and so `the_mapping_accounts_for_every_column_of_the_file`
 /// can fail the day a snapshot refresh adds a column nobody has looked at.
 ///
 /// Note the metals cannot be rescued by dropping units: SIEX's field is
@@ -149,9 +159,10 @@ const COMPOSITION_COLUMNS: &[(&str, &str, &str)] = &[
 /// The code and label columns are deliberately absent — the importer lifts
 /// them out of `attrs`, so they never reach this mapping.
 ///
-/// Together with [`COMPOSITION_COLUMNS`] this accounts for the file EXACTLY,
-/// so a provider adding a column cannot pass as a nutrient nobody decided
-/// about. Checked against the header row `terrazgo-core` pins, not against
+/// Together with [`COMPOSITION_COLUMNS`] and the two density columns
+/// ([`DENSITY_COLUMN`], [`AGGREGATION_COLUMN`]) this accounts for the file
+/// EXACTLY, so a provider adding a column cannot pass as a nutrient nobody
+/// decided about. Checked against the header row `terrazgo-core` pins, not against
 /// sampled data.
 #[cfg(test)]
 const UNMAPPED_COLUMNS: &[(&str, &str)] = &[
@@ -172,10 +183,6 @@ const UNMAPPED_COLUMNS: &[(&str, &str)] = &[
     ),
     ("Fabricante", "manufacturer, not a composition figure"),
     ("D_GRUPO_CONSUMO", "the provider's own consumption grouping"),
-    (
-        "Estado de agregación",
-        "solid or liquid, not a composition figure",
-    ),
     // --- numeric, but not mappable onto a nutrient catalogue ---
     (
         "P_% TOTAL",
@@ -206,34 +213,50 @@ const UNMAPPED_COLUMNS: &[(&str, &str)] = &[
     ),
 ];
 
-/// What the catalogue publishes about one named product's composition, offered
-/// to the material form so Anexo III C.h's eight values need not be copied off
-/// the sack by hand.
+/// What the catalogue publishes about one named product, offered to the
+/// material form so Anexo III C.h's eight values — and a liquid's density —
+/// need not be copied off the sack by hand.
 ///
 /// A **proposal**, never a record: the caller applies it explicitly and may
-/// edit or drop any line, because the label in the farmer's hand is the source
-/// of truth and this snapshot rides app releases.
+/// edit or drop any of it, because the label in the farmer's hand is the
+/// source of truth and this snapshot rides app releases.
 ///
 /// A zero is NOT proposed. The provider fills unstated cells with `0`, and our
 /// own rule is that blank and zero are different claims — "contains no
 /// potassium" is a statement, "did not say" is not.
-pub fn material_composition(
+///
+/// The density is proposed for a liquid only: Anexo V asks for it "cuando se
+/// trate de producto fertilizante líquido", and what the file states for a
+/// solid is a bulk density the field does not mean.
+pub fn material_proposal(
     conn: &Connection,
     country_code: &str,
     detail_code: &str,
-) -> Result<Vec<CompositionLine>> {
+) -> Result<MaterialProposal> {
+    let nothing = MaterialProposal {
+        composition: Vec::new(),
+        density_kg_l: None,
+    };
     let Some(catalogue_id) = siex::fertiliser_detail_catalogue(country_code) else {
-        return Ok(Vec::new());
+        return Ok(nothing);
     };
     let Some(row) = terrazgo_core::catalogue::find_code(conn, catalogue_id, detail_code)?
         .into_iter()
         .next()
     else {
-        return Ok(Vec::new());
+        return Ok(nothing);
     };
+    Ok(MaterialProposal {
+        composition: composition(&row),
+        density_kg_l: liquid_density(&row),
+    })
+}
+
+/// The composition lines one catalogue row states, zeros left out.
+fn composition(row: &CatalogueCode) -> Vec<CompositionLine> {
     let mut lines = Vec::new();
     for (header, kind_code, nutrient_code) in COMPOSITION_COLUMNS {
-        let Some(percentage) = attr(&row, header).and_then(parse_percentage) else {
+        let Some(percentage) = attr(row, header).and_then(parse_percentage) else {
             continue;
         };
         if percentage <= 0.0 {
@@ -245,37 +268,74 @@ pub fn material_composition(
             percentage,
         });
     }
-    Ok(lines)
+    lines
+}
+
+/// A liquid product's stated density, in kg/L; `None` for a solid, or when
+/// the file leaves it at `0`.
+fn liquid_density(row: &CatalogueCode) -> Option<f64> {
+    if attr(row, AGGREGATION_COLUMN) != Some(LIQUID) {
+        return None;
+    }
+    attr(row, DENSITY_COLUMN)
+        .and_then(parse_decimal)
+        .filter(|density| *density > 0.0)
 }
 
 /// The provider writes decimals with a point in this file, but a refreshed
 /// snapshot spelling one with a comma must not silently become a different
 /// number — so both are read, and anything else is skipped rather than guessed.
-fn parse_percentage(raw: &str) -> Option<f64> {
+fn parse_decimal(raw: &str) -> Option<f64> {
     let value: f64 = raw.trim().replace(',', ".").parse().ok()?;
-    (value.is_finite() && (0.0..=100.0).contains(&value)).then_some(value)
+    value.is_finite().then_some(value)
+}
+
+fn parse_percentage(raw: &str) -> Option<f64> {
+    parse_decimal(raw).filter(|value| (0.0..=100.0).contains(value))
 }
 
 /// The good practices a fertilisation record can claim (FEGA
-/// `BUENAS_PRACTICAS_AMBITOS`, 41 rows in the "Fertilización" ámbito).
+/// `BUENAS_PRACTICAS_AMBITOS`, 41 of its 60 marked "SI" under "Ámbito
+/// Fertilización").
 ///
-/// The ámbito filter is the whole point: the file holds three vocabularies in
-/// one table and the same integer means a different practice in each, so an
-/// unfiltered list would offer a farmer irrigation practices to claim on a
-/// fertilisation record.
+/// Every practice is listed and only those are offered. The file is one list
+/// for three ámbitos, so offering all of it would put irrigation and
+/// phytosanitary practices on a fertilisation record. But it can only take a
+/// practice out of an ámbito by turning its "SI" into "NO" — there is no baja
+/// date per ámbito — and a record already claiming one must still name it
+/// rather than show a bare code, which is what a list that dropped it would
+/// leave.
 pub fn fertilisation_practices(
     conn: &Connection,
     country_code: &str,
 ) -> Result<Vec<CataloguePick>> {
+    practices_in_scope(conn, country_code, siex::FERTILISATION_SCOPE_KEY)
+}
+
+/// The good practices an irrigation record can claim — the same list, offered
+/// where it marks "SI" under "Ámbito Riego", for the same reasons
+/// [`fertilisation_practices`] lists all and offers some.
+pub fn irrigation_practices(conn: &Connection, country_code: &str) -> Result<Vec<CataloguePick>> {
+    practices_in_scope(conn, country_code, siex::IRRIGATION_SCOPE_KEY)
+}
+
+/// Every practice, offered only where `scope_key` says "SI".
+fn practices_in_scope(
+    conn: &Connection,
+    country_code: &str,
+    scope_key: &str,
+) -> Result<Vec<CataloguePick>> {
     let Some(catalogue_id) = siex::good_practice_catalogue(country_code) else {
         return Ok(Vec::new());
     };
-    Ok(active_codes(conn, catalogue_id)?
+    // One row per code: the file has one per practice, and the import keeps
+    // one per identity, which is the code alone.
+    Ok(all_codes(conn, catalogue_id)?
         .into_iter()
-        .filter(|row| attr(row, siex::GOOD_PRACTICE_SCOPE_KEY) == Some(siex::FERTILISATION_SCOPE))
         .map(|row| CataloguePick {
-            code: row.code,
+            offered: row.offered && attr(&row, scope_key) == Some(siex::IN_SCOPE),
             name: row.label,
+            code: row.code,
         })
         .collect())
 }
@@ -294,25 +354,21 @@ fn picks(
     let Some(catalogue_id) = catalogue_id else {
         return Ok(Vec::new());
     };
-    let mut seen = std::collections::HashSet::new();
-    Ok(active_codes(conn, catalogue_id)?
-        .into_iter()
-        .filter(|row| match parent {
+    Ok(held_picks(
+        conn,
+        catalogue_id,
+        |row| match parent {
             Some(parent) => attr(row, siex::MATERIAL_PARENT_KEY) == Some(parent),
             None => true,
-        })
-        .filter(|row| seen.insert(row.code.clone()))
-        .map(|row| CataloguePick {
-            code: row.code,
-            name: row.label,
-        })
-        .collect())
+        },
+        |row| row.label.clone(),
+    )?)
 }
 
 /// One provider column of a catalogue row, by its verbatim header. The importer
 /// stores every column it did not take as code or label in `attrs`, keys
 /// exactly as the provider spells them — accents included.
-fn attr<'a>(row: &'a terrazgo_core::catalogue::CatalogueCode, key: &str) -> Option<&'a str> {
+fn attr<'a>(row: &'a CatalogueCode, key: &str) -> Option<&'a str> {
     row.attrs.as_ref()?.get(key)?.as_str()
 }
 
@@ -336,6 +392,26 @@ mod tests {
             picks.iter().any(|p| p.code == "22"),
             "sewage sludge (code 22) is the material Anexo III C.i hangs on"
         );
+    }
+
+    #[test]
+    fn a_retired_material_kind_is_listed_and_not_offered() {
+        // A picker must still name the code a record already carries when it
+        // no longer offers it: retired by the authority since, or held only by
+        // another device's newer catalogue (docs/sync.md → What stays
+        // device-local).
+        let conn = db();
+        conn.execute(
+            "UPDATE catalogue_code SET retired_on = '2026-01-01'
+             WHERE catalogue_id = 'MAT_FERTI' AND code = '22'",
+            [],
+        )
+        .unwrap();
+        let picks = fertiliser_materials(&conn, "es").unwrap();
+        assert_eq!(picks.len(), 24);
+        let sludge = picks.iter().find(|pick| pick.code == "22").unwrap();
+        assert!(!sludge.offered);
+        assert_eq!(picks.iter().filter(|pick| pick.offered).count(), 23);
     }
 
     #[test]
@@ -399,19 +475,55 @@ mod tests {
     }
 
     #[test]
-    fn practices_are_filtered_to_the_fertilisation_scope() {
+    fn practices_are_offered_only_in_the_fertilisation_scope() {
         let conn = db();
         let picks = fertilisation_practices(&conn, "es").unwrap();
-        // 41 of the file's 98 rows sit in the "Fertilización" ámbito.
-        assert_eq!(picks.len(), 41);
+        // BUENAS_PRACTICAS_AMBITOS: 60 practices, 41 of them "SI" under
+        // "Ámbito Fertilización".
+        assert_eq!(picks.len(), 60);
+        assert_eq!(picks.iter().filter(|p| p.offered).count(), 41);
+        let pick = |code: &str| picks.iter().find(|p| p.code == code).unwrap();
         assert!(
-            picks.iter().any(|p| p.name.contains("purines")),
-            "the fertilisation ámbito is the one that talks about slurry"
+            pick("1").offered,
+            "slurry applied in bands is a fertilisation practice"
         );
+        // 23 is irrigation's alone: listed, so a record claiming it names it,
+        // and never offered on a fertilisation.
+        assert_eq!(pick("23").name, "Riego localizado.");
+        assert!(!pick("23").offered);
+    }
+
+    #[test]
+    fn irrigation_is_offered_the_practices_marked_for_riego() {
+        let conn = db();
+        let picks = irrigation_practices(&conn, "es").unwrap();
+        // BUENAS_PRACTICAS_AMBITOS: 31 of its 60 are "SI" under "Ámbito Riego".
+        assert_eq!(picks.len(), 60);
+        assert_eq!(picks.iter().filter(|p| p.offered).count(), 31);
+        let pick = |code: &str| picks.iter().find(|p| p.code == code).unwrap();
+        assert!(pick("23").offered, "riego localizado");
         assert!(
-            !picks.iter().any(|p| p.name.contains("riego por goteo")),
-            "irrigation practices belong to another ámbito and must not be offered here"
+            pick("0").offered,
+            "'No realiza buenas prácticas' in every ámbito"
         );
+        // Slurry in bands is fertilisation's alone: listed, never offered.
+        assert!(!pick("1").offered);
+        assert!(irrigation_practices(&conn, "fr").unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_retired_practice_is_not_offered_even_in_scope() {
+        let conn = db();
+        conn.execute(
+            "UPDATE catalogue_code SET retired_on = '2026-01-01'
+             WHERE catalogue_id = 'BUENAS_PRACTICAS_AMBITOS' AND code = '1'",
+            [],
+        )
+        .unwrap();
+        let picks = fertilisation_practices(&conn, "es").unwrap();
+        let slurry = picks.iter().find(|p| p.code == "1").unwrap();
+        assert!(!slurry.offered);
+        assert_eq!(picks.iter().filter(|p| p.offered).count(), 40);
     }
 
     /// The code of one product by its published name, so the composition tests
@@ -428,7 +540,9 @@ mod tests {
     #[test]
     fn a_products_published_composition_becomes_nutrient_lines() {
         let conn = db();
-        let lines = material_composition(&conn, "es", &detail_code(&conn, "Urea 46")).unwrap();
+        let lines = material_proposal(&conn, "es", &detail_code(&conn, "Urea 46"))
+            .unwrap()
+            .composition;
         let get = |kind: &str, code: &str| {
             lines
                 .iter()
@@ -452,7 +566,9 @@ mod tests {
         // separates the two, so C.i's metals are always entered by hand.
         let conn = db();
         for product in ["CODA-Ca-L", "BASFOLIAR ZNMN", "Lodos calizos"] {
-            let lines = material_composition(&conn, "es", &detail_code(&conn, product)).unwrap();
+            let lines = material_proposal(&conn, "es", &detail_code(&conn, product))
+                .unwrap()
+                .composition;
             assert!(
                 lines.iter().all(|l| l.kind_code != "heavy_metal"),
                 "'{product}' proposed a heavy metal"
@@ -473,9 +589,9 @@ mod tests {
         // the oxide factor), and MACRONUTRIENTES codes oxides only. Mapping it
         // would understate the P₂O₅ of every product by more than half.
         let conn = db();
-        let lines =
-            material_composition(&conn, "es", &detail_code(&conn, "NITRATO AMÓNICO CÁLCICO"))
-                .unwrap();
+        let lines = material_proposal(&conn, "es", &detail_code(&conn, "NITRATO AMÓNICO CÁLCICO"))
+            .unwrap()
+            .composition;
         assert!(lines.iter().all(|l| l.percentage <= 100.0));
         // Every proposed code exists in the catalogue it names.
         for line in &lines {
@@ -529,8 +645,11 @@ mod tests {
             terrazgo_core::catalogue::vendored_key_headers("DETALLE_MATERIAL_FERT")
                 .expect("DETALLE_MATERIAL_FERT is vendored");
 
-        let mapped: std::collections::HashSet<&str> =
-            COMPOSITION_COLUMNS.iter().map(|(h, _, _)| *h).collect();
+        let mapped: std::collections::HashSet<&str> = COMPOSITION_COLUMNS
+            .iter()
+            .map(|(h, _, _)| *h)
+            .chain([DENSITY_COLUMN, AGGREGATION_COLUMN])
+            .collect();
         let declared: std::collections::HashSet<&str> =
             UNMAPPED_COLUMNS.iter().map(|(h, _)| *h).collect();
 
@@ -559,12 +678,46 @@ mod tests {
     #[test]
     fn an_unknown_product_proposes_nothing_rather_than_erroring() {
         let conn = db();
-        assert!(
-            material_composition(&conn, "es", "999999")
-                .unwrap()
-                .is_empty()
-        );
-        assert!(material_composition(&conn, "fr", "1").unwrap().is_empty());
+        for (country, code) in [("es", "999999"), ("fr", "1")] {
+            let proposal = material_proposal(&conn, country, code).unwrap();
+            assert!(proposal.composition.is_empty());
+            assert_eq!(proposal.density_kg_l, None);
+        }
+    }
+
+    // Density is a LIQUID product's: Anexo V 3.11, Fertilización field 17,
+    // "Densidad del material fertilizante cuando se trate de producto
+    // fertilizante líquido" (the CUE descriptor and the 2027 Anexo 03 say the
+    // same). `DETALLE_MATERIAL_FERT` states it in g/cm³, which is kg/L.
+
+    #[test]
+    fn a_liquid_products_stated_density_is_proposed() {
+        let conn = db();
+        let code = detail_code(&conn, "SOLUCIÓN NITROGENADA (32-00-00)");
+        let proposal = material_proposal(&conn, "es", &code).unwrap();
+        assert_eq!(proposal.density_kg_l, Some(1.32));
+        assert!(!proposal.composition.is_empty(), "and its nitrogen too");
+    }
+
+    #[test]
+    fn a_solids_density_is_never_proposed() {
+        // The file states 1,1 for this granulated NPK — a bulk density, which
+        // is not what the field asks for.
+        let conn = db();
+        let code = detail_code(&conn, "Forterra NPK 8-15-15");
+        let proposal = material_proposal(&conn, "es", &code).unwrap();
+        assert_eq!(proposal.density_kg_l, None);
+    }
+
+    #[test]
+    fn a_liquid_stating_zero_proposes_no_density() {
+        // The provider fills unstated cells with 0, as in the composition
+        // columns — and slurry is exactly the material whose density a farmer
+        // must state, by volume dose, so a guess here would be worst.
+        let conn = db();
+        let code = detail_code(&conn, "Purín de cerdos engorde/cebo");
+        let proposal = material_proposal(&conn, "es", &code).unwrap();
+        assert_eq!(proposal.density_kg_l, None);
     }
 
     #[test]

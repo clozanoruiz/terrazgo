@@ -10,8 +10,8 @@
 mod common;
 
 use common::*;
-use module_cue::models::*;
-use module_cue::repository as repo;
+use module_phytosanitary::models::*;
+use module_phytosanitary::repository as repo;
 use rusqlite::Connection;
 
 // ---------------------------------------------------------------------------
@@ -610,6 +610,35 @@ fn a_treatment_naming_an_advisor_appears_on_both_pages() {
     assert_eq!(advised["measure"], "");
     assert_eq!(advised["intensity"], "");
     assert_eq!(advised["measure_date"], "");
+}
+
+#[test]
+fn a_basic_substance_prints_beside_its_measure() {
+    // Which substance "Usos de sustancias básicas" used, named from FEGA's
+    // SUSTANCIAS_BASICAS in the measure's own cell — the model has no column
+    // of its own for it, and a bare "Usos de sustancias básicas" says less
+    // than the record holds. Its amount reads as a symbol, "kg/ha" in every
+    // language.
+    let mut conn = db_with_catalogues();
+    let fx = fixture(&mut conn);
+    let mut new = non_chemical_treatment(&fx, "2026-05-04");
+    new.measure_code = Some("11".into());
+    new.measure_basic_substance_code = Some("28".into());
+    new.measure_intensity_value = Some(2.5);
+    new.measure_intensity_unit_code = Some("kg_ha".into());
+    new.measure_registration_number = None;
+    repo::insert_treatment_record(
+        &mut conn,
+        new,
+        vec![on_plot(&fx.barley_plot_id, Some(&fx.barley_crop_id), 2.1)],
+        None,
+    )
+    .unwrap();
+
+    let doc = inputs(&conn, &fx);
+    let advised = &doc["advised"].as_array().unwrap()[0];
+    assert_eq!(advised["measure"], "Usos de sustancias básicas — Vinagre");
+    assert_eq!(advised["intensity"], "2,5 kg/ha");
 }
 
 #[test]

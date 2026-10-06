@@ -137,6 +137,145 @@ pub fn validate_backup(
     Ok(BackupInfo { schema_version })
 }
 
+/// What importing a backup would take out of the live book.
+///
+/// An import is a MIRROR, not a merge: it replaces everything. So the honest
+/// question before one is not "is this file sound" — validation answers that —
+/// but "what does this book hold that the file does not", and that is a number
+/// a person can be shown before they decide.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct DiscardedByImport {
+    /// Change sets this database holds and the backup does not.
+    pub change_sets: usize,
+    /// Of those, the ones THIS device wrote.
+    ///
+    /// The distinction is what a person can act on: a change set written
+    /// elsewhere still exists on the device that wrote it and comes back at the
+    /// next sync, because a log is a union. One written here exists nowhere
+    /// else unless a bundle has already carried it, so the safety copy is the
+    /// only place it will survive.
+    pub own_change_sets: usize,
+}
+
+/// Every change set a database holds, by the pair that names one everywhere and
+/// forever. DISTINCT because a change set writes many rows.
+const CHANGE_SETS_SQL: &str = "SELECT DISTINCT origin_device, origin_seq FROM record_change";
+
+/// What importing `backup` would discard, or `None` when the file is too old to
+/// say — a backup whose log predates the change stamp has no change sets to
+/// compare, and a warning that cannot count must not guess.
+///
+/// The backup's change sets are read into memory and the live database's are
+/// streamed against them, rather than both sides held at once. The set is
+/// bounded by change sets and not by log rows: the slice-3 measurement put a
+/// cooperative's YEAR at about 3 500 of them, so a decade of one is a couple of
+/// megabytes of pairs, and this runs once, in front of a dialog.
+///
+/// Neither statement goes through the shared cache. It is 32 slots keyed by SQL
+/// text on the connection every write uses, and this query runs once per import
+/// — taking a slot from the write path to save a parse nobody will notice.
+pub fn discarded_by_import(
+    conn: &Connection,
+    backup: &Path,
+    device: &str,
+) -> Result<Option<DiscardedByImport>> {
+    let theirs = Connection::open_with_flags(
+        backup,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    crate::db::harden(&theirs)?;
+    if !logs_change_sets(&theirs)? || !logs_change_sets(conn)? {
+        return Ok(None);
+    }
+
+    let mut stmt = theirs.prepare(CHANGE_SETS_SQL)?;
+    let held: std::collections::HashSet<(String, i64)> = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let mut stmt = conn.prepare(CHANGE_SETS_SQL)?;
+    let mut rows = stmt.query([])?;
+    let mut discarded = DiscardedByImport::default();
+    while let Some(row) = rows.next()? {
+        let set: (String, i64) = (row.get(0)?, row.get(1)?);
+        if held.contains(&set) {
+            continue;
+        }
+        discarded.change_sets += 1;
+        if set.0 == device {
+            discarded.own_change_sets += 1;
+        }
+    }
+    Ok(Some(discarded))
+}
+
+/// Whether a database's log carries the stamp that names a change set. False
+/// for a backup taken before the columns existed, which is the one case this
+/// comparison cannot be made in.
+fn logs_change_sets(conn: &Connection) -> Result<bool> {
+    let columns = table_columns(conn, "record_change")?;
+    Ok(["origin_device", "origin_seq"]
+        .iter()
+        .all(|wanted| columns.iter().any(|held| held == wanted)))
+}
+
+/// Filename prefix of the safety copy taken before an import. Defined here
+/// rather than at the call site so the code that WRITES the name and the code
+/// that prunes by it cannot drift apart.
+pub const PRE_IMPORT_PREFIX: &str = "pre-import-";
+
+/// How many pre-import safety copies survive a prune.
+///
+/// Three, not one: the copy protects against an import the user regrets, and
+/// noticing that can take longer than a single further import. Not unbounded,
+/// which is what it was until 2026-09-05 — each copy is a full database, and
+/// a phone→desktop mirror makes imports a routine act rather than a rare
+/// emergency, so an unpruned directory grows without limit in a place nobody
+/// looks.
+pub const KEEP_PRE_IMPORT_COPIES: usize = 3;
+
+/// Delete all but the `keep` most recent pre-import safety copies in `dir`.
+/// Returns how many were removed.
+///
+/// Ordering is by FILENAME, not by modification time: the names carry an ISO
+/// instant with the separators stripped (`pre-import-20260702T101500Z.db`), so
+/// lexicographic order is chronological order, and it stays right when a file
+/// is copied or restored and its mtime changes. Only names carrying
+/// [`PRE_IMPORT_PREFIX`] are considered — anything else in the directory is
+/// left alone, including subdirectories.
+pub fn prune_pre_import_copies(dir: &Path, keep: usize) -> Result<usize> {
+    let mut copies: Vec<String> = Vec::new();
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        // No directory yet means nothing to prune, not a failure: the first
+        // import creates it.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e.into()),
+    };
+    for entry in entries {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(PRE_IMPORT_PREFIX) {
+            copies.push(name);
+        }
+    }
+    if copies.len() <= keep {
+        return Ok(0);
+    }
+
+    copies.sort_unstable();
+    let doomed = copies.len() - keep;
+    let mut removed = 0;
+    for name in copies.into_iter().take(doomed) {
+        std::fs::remove_file(dir.join(name))?;
+        removed += 1;
+    }
+    Ok(removed)
+}
+
 /// The columns a current-version backup must carry, as a fingerprint of the
 /// squashed schema. Not the whole schema: the point is to catch a stale file
 /// cheaply, so this lists the tables whose shape changed most recently, and
@@ -188,7 +327,7 @@ const REQUIRED_SHAPE: &[TableShape] = &[
         "premises_es_extension",
         &["cadastral_reference", "rea_installation_code"],
     ),
-    // Moved here from module-cue on 2026-08-20 with the table itself. It was in
+    // Moved here from module-phytosanitary on 2026-08-20 with the table itself. It was in
     // neither fingerprint before: a stale backup whose export_alias was missing
     // would have imported cleanly and then lost every frozen alias, which is
     // the one thing about this table that must never happen — SIEX keys its
@@ -198,7 +337,31 @@ const REQUIRED_SHAPE: &[TableShape] = &[
         &["target", "entity_table", "entity_id", "split_key", "alias"],
     ),
     ("machinery", &["acquired_on"]),
-    ("season", &["deleted_at"]),
+    // The sync stamp (2026-09-18). A backup taken before it has a log whose rows
+    // name no device and no register, which no merge could ever read — and the
+    // first write after importing one would fail on the missing columns.
+    (
+        "record_change",
+        &[
+            "root_table",
+            "root_id",
+            "origin_device",
+            "origin_seq",
+            "version_vector",
+            "hlc",
+        ],
+    ),
+    ("sync_peer", &["id", "label"]),
+    // The merge layer's own two tables (2026-09-20, 2026-09-22). Both are
+    // device-local and derived, so a backup taken before them loses nothing —
+    // but the first settle after importing one fails on the missing table,
+    // which is the failure this probe exists to turn into a legible refusal.
+    (
+        "sync_conflict",
+        &["root_table", "root_id", "live_device", "other_device"],
+    ),
+    ("sync_group", &["row_id", "group_id", "joined_at"]),
+    ("season", &["deleted_at", "farm_id", "custom_label"]),
     ("advisor", &["id", "name", "registration_number"]),
     (
         "farm_advisor",
@@ -246,6 +409,35 @@ const REQUIRED_SHAPE: &[TableShape] = &[
     // list because the import clears it on every row a file still carries.
     ("catalogue", &["source_digest", "imported_by_version"]),
     ("catalogue_code", &["absent_since"]),
+    (
+        "alert_acknowledgement",
+        &[
+            "alert_type_code",
+            "subject_table",
+            "subject_id",
+            "due_date",
+            "status",
+        ],
+    ),
+    (
+        "duplicate_verdict",
+        &[
+            "subject_table",
+            "first_id",
+            "second_id",
+            "verdict",
+            "kept_id",
+        ],
+    ),
+    // The purge (slice 11). A backup without them would import and then fail
+    // on its first write — every stamp reads the markers, and every number
+    // starts from what the database has held.
+    (
+        "purged_register",
+        &["root_table", "root_id", "removal", "purged_at"],
+    ),
+    ("sync_held", &["device", "through"]),
+    ("sync_known", &["device", "seen"]),
 ];
 
 /// Column names of `table`, empty when the table itself is missing.

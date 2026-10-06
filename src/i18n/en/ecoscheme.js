@@ -28,9 +28,10 @@ export default {
   "cultural_operation_kind.mowing": "Mowing",
   "cultural_operation_kind.brush_cutting": "Brush cutting",
   "cultural_operation_kind.drainage": "Drainage maintenance",
-  "cultural_operation_kind.pruning": "Pruning",
+  "cultural_operation_kind.green_pruning_with_cleaning":
+    "Green pruning, including cleaning of stems, suckers and shoots",
   "cultural_operation_kind.thinning": "Thinning",
-  "cultural_operation_kind.staking": "Staking",
+  "cultural_operation_kind.staking": "Staking, training and tying of stems",
   "cultural_operation_kind.grafting": "Grafting",
   "cultural_operation_kind.pruning_removal": "Pruning residue removal",
   "cultural_operation_kind.green_pruning": "Green pruning",

@@ -42,6 +42,11 @@ export default {
   "irrigation.water_section": "Agua de riego",
   "irrigation.water_hint":
     "El contenido en nitrógeno y fósforo del agua solo se anota cuando lo facilita el organismo de cuenca o la comunidad de regantes; con analíticas propias es voluntario.",
+  "irrigation.practices_section": "Buenas prácticas",
+  "irrigation.practices_hint": "El modelo impreso no las recoge; el cuaderno digital las admite.",
+  "irrigation.practices_none": "Ninguna seleccionada",
+  "irrigation.practices_selected.one": "1 seleccionada",
+  "irrigation.practices_selected.other": "{count} seleccionadas",
   "irrigation.nitric_n": "N nítrico (mg/l)",
   "irrigation.soluble_p2o5": "P₂O₅ soluble (mg/l)",
   "irrigation.plots_section": "Parcelas regadas",
@@ -106,9 +111,10 @@ export default {
   "material.add_nutrient": "Añadir nutriente",
   "material.fill": "Rellenar desde el catálogo",
   "material.fill_hint":
-    "Toma la composición que el catálogo publica para el producto elegido, sin tocar las líneas que usted ya haya anotado. Compruébela con la etiqueta: los metales pesados no se rellenan nunca, porque el catálogo mezcla porcentajes y mg/kg en las mismas columnas.",
+    "Toma la composición que el catálogo publica para el producto elegido y, si es líquido, su densidad, sin tocar lo que usted ya haya anotado. Compruébelo con la etiqueta: los metales pesados no se rellenan nunca, porque el catálogo mezcla porcentajes y mg/kg en las mismas columnas.",
   "material.filled.one": "Se ha añadido una línea de composición.",
   "material.filled.other": "Se han añadido {count} líneas de composición.",
+  "material.filled_density": "Se ha tomado la densidad del catálogo: {density} kg/L.",
   "material.filled_none": "El catálogo no añade nada que no estuviera ya anotado.",
   "material.supplier_registry": "Registro",
   "material.supplier_number": "Nº de identificación",

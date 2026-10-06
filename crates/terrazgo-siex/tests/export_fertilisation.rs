@@ -9,7 +9,7 @@
 mod common;
 
 use common::*;
-use module_cue::repository as repo;
+use module_phytosanitary::repository as repo;
 use serde_json::Value;
 use terrazgo_siex::export_precheck;
 
@@ -60,6 +60,31 @@ fn an_irrigation_exports_its_system_volume_and_water_origin() {
     assert_eq!(entries[0]["NumContador"], "C-4471");
     assert_eq!(entries[0]["DGCs"][0]["Superficie"], 3.5);
     assert!(entries[0]["DGCs"][0]["CodigoDGCAjena"].is_i64());
+}
+
+#[test]
+fn an_irrigations_good_practices_go_out_as_buenas_practicas_riego() {
+    // `Riego.BuenasPracticasRiego[].TipoBPR`: the BUENAS_PRACTICAS_AMBITOS codes
+    // claimed on the watering, from the practices marked "SI" under "Ámbito
+    // Riego". None claimed, none sent — the member is optional.
+    let mut conn = db();
+    let fx = fixture(&mut conn);
+    let mut watered = irrigation(&fx);
+    watered.practices = vec!["23".into(), "33".into()];
+    fert::insert_irrigation_record(&mut conn, watered, None).unwrap();
+    fert::insert_irrigation_record(&mut conn, irrigation(&fx), None).unwrap();
+
+    let doc = export_json(&mut conn, &fx.season_id, &fx.farm_id);
+    assert_schema_valid(&doc);
+    let entries = block(&doc, "Riego");
+    let claimed: Vec<i64> = entries[0]["BuenasPracticasRiego"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["TipoBPR"].as_i64().unwrap())
+        .collect();
+    assert_eq!(claimed, vec![23, 33]);
+    assert!(entries[1].get("BuenasPracticasRiego").is_none());
 }
 
 #[test]

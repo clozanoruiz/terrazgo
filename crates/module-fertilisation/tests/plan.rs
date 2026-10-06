@@ -42,10 +42,10 @@ fn fixture(conn: &mut Connection) -> Fixture {
     let other_season_id = core_repo::insert_season(
         conn,
         NewSeason {
-            campaign_year: 2027,
-            label: "2026/2027".into(),
-            starts_on: None,
-            ends_on: None,
+            farm_id: core.farm_id.clone(),
+            starts_on: "2026-09-01".into(),
+            ends_on: "2027-08-31".into(),
+            custom_label: None,
         },
         None,
     )
@@ -79,7 +79,7 @@ fn fixture(conn: &mut Connection) -> Fixture {
     Fixture {
         wheat: crop(conn, &core.plot_a, &core.season_id, "trigo blando"),
         barley: crop(conn, &core.plot_b, &core.season_id, "cebada"),
-        other_farm_crop: crop(conn, &core.other_farm_plot, &core.season_id, "maíz"),
+        other_farm_crop: crop(conn, &core.other_farm_plot, &core.other_season_id, "maíz"),
         other_season_crop: crop(conn, &core.plot_a, &other_season_id, "girasol"),
         season_id: core.season_id,
         other_season_id,
@@ -310,20 +310,37 @@ fn logs_a_complete_row_image_for_the_plan_and_each_covered_crop() {
     assert_eq!(after["crop_id"], fx.wheat);
 }
 
+/// Deleting a book deletes its fertilisation plans, and bringing it back restores each one
+/// whole, the rows belonging to it included (docs/sync.md → Deleting a book
+/// with its records). Core finds the register in the aggregate map; this pins
+/// that it finds THIS one.
 #[test]
-fn a_season_holding_only_a_plan_reports_itself_in_use() {
+fn deleting_its_book_takes_a_plan_and_bringing_it_back_restores_it_whole() {
     let mut conn = open_in_memory().unwrap();
     let fx = fixture(&mut conn);
-    assert!(!repo::season_has_records(&conn, &fx.season_id).unwrap());
-
     let created = repo::insert_fertilisation_plan(&mut conn, sample(&fx), None).unwrap();
-    assert!(repo::season_has_records(&conn, &fx.season_id).unwrap());
+    let id = created.plan.id.clone();
+    let before = serde_json::to_value(repo::get_fertilisation_plan(&conn, &id).unwrap()).unwrap();
 
-    repo::soft_delete_fertilisation_plan(&mut conn, &created.plan.id, None).unwrap();
-    assert!(
-        repo::season_has_records(&conn, &fx.season_id).unwrap(),
-        "a soft-deleted plan's audit history is only reachable through its season"
+    assert_eq!(
+        terrazgo_core::repository::delete_book(&mut conn, &fx.season_id, &[], None).unwrap(),
+        3,
+        "the plan and the book's two crops it covers"
     );
+    assert!(matches!(
+        repo::get_fertilisation_plan(&conn, &id),
+        Err(module_fertilisation::FertilisationError::NotFound)
+    ));
+
+    terrazgo_core::repository::restore_book(
+        &mut conn,
+        &fx.season_id,
+        &terrazgo_core::date::today_utc(),
+        None,
+    )
+    .unwrap();
+    let after = serde_json::to_value(repo::get_fertilisation_plan(&conn, &id).unwrap()).unwrap();
+    terrazgo_testkit::assert_restored(&before, &after);
 }
 
 #[test]

@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 //! Crop CRUD: the crop on a plot in a given season ("crop at time of treatment"
-//! in CUE links here; future crop-planning modules will too).
+//! in the phytosanitary module links here; future crop-planning modules will too).
 //!
 //! Soft-delete only, like every other referenced entity. Past treatment records
 //! are safe from both edits and deletes — `treatment_plot` freezes the crop name
 //! and variety in its own snapshot columns at write time.
 
 use super::validate_name;
-use crate::audit::{log_delete, log_insert, log_update};
+use crate::audit::{WriteTx, begin, log_delete, log_insert, log_update};
 use crate::date::now_utc_iso;
 use crate::error::{CoreError, Result};
 use crate::models::{Crop, NewCrop, UpdateCrop};
@@ -21,7 +21,22 @@ pub const SOURCE_USER: &str = "user";
 
 pub fn insert_crop(conn: &mut Connection, new: NewCrop, actor: Option<&str>) -> Result<Crop> {
     validate_name(&new.species_name)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    // The plot's farm must be the season's: a crop reaches its farm only
+    // through its plot, so no key can say so (see `crop.season_id` in the
+    // schema), and a mismatched crop would be listed in no book. A missing plot
+    // or season is left to the foreign keys, as before.
+    let farms: Option<(String, String)> = tx
+        .query_row(
+            "SELECT plot.farm_id, season.farm_id FROM plot, season
+             WHERE plot.id = ?1 AND season.id = ?2",
+            params![new.plot_id, new.season_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    if farms.is_some_and(|(plot_farm, season_farm)| plot_farm != season_farm) {
+        return Err(CoreError::Invalid("season_not_on_farm"));
+    }
     let now = now_utc_iso();
     let crop = Crop {
         id: Uuid::now_v7().to_string(),
@@ -68,7 +83,8 @@ pub fn insert_crop(conn: &mut Connection, new: NewCrop, actor: Option<&str>) -> 
             crop.updated_at
         ],
     )?;
-    log_insert(&tx, "crop", &crop.id, Some(&crop.season_id), actor, &crop)?;
+    let stamp = tx.register("crop", &crop.id, Some(&crop.season_id))?;
+    log_insert(&tx, &stamp, "crop", &crop.id, &crop)?;
     tx.commit()?;
     Ok(crop)
 }
@@ -147,7 +163,7 @@ pub fn update_crop(
     actor: Option<&str>,
 ) -> Result<Crop> {
     validate_name(&update.species_name)?;
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
     let before = tx
         .query_row(
             "SELECT * FROM crop WHERE id = ?1 AND deleted_at IS NULL",
@@ -196,15 +212,8 @@ pub fn update_crop(
             after.updated_at
         ],
     )?;
-    log_update(
-        &tx,
-        "crop",
-        id,
-        Some(&after.season_id),
-        actor,
-        &before,
-        &after,
-    )?;
+    let stamp = tx.register("crop", id, Some(&after.season_id))?;
+    log_update(&tx, &stamp, "crop", id, &before, &after)?;
     tx.commit()?;
     Ok(after)
 }
@@ -214,7 +223,16 @@ pub fn update_crop(
 /// Always allowed (the farm/plot precedent) — treatments printed in the cuaderno
 /// read their crop from the snapshot columns, not from this row.
 pub fn soft_delete_crop(conn: &mut Connection, id: &str, actor: Option<&str>) -> Result<()> {
-    let tx = conn.transaction()?;
+    let tx = begin(conn, actor)?;
+    soft_delete_crop_tx(&tx, id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// The withdrawal inside a transaction the caller owns — how a record removed
+/// as a duplicate shares one change set with the verdict that says why
+/// (docs/sync.md → Duplicate suspects).
+pub fn soft_delete_crop_tx(tx: &WriteTx, id: &str) -> Result<()> {
     let before = tx
         .query_row(
             "SELECT * FROM crop WHERE id = ?1 AND deleted_at IS NULL",
@@ -231,31 +249,9 @@ pub fn soft_delete_crop(conn: &mut Connection, id: &str, actor: Option<&str>) ->
         "UPDATE crop SET deleted_at = ?2, updated_at = ?2 WHERE id = ?1",
         params![id, now],
     )?;
-    log_delete(
-        &tx,
-        "crop",
-        id,
-        Some(&before.season_id),
-        actor,
-        &before,
-        Some(&after),
-    )?;
-    tx.commit()?;
+    let stamp = tx.register("crop", id, Some(&before.season_id))?;
+    log_delete(tx, &stamp, "crop", id, &before, Some(&after))?;
     Ok(())
-}
-
-/// Whether any crop still lives in this season — the guard
-/// `soft_delete_season` uses (only an empty season may be deleted).
-pub(super) fn season_has_crops(conn: &Connection, season_id: &str) -> Result<bool> {
-    // EXISTS rather than COUNT(*): the subquery stops at the first matching row,
-    // where a count has to visit every one of a campaign's crops to answer a
-    // yes/no. With `idx_crop_season_plot` it is a single index seek.
-    let held: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM crop WHERE season_id = ?1 AND deleted_at IS NULL)",
-        [season_id],
-        |row| row.get(0),
-    )?;
-    Ok(held)
 }
 
 fn map_crop(row: &Row) -> rusqlite::Result<Crop> {

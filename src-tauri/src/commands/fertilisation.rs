@@ -183,23 +183,23 @@ pub fn list_fertiliser_material_details(
     )
 }
 
-/// What the catalogue publishes about one named product's composition, offered
-/// to the material form so Anexo III C.h's eight values need not be copied off
-/// the sack by hand.
+/// What the catalogue publishes about one named product — its composition and,
+/// for a liquid, its density — offered to the material form so Anexo III C.h's
+/// eight values need not be copied off the sack by hand.
 ///
 /// A proposal, never a record: the form applies it explicitly and the farmer
-/// may edit or drop any line. Heavy metals are never proposed — the provider's
+/// may edit or drop any of it. Heavy metals are never proposed — the provider's
 /// columns mix percentages and mg/kg with nothing to tell them apart (see
 /// `module_fertilisation::catalogue`).
 #[tauri::command]
-pub fn fertiliser_material_composition(
+pub fn fertiliser_material_proposal(
     state: State<'_, AppState>,
     country_code: String,
     detail_code: String,
-) -> CmdResult<Vec<module_fertilisation::catalogue::CompositionLine>> {
+) -> CmdResult<module_fertilisation::catalogue::MaterialProposal> {
     let db = state.db.lock()?;
     let conn = db.conn()?;
-    Ok(module_fertilisation::catalogue::material_composition(
+    Ok(module_fertilisation::catalogue::material_proposal(
         conn,
         &country_code,
         &detail_code,
@@ -235,6 +235,21 @@ pub fn list_fertilisation_practices(
     let db = state.db.lock()?;
     let conn = db.conn()?;
     Ok(module_fertilisation::catalogue::fertilisation_practices(
+        conn,
+        &country_code,
+    )?)
+}
+
+/// The good practices an irrigation record can claim — every practice, offered
+/// where `BUENAS_PRACTICAS_AMBITOS` marks it "SI" under "Ámbito Riego".
+#[tauri::command]
+pub fn list_irrigation_practices(
+    state: State<'_, AppState>,
+    country_code: String,
+) -> CmdResult<Vec<module_fertilisation::catalogue::CataloguePick>> {
+    let db = state.db.lock()?;
+    let conn = db.conn()?;
+    Ok(module_fertilisation::catalogue::irrigation_practices(
         conn,
         &country_code,
     )?)

@@ -7,7 +7,7 @@ members = [
     "crates/terrazgo-report",
     "crates/terrazgo-recordbook",
     "crates/terrazgo-siex",
-    "crates/module-cue",
+    "crates/module-phytosanitary",
     "crates/module-fertilisation",
     "crates/module-ecoscheme",
     "crates/module-sigpac",
@@ -17,7 +17,7 @@ resolver = "3"
 
 # Shared package metadata; crates inherit with `<field>.workspace = true`.
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 # Floor set by rusqlite_migration 2.6; raise as dependencies demand.
 rust-version = "1.95"
@@ -32,13 +32,13 @@ unwrap_used = "warn"
 expect_used = "warn"
 
 # Single source of truth for shared dependency versions. Not just tidiness:
-# `rusqlite::Connection` crosses the module-cue ↔ src-tauri boundary and
+# `rusqlite::Connection` crosses the module-phytosanitary ↔ src-tauri boundary and
 # libsqlite3-sys has `links = "sqlite3"`, so two incompatible rusqlite versions
 # in the graph would be a hard build error. Crates opt in with `workspace = true`.
 [workspace.dependencies]
 rusqlite = { version = "0.40", features = ["bundled"] }
 rusqlite_migration = "2.6"
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v5", "v7"] }
 jiff = "0.2"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -48,12 +48,42 @@ anyhow = "1"
 # quoting with embedded ';' and newlines in their notes columns — real CSV,
 # not split-on-delimiter territory.
 csv = "1.3"
-# JSON-Schema validation for the SIEX export tests (module-cue dev-dependency
+# Sync bundles (terrazgo-core): gzip for the container, and its CRC32 for the
+# trailer's integrity check. Already in the workspace tree through typst, so
+# this adds a direct edge rather than a new build — `cargo tree --duplicates`
+# says if that ever stops being true.
+flate2 = "1"
+# The change-set hash (terrazgo-core): XXH3-64 over a change set's stored rows,
+# which is how a peer tells "I already hold (D, 51)" from "two devices are
+# writing under one identity" (docs/sync.md → Sequence rewind). It is an
+# IDENTITY check, never tamper-evidence — a forged bundle recomputes it, and
+# there is no key here to prevent that.
+#
+# `twox-hash` over `xxhash-rust` because it is past 1.0: a digest two devices
+# compare has to be identical forever, and a 0.x crate reserves the right to
+# change its output in a minor bump. Verified against the reference C
+# implementation, and no required dependencies of its own.
+#
+# 64 bits rather than 128 because every comparison here is PAIRWISE — our
+# (D, 51) against theirs — so there is no birthday bound in play and a false
+# match on a differing pair is 1 in 1.8e19. The digest is never stored and
+# never travels in a bundle, both sides recomputing it from rows they hold, so
+# the width costs nothing either way and widening it later is one line.
+twox-hash = { version = "2", default-features = false, features = [
+    "xxhash3_64",
+    "std",
+] }
+# JSON-Schema validation for the SIEX export tests (terrazgo-siex dev-dependency
 # only — never in the shipped binary): the serializer's output is validated
 # against the vendored official CUE schema. Default features pull an HTTP
 # resolver (reqwest + rustls) for remote $refs; the vendored schema has none,
 # so they stay off.
-jsonschema = { version = "0.47", default-features = false }
+#
+# PINNED AT 0.48.1, the newest release that adds no crate copy: 0.48.2 took
+# `strum` 0.28 while typst's biblatex holds 0.27, so every test build would
+# compile both. Raise when biblatex moves to strum 0.28 —
+# `cargo tree --duplicates` says when.
+jsonschema = { version = "=0.48.1", default-features = false }
 # Sync HTTP for terrazgo-net, the app's single network seam (the map's
 # cache-through fetch, the catalogue refresh). Kept out of core and modules —
 # offline-first forbids network there. platform-verifier:
@@ -68,9 +98,9 @@ ureq = { version = "3", features = ["platform-verifier"] }
 # handles tao's ndk_glue captures at activity creation. `tao` must resolve to
 # the SAME crate copy tauri-runtime-wry links (its statics hold that context)
 # and `jni` to the version rustls-platform-verifier's signatures use.
-jni = { version = "0.21", default-features = false }
-tao = { version = "0.35", default-features = false }
-rustls-platform-verifier = "0.6"
+jni = { version = "0.22", default-features = false }
+tao = { version = "0.37", default-features = false }
+rustls-platform-verifier = "0.7"
 # GPKG geometry blobs (WKB) → GeoJSON, for boundary-file import. `with-gpkg`
 # deliberately NOT enabled: it pulls sqlx, and we read GeoPackage files (they
 # are SQLite) with the rusqlite we already have.
@@ -95,7 +125,7 @@ typst-as-lib = "0.16"
 # (zlib-rs, not zlib), so Android cross-compilation is unaffected. Default
 # features are empty; chrono/jiff/polars/serde integrations stay off — the
 # engine takes plain values and ISO date strings.
-rust_xlsxwriter = { version = "0.97", default-features = false }
+rust_xlsxwriter = { version = "0.99", default-features = false }
 # Reading .xlsx back apart, dev-only (terrazgo-report's styles contract test).
 # Already in the tree as rust_xlsxwriter's own dependency, and pinned to the
 # same minor so the two resolve to one copy rather than two.
@@ -120,17 +150,35 @@ zip = { version = "8.3", default-features = false, features = ["deflate"] }
 icu_collator = "2.2"
 # Only to name the locale a collator is built for (`locale!("es")`).
 icu_locale_core = "2.2"
-# The OS name and VERSION for the About panel's technical details, which exist
-# so a bug report carries them. `std::env::consts::OS` is a compile-time
-# constant and only ever says "linux"; this reads the running system.
-# Deliberately the crate and NOT `tauri-plugin-os`: the plugin's value is a JS
-# API for the webview, and the About panel is fed from Rust, so the plugin
-# would only add an IPC surface plus `os:allow-*` permissions to a webview
-# whose permission surface is zero. It would also pull `gethostname`, and the
-# machine's hostname has no business on that page. Costs three crates in total
-# (`os_info`, `nix`, `cfg_aliases`); `plist` is macOS-only and `windows-sys`
-# Windows-only and already present.
-os_info = { version = "3.15", default-features = false }
+# The MACHINE the app is running on, for the About panel's technical details,
+# which exist so a bug report carries them: OS name and version
+# (`std::env::consts::OS` is a compile-time constant and only ever says
+# "linux"), CPU model and core count, total/available RAM, and this process's
+# resident set. Replaced `os_info` on 2026-09-06 — it answered the first of
+# those and nothing else, and dropping it takes `nix` and `cfg_aliases` with
+# it, so Linux and Android builds compile two crates FEWER than before
+# (sysinfo needs only `libc`, already in the tree).
+#
+# Still deliberately not `tauri-plugin-os`: the plugin's value is a JS API for
+# the webview, and the About panel is fed from Rust, so it would only add an
+# IPC surface plus `os:allow-*` permissions to a webview whose permission
+# surface is zero.
+#
+# `default-features = false, features = ["system"]`: the disk, network,
+# component and user probes are all off — nothing here enumerates a machine's
+# filesystems or its user accounts. On Linux and Android that leaves `libc` and
+# `memchr`, both already in the tree, so nothing new compiles at all.
+#
+# THE MINOR FOLLOWS TAURI'S `windows`. `sysinfo` takes the `windows` crate on
+# Windows targets, and 0.39 asks for `>=0.62, <0.63` — the 0.62 that tauri 2.12
+# links. A sysinfo release asking for another `windows` minor compiles a SECOND
+# copy into Windows builds, so move this only when the two meet again;
+# `cargo tree --duplicates --target x86_64-pc-windows-msvc` is how to check.
+#
+# One thing it does NOT answer, on any platform: PEAK resident memory. `Process`
+# exposes `memory()` and `virtual_memory()` and no high-water mark, so that row
+# is read from `/proc/self/status` by `machine.rs` and is blank off Linux.
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
 tauri = "2"
 tauri-build = "2"
 # Floor 2.7: that release removed the `confirm`/`ask` IPC commands (merged
@@ -159,8 +207,8 @@ tauri-plugin-opener = "2.5"
 terrazgo-core = { path = "crates/terrazgo-core" }
 # Shared test fixtures. A DEV-DEPENDENCY ONLY -- no shipping crate may name it --
 # and it depends on terrazgo-core alone. The core-only rule is what stops it
-# becoming a back door between modules: a testkit that named module-cue would
-# put module-cue's schema inside module-fertilisation's test graph, and the
+# becoming a back door between modules: a testkit that named module-phytosanitary would
+# put module-phytosanitary's schema inside module-fertilisation's test graph, and the
 # `the_module_runs_on_core_alone` guards would keep passing while it was open.
 # Anything needing a module's tables belongs in that crate's own tests/common.
 terrazgo-testkit = { path = "crates/terrazgo-testkit" }
@@ -178,9 +226,9 @@ terrazgo-recordbook = { path = "crates/terrazgo-recordbook" }
 # as the record book: it reads core and every domain module and projects one
 # exchange document. It lives above the modules because ten of the format's
 # fifteen activity blocks come from module-fertilisation and module-ecoscheme,
-# which module-cue (its old home) may never depend on.
+# which module-phytosanitary (its old home) may never depend on.
 terrazgo-siex = { path = "crates/terrazgo-siex" }
-module-cue = { path = "crates/module-cue" }
+module-phytosanitary = { path = "crates/module-phytosanitary" }
 # Fertilisation, irrigation and soil records (model sections 6, 7.1 and 8).
 # A second regulatory domain on the same core, under a second decree
 # (RD 1051/2022) with its own deadlines -- see docs/cuaderno-print.md.

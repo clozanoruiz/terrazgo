@@ -30,6 +30,7 @@ const {
   formatPercent,
   formatCoordinates,
   formatDate,
+  formatList,
   setLocale,
   setFormatMode,
   formatMode,
@@ -104,6 +105,23 @@ describe("formatCoordinates", () => {
 
   it("does not round a coordinate to the four decimals a dose uses", () => {
     expect(formatCoordinates(41.65234, -4.72891)).toContain("41,65234");
+  });
+});
+
+describe("formatList", () => {
+  it("joins names with the language's own word, whatever the format mode", async () => {
+    setFormatMode("system");
+    expect(formatList(["Móvil de Juan", "Tablet"])).toBe("Móvil de Juan y Tablet");
+    await setLocale("ca");
+    expect(formatList(["Mòbil", "Tauleta", "Portàtil"])).toBe("Mòbil, Tauleta i Portàtil");
+    await setLocale("en");
+    expect(formatList(["Phone", "Tablet"])).toBe("Phone and Tablet");
+    await setLocale("es");
+    setFormatMode("language");
+  });
+
+  it("says one name as itself", () => {
+    expect(formatList(["Móvil de Juan"])).toBe("Móvil de Juan");
   });
 });
 

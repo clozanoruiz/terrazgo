@@ -12,13 +12,28 @@ workspace = true
 # lib + thin main is the standard Tauri 2 shape; it also gives tests/ a library
 # target to link against (the migration-composition tests need one).
 [lib]
-name = "terrazgo"
+# `terrazgo_lib`, not `terrazgo`: the bin target is already called that, and on
+# WINDOWS ONLY both want target/release/deps/terrazgo.pdb, so every release
+# build printed "output filename collision … may become a hard error"
+# (rust-lang/cargo#6313). It cannot be reproduced on Linux, which has no .pdb —
+# the next Windows release build is the proof.
+#
+# This is the shape Tauri's own v2 template ships, for the same reason and with
+# the same caveat ("only an issue on Windows", rust-lang/cargo#8519); we had
+# drifted from it. The Android app loads this library BY NAME — the generated
+# Rust.kt calls System.loadLibrary with it — so the two are renamed together or
+# the app dies at startup with UnsatisfiedLinkError.
+name = "terrazgo_lib"
 # rlib for the desktop binary + tests; cdylib is what the Android app loads;
 # staticlib is for iOS when that milestone arrives.
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { workspace = true }
+# Formats the build stamp the About panel prints beside the version (build.rs).
+# The same date crate the rest of the workspace already uses, so this adds no
+# crate to the tree — only one host-side compile of it on a cross build.
+jiff = { workspace = true }
 
 [dependencies]
 tauri = { workspace = true }
@@ -29,11 +44,12 @@ tauri-plugin-fs = { workspace = true }
 # Hands a registry URL to the platform browser (external_links.rs). Rust-side
 # only: the webview names a link by id, so it needs no opener permission.
 tauri-plugin-opener = { workspace = true }
-# OS name + version for the About panel's technical details (commands/app.rs).
-os_info = { workspace = true }
+# OS, CPU and memory facts for the About panel's technical details
+# (commands/app.rs, machine.rs).
+sysinfo = { workspace = true }
 # `demo` is enabled unconditionally because cargo features cannot be
 # debug-profile-conditional; the seed command itself refuses in release builds.
-module-cue = { workspace = true, features = ["demo"] }
+module-phytosanitary = { workspace = true, features = ["demo"] }
 module-fertilisation = { workspace = true }
 # The eco-scheme registers (RD 1048/2022, model section 9).
 module-ecoscheme = { workspace = true }
