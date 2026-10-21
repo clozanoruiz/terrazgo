@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Política de privacidad — Terrazgo</title>
+    <meta
+      name="description"
+      content="Política de privacidad de Terrazgo: la aplicación no recoge datos personales; lo que guardas se queda en tus dispositivos."
+    />
+    <link rel="icon" href="assets/favicon.png" />
+    <!-- Applied before the stylesheet loads so a saved choice never flashes. -->
+    <script>
+      const savedTheme = localStorage.getItem("terrazgo.theme");
+      if (savedTheme === "light" || savedTheme === "dark") {
+        document.documentElement.dataset.theme = savedTheme;
+      }
+    </script>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">
+        <a href="./" class="brand-link">
+          <img src="assets/logo.png" alt="" width="32" height="32" />
+          <span>Terrazgo</span>
+        </a>
+      </div>
+      <nav>
+        <a href="./#descargas">Descargas</a>
+        <a href="https://github.com/clozanoruiz/terrazgo">GitHub</a>
+        <button id="theme-toggle" type="button" aria-label="Cambiar entre tema claro y oscuro">
+          🌙
+        </button>
+      </nav>
+    </header>
+
+    <main class="prose">
+      <h1>Política de privacidad</h1>
+      <p class="policy-date">Última actualización: 9 de octubre de 2026</p>
+
+      <p>
+        Terrazgo es una aplicación libre y gratuita para gestionar una explotación agrícola. No
+        recoge datos personales, no los envía al desarrollador ni a nadie más y no los vende. Esta
+        página explica qué guarda la aplicación, a qué servicios se conecta y qué permisos pide.
+      </p>
+
+      <h2>Responsable</h2>
+      <p>
+        Terrazgo es un proyecto de software libre de Carlos Lozano Ruiz. Si tienes alguna pregunta
+        sobre privacidad, escribe a
+        <a href="mailto:clozanoruiz.dev@outlook.com">clozanoruiz.dev@outlook.com</a> o abre una
+        incidencia en
+        <a href="https://github.com/clozanoruiz/terrazgo/issues">el repositorio del proyecto</a>.
+      </p>
+
+      <h2>Qué datos recoge la aplicación</h2>
+      <p>
+        Ninguno. No hace falta crear una cuenta, no hay estadísticas de uso ni publicidad, y la
+        aplicación no envía nada a servidores del proyecto, porque no los hay.
+      </p>
+      <p>
+        Lo que anotas (explotaciones, parcelas, cultivos, tratamientos, aplicadores, maquinaria…) se
+        guarda en una base de datos dentro de tu dispositivo. Nadie más tiene acceso a ella, ni
+        siquiera el desarrollador.
+      </p>
+
+      <h2>Copias de seguridad</h2>
+      <p>
+        Las copias de seguridad las haces tú desde la aplicación y las guardas donde quieras: en el
+        propio dispositivo, en una memoria USB o en tu ordenador. La aplicación no las sube a ningún
+        sitio.
+      </p>
+      <p>
+        Android no incluye los datos de Terrazgo en sus copias automáticas ni los pasa a un móvil
+        nuevo. Para llevarlos a otro dispositivo, usa una copia de seguridad o la sincronización.
+      </p>
+
+      <h2>Sincronización entre tus dispositivos</h2>
+      <p>
+        Si usas Terrazgo en más de un dispositivo, por ejemplo en el móvil y en el ordenador, puedes
+        mantenerlos al día entre sí. Hay dos formas, y en ninguna pasan los datos por un servidor.
+      </p>
+      <ul>
+        <li>
+          <strong>Con un archivo de sincronización</strong>, que creas tú y llevas al otro
+          dispositivo como prefieras. Contiene todas las explotaciones de ese dispositivo y el
+          historial de cambios: qué se cambió, cuándo, en qué dispositivo y con qué perfil de
+          usuario. No va cifrado, así que guárdalo con el mismo cuidado que cualquier otro documento
+          de tu explotación.
+        </li>
+        <li>
+          <strong>Por la red local</strong> (la wifi de casa, o la zona wifi de un móvil). Los dos
+          dispositivos se conectan directamente, sin salir a internet, y la conexión va cifrada. La
+          primera vez, uno de ellos muestra un código de seis cifras que hay que escribir en el
+          otro. Un dispositivo solo acepta conexiones mientras tiene abierta la pantalla «Esperar a
+          otro dispositivo»; al cerrarla, al cambiar de aplicación o al apagarse la pantalla, deja
+          de aceptarlas.
+        </li>
+      </ul>
+      <p>
+        Mientras esa pantalla está abierta, el dispositivo se anuncia en la red local para que los
+        demás lo encuentren sin escribir su dirección. El anuncio contiene un identificador
+        aleatorio del dispositivo y el puerto en el que espera, pero no su nombre ni ningún dato de
+        tus explotaciones. Cualquier aparato conectado a esa misma red puede verlo.
+      </p>
+      <p>
+        Para reconocerse, cada dispositivo crea una clave que nunca sale de él. Los dispositivos que
+        sincronizas entre sí conocen el nombre que les hayas dado y la parte pública de esa clave.
+        Cada uno recuerda además la última dirección en la que encontró a los otros; ese dato se
+        queda en el dispositivo y no se comparte.
+      </p>
+
+      <h2>Conexiones a internet</h2>
+      <p>
+        La aplicación funciona sin conexión. Cuando hay internet, solo se conecta a estos servicios
+        públicos:
+      </p>
+      <ul>
+        <li>
+          <strong>Mapas</strong>: OpenFreeMap para el mapa base y el Instituto Geográfico Nacional
+          para la ortofoto PNOA. Por las teselas que se descargan, estos servicios pueden saber qué
+          zona del mapa estás viendo.
+        </li>
+        <li>
+          <strong>SIGPAC</strong>, el servicio público del FEGA: para comprobar referencias de
+          parcela, obtener sus límites y saber si están en zona vulnerable a nitratos, en Red Natura
+          2000 o con restricciones fitosanitarias. Se envía la referencia SIGPAC o las coordenadas
+          del punto que consultas, que es lo que el servicio necesita para responder.
+        </li>
+        <li>
+          <strong>Catálogos oficiales del FEGA</strong>: solo cuando pulsas «Actualizar catálogos»
+          en los ajustes, para descargar las listas de códigos oficiales. No se envía ningún dato
+          tuyo.
+        </li>
+        <li>
+          <strong>Registro de productos fitosanitarios del Ministerio de Agricultura</strong>: solo
+          cuando pulsas «Descargar la última versión» en los ajustes, para descargar la lista
+          oficial de productos autorizados y la de cultivos del registro. No se envía ningún dato
+          tuyo.
+        </li>
+      </ul>
+      <p>
+        Como cualquier servicio de internet, estos ven la dirección IP desde la que llega la
+        petición y pueden registrarla según sus propias políticas. Las respuestas se guardan en una
+        caché del dispositivo para que el mapa funcione sin cobertura, y puedes vaciarla desde los
+        ajustes.
+      </p>
+      <p>
+        Los enlaces a registros oficiales (ROPO, ROMA, Catastro…) y a la web del proyecto se abren
+        en tu navegador.
+      </p>
+
+      <h2>Permisos en Android</h2>
+      <ul>
+        <li>
+          <strong>Internet</strong>, para los mapas, SIGPAC, los catálogos, el registro de productos
+          y la sincronización por la red local. Android lo concede al instalar la aplicación.
+        </li>
+        <li>
+          <strong>Ubicación</strong>. Se pide la primera vez que pulsas «Recinto en mi posición» o
+          «Seguir mi posición» en el mapa. Con ella, la aplicación te sitúa en el mapa y, con
+          «Recinto en mi posición», consulta en SIGPAC el recinto en el que estás, enviando las
+          coordenadas de ese punto como en cualquier otra consulta. La aplicación no guarda tu
+          posición, aunque esa consulta queda en la caché como las demás. No pide la ubicación en
+          segundo plano.
+        </li>
+        <li>
+          <strong>Dispositivos cercanos</strong>, en Android 17 y posteriores. Se pide la primera
+          vez que abres la sincronización por la red local: Android lo exige para que una aplicación
+          pueda conectarse a otros aparatos de la misma red.
+        </li>
+        <li>
+          <strong>Archivos</strong>: la aplicación no pide acceso general a tus archivos. Solo abre
+          o guarda el archivo que eliges en el selector del sistema, por ejemplo al exportar un PDF
+          o al importar una copia de seguridad.
+        </li>
+      </ul>
+      <p>No pide acceso a la cámara, al micrófono, a los contactos ni a tus fotos.</p>
+
+      <h2>Este sitio web</h2>
+      <p>
+        terrazgo.com es una página estática alojada en GitHub Pages, de GitHub, Inc., que como
+        proveedor de alojamiento puede registrar las direcciones IP de quienes la visitan según su
+        <a
+          href="https://docs.github.com/es/site-policy/privacy-policies/github-general-privacy-statement"
+          >política de privacidad</a
+        >. La página no usa cookies ni analítica. Si eliges el tema claro u oscuro, esa preferencia
+        se guarda solo en tu navegador. Los enlaces de descarga se rellenan consultando la API
+        pública de GitHub desde tu navegador.
+      </p>
+
+      <h2>Menores</h2>
+      <p>
+        Terrazgo es una herramienta profesional para la gestión agraria y no está pensada para
+        menores. De todos modos, no recoge datos de nadie, tenga la edad que tenga.
+      </p>
+
+      <h2>Tus derechos</h2>
+      <p>
+        Tus datos están en tus dispositivos y en ningún otro sitio, así que los derechos que te
+        reconoce el Reglamento General de Protección de Datos (acceder a ellos, corregirlos o
+        borrarlos) los ejerces tú mismo desde la aplicación. En Android, al desinstalarla se borran
+        sus datos de ese teléfono; en un ordenador, la carpeta de datos puede quedarse después de
+        desinstalarla y la puedes borrar tú. Si sincronizabas con otros dispositivos, cada uno
+        conserva su propia copia. Para cualquier duda, escribe al contacto de arriba.
+      </p>
+
+      <h2>Cambios en esta política</h2>
+      <p>
+        Si una nueva versión cambia algo de lo que se explica aquí, esta página se actualizará antes
+        de publicarla, y la fecha de arriba lo indicará.
+      </p>
+    </main>
+
+    <footer>
+      <p>
+        Software libre bajo licencia
+        <a href="https://www.gnu.org/licenses/agpl-3.0.html">AGPL-3.0-or-later</a>.
+      </p>
+      <p>
+        <a href="https://github.com/clozanoruiz/terrazgo">Código fuente</a> ·
+        <a href="https://github.com/clozanoruiz/terrazgo/issues/new/choose"
+          >Incidencias y sugerencias</a
+        >
+        · <a href="privacidad.html">Política de privacidad</a>
+      </p>
+    </footer>
+
+    <script>
+      const themeButton = document.getElementById("theme-toggle");
+      const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+      const effectiveTheme = () =>
+        document.documentElement.dataset.theme || (systemDark.matches ? "dark" : "light");
+      const paintButton = () => {
+        themeButton.textContent = effectiveTheme() === "dark" ? "☀️" : "🌙";
+      };
+      themeButton.addEventListener("click", () => {
+        const next = effectiveTheme() === "dark" ? "light" : "dark";
+        document.documentElement.dataset.theme = next;
+        localStorage.setItem("terrazgo.theme", next);
+        paintButton();
+      });
+      systemDark.addEventListener("change", paintButton);
+      paintButton();
+    </script>
+  </body>
+</html>
